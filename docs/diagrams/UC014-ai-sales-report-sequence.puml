@@ -1,0 +1,30 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+actor "Chủ cửa hàng (SuperAdmin)" as Boss
+boundary "DashboardPage (React)" as UI
+control "AiRouter" as Router
+control "ReportService" as Report
+entity "SQLite DB (`orders`, `products`)" as DB
+control "Google Gemini API" as Gemini
+
+Boss -> UI: Bấm nút "Yêu cầu AI phân tích doanh thu"
+UI -> Router: POST /api/v1/ai/sales-report (Bearer Token)
+Router -> Router: require_roles(['superadmin'])
+
+alt Không đủ quyền
+    Router --> UI: HTTP 403 Forbidden
+    UI --> Boss: Báo lỗi phân quyền
+else Là SuperAdmin
+    Router -> Report: get_financial_facts(db)
+    Report -> DB: Query tổng doanh thu, top sản phẩm, tồn kho thấp
+    DB --> Report: Số liệu thống kê chính xác 100%
+    Report --> Router: facts_summary_text
+    Router -> Gemini: generate_content(prompt_with_facts)
+    Gemini --> Router: Báo cáo phân tích kinh doanh (Markdown)
+    Router -> Router: sanitize_output(text)
+    Router --> UI: HTTP 200 OK { "report": markdown_text }
+    UI --> Boss: Hiển thị báo cáo tài chính AI
+end
+@enduml

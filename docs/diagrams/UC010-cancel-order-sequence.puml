@@ -1,0 +1,33 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+actor "SuperAdmin / Quản lý" as Admin
+boundary "OrdersPage (React)" as UI
+control "OrdersRouter" as Router
+control "OrderService" as Service
+entity "SQLite DB (Atomic)" as DB
+
+Admin -> UI: Bấm nút Hủy đơn hàng #{id}
+UI -> Router: POST /api/v1/orders/{id}/cancel (Bearer Token)
+Router -> Router: require_roles(['superadmin', 'staff'])
+Router -> Service: cancel_order(db, order_id)
+Service -> DB: BEGIN IMMEDIATE
+Service -> DB: SELECT status FROM orders WHERE id = ?
+DB --> Service: status = 'completed'
+
+Service -> DB: UPDATE orders SET status = 'cancelled' WHERE id = ?
+Service -> DB: SELECT product_id, quantity FROM order_items WHERE order_id = ?
+DB --> Service: List of items
+
+loop Với từng item
+    Service -> DB: UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?
+    Service -> DB: INSERT INTO inventory_logs (change_type='cancel_restoration', ...)
+end
+
+Service -> DB: COMMIT
+DB --> Service: Success
+Service --> Router: Cancelled Order Object
+Router --> UI: HTTP 200 OK
+UI --> Admin: Thông báo hoàn kho thành công
+@enduml

@@ -1,0 +1,43 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+start
+:Nhân viên / Khách hàng mở trang Bán hàng POS;
+:Tìm kiếm và bấm chọn sản phẩm vào Giỏ hàng;
+:Điều chỉnh số lượng từng món trong Giỏ hàng;
+:Chọn khách hàng hoặc để Trống (Khách lẻ);
+:Nhập số tiền chiết khấu / giảm giá (nếu có);
+:Chọn phương thức thanh toán (Tiền mặt / Chuyển khoản);
+:Bấm nút [THANH TOÁN & HOÀN TẤT ĐƠN HÀNG];
+
+:Frontend gửi POST /api/v1/orders;
+:Backend mở giao dịch nguyên tử: `BEGIN IMMEDIATE`;
+
+partition "Xác thực tồn kho thời gian thực" {
+    :Duyệt qua từng mặt hàng trong giỏ;
+    :SELECT stock_quantity FROM products WHERE id = ?;
+    if (stock_quantity >= số lượng mua?) then (Đủ hàng)
+        :Hợp lệ cho mặt hàng này;
+    else (Thiếu hàng)
+        :Giao dịch bị vi phạm;
+        :Thực thi `ROLLBACK`;
+        :Trả về HTTP 400 "Sản phẩm X không đủ tồn kho";
+        :Frontend hiển thị thông báo lỗi;
+        stop
+    endif
+}
+
+partition "Ghi nhận hóa đơn & Trừ kho nguyên tử" {
+    :INSERT INTO orders (customer_id, total_amount, discount, payment_method, status='completed');
+    :Duyệt từng item: INSERT INTO order_items (...);
+    :Duyệt từng item: UPDATE products SET stock_quantity = stock_quantity - ?;
+    :INSERT INTO inventory_logs (change_type='sale', reference_id=order_id);
+    :Thực thi `COMMIT`;
+}
+
+:Backend trả HTTP 200 kèm chi tiết đơn hàng;
+:Frontend mở modal In Hóa Đơn (ReceiptModal);
+:Làm trống Giỏ hàng và cập nhật tồn kho giao diện;
+stop
+@enduml

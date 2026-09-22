@@ -1,0 +1,34 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+start
+:SuperAdmin mở trang Báo cáo Doanh thu;
+:Bấm nút [YÊU CẦU AI PHÂN TÍCH DOANH THU];
+:Frontend gửi POST /api/v1/ai/sales-report;
+
+:Backend xác thực người dùng qua JWT;
+if (Vai trò là SuperAdmin?) then (Hợp lệ)
+    :ReportService tổng hợp số liệu thực tế từ SQLite:
+    - Doanh thu hôm nay, tuần này, tháng này
+    - Top 5 mặt hàng bán chạy nhất
+    - Danh sách hàng tồn dưới mức an toàn;
+    :Nạp Prompt `sales_report.txt`;
+    :Đóng gói số liệu SQL Facts vào Prompt Context;
+    :Gọi Google Gemini 3.6 Flash;
+    if (Gemini gọi thành công?) then (Có)
+        :Gemini sinh nhận xét chiến lược và khuyến nghị nhập hàng;
+    else (Lỗi API)
+        :Fallback: Sinh bản tóm tắt số liệu kinh doanh định dạng bảng;
+    endif
+    :Bộ lọc Secret Sanitizer kiểm tra nội dung;
+    :Ghi nhận vào `ai_audit_logs`;
+    :Backend trả kết quả Markdown;
+    :Frontend render giao diện phân tích tài chính;
+    stop
+else (Không phải SuperAdmin)
+    :Backend trả lỗi HTTP 403 Forbidden;
+    :Frontend hiển thị thông báo chặn quyền;
+    stop
+endif
+@enduml

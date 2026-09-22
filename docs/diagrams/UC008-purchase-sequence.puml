@@ -1,0 +1,30 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+actor "Admin / SuperAdmin" as User
+boundary "PurchasesPage (React)" as UI
+control "PurchasesRouter" as Router
+control "PurchaseService" as Service
+entity "SQLite DB (Atomic Trans)" as DB
+
+User -> UI: Nhập nhà cung cấp & danh sách hàng, bấm Tạo phiếu
+UI -> Router: POST /api/v1/purchases\n{supplier_name, items: [...]}
+Router -> Router: require_roles(['admin', 'superadmin'])
+Router -> Service: create_purchase_receipt(db, data, current_user)
+Service -> DB: BEGIN IMMEDIATE
+Service -> DB: INSERT INTO purchases (...) RETURNING id
+DB --> Service: purchase_id
+
+loop Với từng mặt hàng nhập kho
+    Service -> DB: INSERT INTO purchase_items (purchase_id, product_id, quantity, import_price)
+    Service -> DB: UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?
+    Service -> DB: INSERT INTO inventory_logs (change_type='purchase', ...)
+end
+
+Service -> DB: COMMIT
+DB --> Service: Success
+Service --> Router: Purchase Object
+Router --> UI: HTTP 201 Created
+UI --> User: Thông báo nhập hàng và tăng tồn kho thành công
+@enduml

@@ -1,0 +1,24 @@
+# Core Web Framework & Server
+fastapi>=0.110.0,<0.115.0
+uvicorn[standard]>=0.28.0,<0.32.0
+pydantic>=2.6.0,<2.10.0
+pydantic-settings>=2.2.0,<2.6.0
+python-dotenv>=1.0.1
+
+# Security & Authentication
+bcrypt>=4.1.2,<5.0.0
+pyjwt>=2.8.0,<2.10.0
+python-multipart>=0.0.9
+
+# Data Processing & Export
+pandas>=2.2.0,<2.3.0
+openpyxl>=3.1.2
+
+# Testing
+pytest>=8.1.0
+httpx>=0.27.0
+
+# AI & Vector Search
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+google-genai>=0.1.0

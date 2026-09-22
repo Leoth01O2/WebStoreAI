@@ -1,0 +1,45 @@
+# Environment and Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Databases and Vector Stores
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+webstore.db*
+storeflow.db*
+chroma_data/
+chroma_db/
+
+# Uploads
+backend/uploads/products/*
+!backend/uploads/products/.gitkeep
+
+# Node.js & Frontend
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

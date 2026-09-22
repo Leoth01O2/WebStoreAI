@@ -1,0 +1,24 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+start
+:Khách hàng thành viên hỏi: "Đơn hàng gần nhất của tôi thế nào?";
+:Frontend gửi POST /api/v1/ai/chat kèm Bearer Token;
+
+:Backend giải mã JWT Token -> xác định `current_user.id`;
+:Kiểm tra vai trò người dùng là `customer`;
+
+partition "Chống truy cập chéo (Anti-IDOR)" {
+    :SELECT id FROM customers WHERE user_id = current_user.id;
+    if (Tìm thấy hồ sơ khách hàng?) then (Có)
+        :SELECT * FROM orders WHERE customer_id = customer.id ORDER BY created_at DESC LIMIT 5;
+        :Chỉ nạp danh sách đơn hàng CỦA CHÍNH NGƯỜI ĐÓ vào context;
+        :Gọi Gemini tóm tắt tiến độ đơn hàng;
+        :Trả lời chi tiết cho khách hàng;
+    else (Chưa liên kết hồ sơ)
+        :Thông báo: "Bạn chưa có đơn hàng nào được ghi nhận trên hệ thống";
+    endif
+}
+stop
+@enduml

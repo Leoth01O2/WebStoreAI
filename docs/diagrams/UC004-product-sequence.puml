@@ -1,0 +1,35 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+actor "Admin / Staff" as User
+boundary "ProductsPage (React)" as UI
+control "ProductsRouter" as Router
+entity "SQLite DB (`products`)" as DB
+entity "ChromaDB (Vector RAG)" as Chroma
+
+User -> UI: Nhập thông tin sản phẩm và chọn ảnh
+opt Có upload ảnh
+    UI -> Router: POST /api/v1/products/upload-image (FormData)
+    Router -> Router: Lưu file tĩnh vào /uploads/products/
+    Router --> UI: {"image_url": "/uploads/products/xyz.webp"}
+end
+
+UI -> Router: POST /api/v1/products (Bearer Token)
+Router -> Router: get_current_user & require_roles(['admin', 'superadmin', 'staff'])
+Router -> DB: SELECT id FROM products WHERE sku = ?
+
+alt Mã SKU đã tồn tại
+    DB --> Router: id (Đã có sản phẩm)
+    Router --> UI: HTTP 400 Bad Request ("SKU đã tồn tại")
+    UI --> User: Thông báo lỗi trùng SKU
+else Mã SKU hợp lệ
+    DB --> Router: None
+    Router -> DB: INSERT INTO products (sku, name, category_id, cost_price, selling_price, stock_quantity, ...)
+    DB --> Router: product_id mới
+    Router -> Chroma: update_product_embedding(product_id, name, description)
+    Chroma --> Router: Vector indexed
+    Router --> UI: HTTP 201 Created (Product Data)
+    UI --> User: Đóng modal, tải lại danh sách sản phẩm
+end
+@enduml

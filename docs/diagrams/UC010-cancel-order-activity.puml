@@ -1,0 +1,38 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+start
+:SuperAdmin / Quản lý mở danh sách Đơn hàng;
+:Chọn một đơn hàng đã hoàn tất cần hủy;
+:Nhập lý do hủy và bấm [HỦY ĐƠN HÀNG];
+
+:Frontend gửi POST /api/v1/orders/{id}/cancel;
+:Backend kiểm tra quyền vai trò (SuperAdmin / Manager);
+
+if (Đủ quyền hạn?) then (Có)
+    :Backend mở giao dịch `BEGIN IMMEDIATE`;
+    :SELECT status FROM orders WHERE id = ?;
+    if (Đơn hàng đã bị hủy trước đó?) then (Đã hủy)
+        :ROLLBACK;
+        :Trả lỗi HTTP 400 "Đơn hàng đã được hủy trước đó";
+        stop
+    else (Trạng thái 'completed')
+        :UPDATE orders SET status = 'cancelled' WHERE id = ?;
+        :Lấy danh sách các mặt hàng từ `order_items`;
+        partition "Hoàn trả tồn kho nguyên tử" {
+            while (Còn mặt hàng trong order_items?) is (Có)
+                :UPDATE products SET stock_quantity = stock_quantity + item.quantity WHERE id = item.product_id;
+                :INSERT INTO inventory_logs (change_type='cancel_restoration', quantity=item.quantity, note='Hoàn kho hủy đơn');
+            endwhile (Hết danh sách)
+        }
+        :Thực thi `COMMIT`;
+        :Backend trả về HTTP 200 "Hủy đơn hàng và hoàn kho thành công";
+        :Frontend cập nhật trạng thái đơn sang 'ĐÃ HỦY';
+        stop
+    endif
+else (Không đủ quyền)
+    :Trả lỗi HTTP 403 Forbidden;
+    stop
+endif
+@enduml

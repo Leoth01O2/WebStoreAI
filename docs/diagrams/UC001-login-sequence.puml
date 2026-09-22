@@ -1,0 +1,28 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+actor "Người dùng" as User
+boundary "LoginPage (React)" as UI
+control "AuthRouter (/api/v1/auth)" as Router
+control "AuthService" as Service
+entity "SQLite DB (`users`)" as DB
+
+User -> UI: Nhập username & password, bấm Đăng nhập
+UI -> Router: POST /api/v1/auth/login\n{username, password}
+Router -> Service: authenticate_user(db, username, password)
+Service -> DB: SELECT * FROM users WHERE username = ?
+DB --> Service: Thông tin User (password_hash, role)
+
+alt Tài khoản không tồn tại hoặc sai mật khẩu
+    Service --> Router: None / AuthenticationError
+    Router --> UI: HTTP 401 Unauthorized\n{"detail": "Sai thông tin"}
+    UI --> User: Hiển thị Toast lỗi đăng nhập
+else Mật khẩu hợp lệ (bcrypt.verify = True)
+    Service -> Service: create_access_token(user_id, role)
+    Service --> Router: access_token (JWT)
+    Router --> UI: HTTP 200 OK\n{access_token, token_type: "bearer"}
+    UI -> UI: Lưu token vào localStorage & AuthContext
+    UI --> User: Đăng nhập thành công, chuyển hướng trang
+end
+@enduml

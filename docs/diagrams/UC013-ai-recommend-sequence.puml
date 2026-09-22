@@ -1,0 +1,52 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+actor "Người dùng (Guest / Customer)" as User
+boundary "AiAssistantPage (React)" as UI
+control "AiRouter (/api/v1/ai)" as Router
+control "AiRateLimiter" as Limiter
+control "RagService" as RAG
+entity "ChromaDB (Vector)" as Chroma
+entity "SQLite DB (`products`)" as DB
+control "PromptLoader" as Prompt
+control "Google Gemini API" as Gemini
+entity "SQLite DB (`ai_audit_logs`)" as Audit
+
+User -> UI: Nhập "Tai nghe gaming không dây dưới 1 triệu"
+UI -> Router: POST /api/v1/ai/recommend\n{query: "...", conversation_history: []}
+
+Router -> Limiter: check_rate_limit(client_id, role)
+alt Bị giới hạn tần suất
+    Limiter --> Router: 429 Too Many Requests
+    Router --> UI: HTTP 429 (Retry-After)
+    UI --> User: Thông báo làm chậm thao tác
+end
+
+Router -> Limiter: validate_input_length(query, role)
+Router -> RAG: get_grounded_recommendation_context(query)
+RAG -> Chroma: query(query_texts=[query], n_results=5)
+Chroma --> RAG: List candidate IDs & Distances
+
+RAG -> DB: SELECT * FROM products WHERE id IN (...) AND status='active' AND stock_quantity > 0
+DB --> RAG: Verified in-stock products (Ground Truth)
+
+RAG --> Router: Verified candidates & Context string
+Router -> Prompt: format_prompt("product_recommendation.txt", query, context)
+Prompt --> Router: Final System + User Prompt
+
+Router -> Gemini: generate_content(final_prompt)
+alt Gemini thành công
+    Gemini --> Router: AI Generated Advice Text
+    Router -> Router: is_fallback = False
+else Gemini Timeout hoặc Quota Exhausted
+    Gemini --> Router: Error Exception
+    Router -> Router: Fallback to SQLite direct summary
+    Router -> Router: is_fallback = True
+end
+
+Router -> Router: sanitize_output(ai_text)
+Router -> Audit: INSERT INTO ai_audit_logs (user_id, feature, query, latency, is_fallback)
+Router --> UI: HTTP 200 OK\n{recommendation: text, products: [...], is_fallback: bool}
+UI --> User: Hiển thị phản hồi AI & Card sản phẩm gợi ý
+@enduml

@@ -1,0 +1,38 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+start
+:Người dùng mở trang Đăng nhập;
+:Nhập Username và Password;
+:Nhấn nút [ĐĂNG NHẬP];
+
+if (Kiểm tra form hợp lệ?) then (Có)
+    :Frontend gửi POST /api/v1/auth/login;
+    :Backend truy vấn bảng `users` theo username;
+    if (Tìm thấy tài khoản?) then (Có)
+        :So khớp mật khẩu bằng bcrypt;
+        if (Mật khẩu chính xác?) then (Có)
+            :Sinh JWT Access Token (HMAC-SHA256, hạn 8h);
+            :Backend trả HTTP 200 kèm access_token;
+            :Frontend lưu token vào localStorage;
+            :AuthContext cập nhật trạng thái isAuthenticated;
+            if (Vai trò người dùng?) then (SuperAdmin)
+                :Chuyển hướng về trang POS / Dashboard;
+            else (Customer / Staff / Admin)
+                :Chuyển hướng về trang POS Storefront;
+            endif
+            stop
+        else (Sai mật khẩu)
+            :Backend trả HTTP 401 "Sai tên đăng nhập hoặc mật khẩu";
+        endif
+    else (Không tồn tại)
+        :Backend trả HTTP 401 "Sai tên đăng nhập hoặc mật khẩu";
+    endif
+else (Dữ liệu rỗng)
+    :Frontend hiển thị cảnh báo "Vui lòng nhập đầy đủ thông tin";
+endif
+
+:Hiển thị thông báo lỗi trên giao diện;
+stop
+@enduml

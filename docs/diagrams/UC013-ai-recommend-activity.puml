@@ -1,0 +1,63 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+start
+:Người dùng (Guest / Customer) mở [Trợ lý AI];
+:Nhập nhu cầu sản phẩm (ví dụ: "Tai nghe dưới 1 triệu, pin lâu");
+:Bấm [Gửi câu hỏi];
+
+:Frontend gửi POST /api/v1/ai/recommend;
+
+partition "Lớp Bảo vệ Tần suất & Đầu vào" {
+    :RateLimiter kiểm tra giới hạn request theo vai trò;
+    if (Vượt quá số request hoặc gửi dồn dập?) then (Vi phạm)
+        :Trả lỗi HTTP 429 "Thao tác quá nhanh, vui lòng chờ";
+        stop
+    endif
+    :Kiểm tra độ dài câu hỏi (Guest <= 500 ký tự);
+    if (Câu hỏi quá dài?) then (Vượt giới hạn)
+        :Trả lỗi HTTP 400 "Độ dài câu hỏi vượt giới hạn";
+        stop
+    endif
+}
+
+partition "Tầng 1: ChromaDB Vector Retrieval" {
+    :Trích xuất vector nhúng của câu hỏi;
+    :Tìm kiếm Top-K sản phẩm tương đồng nhất trong ChromaDB (Cosine Space);
+}
+
+partition "Tầng 2: SQLite Anti-Hallucination Guard" {
+    :Truy vấn SQLite theo danh sách Product ID tìm được;
+    :Lọc chỉ lấy sản phẩm có `status = 'active'` VÀ `stock_quantity > 0`;
+    :Loại bỏ 100% sản phẩm hết hàng hoặc sai lệch giá;
+    :Ghép dữ liệu sản phẩm thật vào Prompt Context;
+}
+
+partition "Tầng 3: Gemini Execution & Graceful Fallback" {
+    :Nạp template `product_recommendation.txt`;
+    :Gọi Google Gemini 3.6 Flash API;
+    if (Gemini phản hồi thành công?) then (Thành công)
+        :Lấy nội dung câu trả lời tư vấn;
+        :Đặt cờ `is_fallback = False`;
+    else (Lỗi mạng / Timeout / 429 Quota Exceeded)
+        :Kích hoạt cơ chế Fallback tự động;
+        :Định dạng câu trả lời trực tiếp từ danh sách kho hàng SQLite;
+        :Đặt cờ `is_fallback = True`;
+    endif
+}
+
+partition "Tầng 4: Bộ lọc Bí mật & Kiểm toán" {
+    :OutputSecretSanitizer quét và che giấu API Key / Passwords;
+    :Ghi nhật ký tương tác vào bảng `ai_audit_logs`;
+}
+
+:Backend trả về JSON kết quả kèm danh sách sản phẩm;
+if (is_fallback == True?) then (Chế độ dự phòng)
+    :Frontend hiển thị badge "Chế độ tra cứu trực tiếp từ kho hàng";
+else (Bình thường)
+    :Frontend hiển thị badge "Trợ lý AI Gemini 3.6 Flash";
+endif
+:Hiển thị danh sách thẻ sản phẩm gợi ý và nút mua ngay;
+stop
+@enduml

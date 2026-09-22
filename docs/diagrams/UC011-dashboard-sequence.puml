@@ -1,0 +1,29 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+actor "Chủ cửa hàng (SuperAdmin)" as Boss
+boundary "DashboardPage (React)" as UI
+control "ReportsRouter" as Router
+control "ReportService" as Service
+entity "SQLite DB (`orders`, `products`)" as DB
+
+Boss -> UI: Mở tab Báo cáo doanh thu
+UI -> Router: GET /api/v1/reports/overview (Bearer Token)
+Router -> Router: require_roles(['superadmin'])
+
+alt Người dùng không phải SuperAdmin (Admin / Staff / Customer)
+    Router --> UI: HTTP 403 Forbidden ("Chỉ SuperAdmin mới được xem doanh thu")
+    UI --> Boss: Hiển thị thông báo không có quyền
+else Người dùng là SuperAdmin
+    Router -> Service: get_revenue_overview(db)
+    Service -> DB: SELECT SUM(total_amount), COUNT(id) FROM orders WHERE status='completed'
+    Service -> DB: SELECT p.name, SUM(oi.quantity), SUM(oi.subtotal) FROM order_items ... GROUP BY p.id ORDER BY ... LIMIT 5
+    Service -> DB: SELECT * FROM products WHERE stock_quantity <= min_stock_alert
+    DB --> Service: Thống kê số liệu tài chính
+    Service --> Router: Dashboard Summary JSON
+    Router --> UI: HTTP 200 OK (Data)
+    UI -> UI: Render RetroChart biểu đồ & thẻ KPI
+    UI --> Boss: Hiển thị báo cáo trực quan
+end
+@enduml

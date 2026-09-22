@@ -1,0 +1,25 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+start
+:Người dùng chọn tab [Báo cáo doanh thu];
+:Frontend gửi request kèm JWT Token;
+
+if (Kiểm tra vai trò người dùng?) then (SuperAdmin)
+    :Frontend gọi GET /api/v1/reports/overview;
+    :Backend kiểm tra require_roles(['superadmin']);
+    :Truy vấn tổng doanh thu (Hôm nay, 7 ngày, Tháng này, Toàn bộ);
+    :Truy vấn tổng số đơn hàng đã hoàn tất;
+    :Truy vấn Top 5 sản phẩm bán chạy nhất;
+    :Truy vấn danh sách sản phẩm cảnh báo hết hàng;
+    :Backend trả về dữ liệu JSON thống kê;
+    :Frontend vẽ biểu đồ RetroChart và các thẻ KPI;
+    stop
+else (Admin / Staff / Customer / Guest)
+    :Hệ thống chặn truy cập;
+    :Frontend tự động chuyển hướng về tab POS;
+    :Backend trả HTTP 403 Forbidden nếu gọi trực tiếp API;
+    stop
+endif
+@enduml

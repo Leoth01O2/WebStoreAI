@@ -1,0 +1,66 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam linetype ortho
+
+skinparam package {
+    BackgroundColor #F8FAFC
+    BorderColor #64748B
+    FontColor #0F172A
+    FontStyle bold
+}
+
+skinparam component {
+    BackgroundColor #FFFFFF
+    BorderColor #0284C7
+    FontColor #0F172A
+}
+
+skinparam database {
+    BackgroundColor #FEF3C7
+    BorderColor #D97706
+    FontColor #92400E
+}
+
+skinparam cloud {
+    BackgroundColor #EDE9FE
+    BorderColor #7C3AED
+    FontColor #5B21B6
+}
+
+package "CLIENT TIER (Trình duyệt người dùng)" {
+    [React 18 + Vite SPA\n(Cyberpunk Dark/Light UI)] as UI
+    [AuthContext & Axios Interceptor\n(Bearer JWT Token)] as ClientAuth
+    [POS / Products / Dashboard\n/ AI Chatbot Component] as UIComp
+    UI -down-> ClientAuth
+    UI -down-> UIComp
+}
+
+package "APPLICATION TIER (FastAPI Backend Server)" {
+    component "API Gateway & Router\n(/api/v1/*)" as Router
+    component "Security & Defense Layer\n(OAuth2, bcrypt, RBAC, AiRateLimiter)" as Security
+    component "Business Services\n(Product, Order, Inventory, Report)" as BizServices
+    component "AI & RAG Engine\n(Hybrid RAG Service, PromptLoader)" as AIEngine
+    
+    Router -down-> Security
+    Security -down-> BizServices
+    Security -down-> AIEngine
+}
+
+package "DATA PERSISTENCE TIER" {
+    database "SQLite 3 (WAL Mode)\n- users, products, categories\n- orders, order_items\n- inventory_logs, ai_audit_logs" as SQLite
+    database "ChromaDB (Vector Database)\n- 384-dim Product Embeddings\n- Semantic Cosine Similarity" as Chroma
+}
+
+cloud "EXTERNAL AI SERVICES" {
+    [Google Gemini 3.6 Flash API\n(Generative AI Model)] as Gemini
+}
+
+UIComp --> Router : RESTful JSON API
+BizServices --> SQLite : ACID Transactions (BEGIN IMMEDIATE)
+AIEngine --> Chroma : Semantic Retrieval
+AIEngine --> SQLite : In-stock Verification (Ground Truth)
+AIEngine --> Gemini : Grounded Prompting & Inference
+
+@enduml

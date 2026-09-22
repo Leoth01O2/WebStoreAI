@@ -1,0 +1,85 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Arial"
+skinparam roundCorner 10
+
+actor "Khách vãng lai\n(Guest)" as Guest #D5D8DC
+actor "Khách hàng\n(Customer)" as Customer #AED6F1
+actor "Nhân viên\n(Staff)" as Staff #A9DFBF
+actor "Quản trị viên\n(Admin)" as Admin #FAD7A0
+actor "Chủ cửa hàng\n(SuperAdmin)" as SuperAdmin #F5B7B1
+
+Guest <|-- Customer
+Staff <|-- Admin
+Admin <|-- SuperAdmin
+
+rectangle "STOREFLOW AI — HỆ THỐNG QUẢN LÝ BÁN HÀNG TÍCH HỢP AI" {
+    
+    package "1.0 Xác thực & Phân quyền" {
+        usecase "UC001: Đăng ký & Đăng nhập" as UC001
+        usecase "UC002: Quản lý Người dùng & RBAC" as UC002
+    }
+    
+    package "2.0 Quản lý Danh mục & Sản phẩm" {
+        usecase "UC003: Quản lý Danh mục" as UC003
+        usecase "UC004: Quản lý Sản phẩm & Upload ảnh" as UC004
+        usecase "UC005: Duyệt Storefront công khai" as UC005
+    }
+    
+    package "3.0 Quản lý Khách hàng" {
+        usecase "UC006: Quản lý Hồ sơ khách hàng" as UC006
+    }
+    
+    package "4.0 Bán hàng tại quầy (POS)" {
+        usecase "UC007: Bán hàng POS & Trừ kho" as UC007
+        usecase "UC010: Hủy đơn & Hoàn kho" as UC010
+    }
+    
+    package "5.0 Nhập hàng & Kho vận" {
+        usecase "UC008: Nhập hàng & Tăng tồn kho" as UC008
+        usecase "UC009: Theo dõi Sổ kho & Cảnh báo" as UC009
+    }
+    
+    package "6.0 Báo cáo Doanh thu" {
+        usecase "UC011: Xem Dashboard Doanh thu" as UC011
+        usecase "UC012: Xuất Báo cáo ra CSV" as UC012
+    }
+    
+    package "7.0 Trợ lý AI & RAG" {
+        usecase "UC013: Trợ lý AI Tư vấn Sản phẩm" as UC013
+        usecase "UC014: AI Sinh Báo cáo Doanh thu" as UC014
+        usecase "UC015: AI Hỏi đáp Bán hàng" as UC015
+        usecase "UC016: Tra cứu Đơn cá nhân qua AI" as UC016
+    }
+    
+    package "8.0 Quản trị An toàn AI" {
+        usecase "UC017: Xem Nhật ký Kiểm toán AI" as UC017
+    }
+}
+
+Guest --> UC001
+Guest --> UC005
+Guest --> UC013
+
+Customer --> UC007
+Customer --> UC016
+
+Staff --> UC006
+Staff --> UC007
+Staff --> UC009
+Staff --> UC010
+Staff --> UC015
+
+Admin --> UC002
+Admin --> UC003
+Admin --> UC004
+Admin --> UC008
+Admin --> UC017
+
+SuperAdmin --> UC011
+SuperAdmin --> UC012
+SuperAdmin --> UC014
+
+@enduml

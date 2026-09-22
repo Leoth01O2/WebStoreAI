@@ -1,0 +1,27 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+actor "Khách hàng (Customer)" as Customer
+boundary "AiAssistantPage" as UI
+control "AiRouter" as Router
+control "AiService" as AI
+entity "SQLite DB (`customers`, `orders`)" as DB
+control "Google Gemini API" as Gemini
+
+Customer -> UI: Nhập "Kiểm tra đơn hàng gần nhất của tôi"
+UI -> Router: POST /api/v1/ai/chat (Bearer Token của Customer)
+Router -> Router: get_current_user -> current_user (id=10, role='customer')
+Router -> AI: answer_sales_qa(query, current_user)
+
+AI -> DB: SELECT id FROM customers WHERE user_id = 10
+DB --> AI: customer_id = 5
+AI -> DB: SELECT id, total_amount, status, created_at FROM orders WHERE customer_id = 5 ORDER BY created_at DESC LIMIT 5
+DB --> AI: Danh sách đơn hàng cá nhân (Chỉ của user 10)
+
+AI -> Gemini: generate_content(prompt_with_customer_orders)
+Gemini --> AI: Phản hồi tiến độ đơn hàng
+AI --> Router: Sanitized response text
+Router --> UI: HTTP 200 OK
+UI --> Customer: Hiển thị thông tin đơn hàng cá nhân
+@enduml

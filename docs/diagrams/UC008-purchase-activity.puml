@@ -1,0 +1,30 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+
+start
+:Admin / SuperAdmin mở trang Nhập hàng;
+:Nhập tên Nhà cung cấp và ghi chú đơn;
+:Chọn danh sách sản phẩm, nhập số lượng và giá nhập;
+:Bấm [LẬP PHIẾU NHẬP HÀNG];
+
+:Frontend gửi POST /api/v1/purchases;
+:Backend kiểm tra quyền vai trò (Admin / SuperAdmin);
+
+if (Hợp lệ?) then (Có)
+    :Mở giao dịch SQLite nguyên tử `BEGIN IMMEDIATE`;
+    :INSERT INTO purchases (supplier_name, total_cost, created_by);
+    while (Còn mặt hàng nhập?) is (Có)
+        :INSERT INTO purchase_items (purchase_id, product_id, quantity, import_price);
+        :UPDATE products SET stock_quantity = stock_quantity + item.quantity WHERE id = ?;
+        :INSERT INTO inventory_logs (change_type='purchase', product_id, quantity, note='Nhập hàng');
+    endwhile (Hết mặt hàng)
+    :Thực thi `COMMIT`;
+    :Backend trả về HTTP 201 Created kèm chi tiết phiếu;
+    :Frontend cập nhật tồn kho mới;
+    stop
+else (Không đủ quyền)
+    :Trả HTTP 403 Forbidden;
+    stop
+endif
+@enduml

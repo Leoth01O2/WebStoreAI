@@ -1,0 +1,32 @@
+@startuml
+skinparam defaultFontName "Arial"
+skinparam shadowing false
+skinparam roundcorner 10
+
+skinparam activity {
+    BackgroundColor #F0F9FF
+    BorderColor #0284C7
+    FontColor #0C4A6E
+    FontSize 11
+}
+
+start
+:1. Câu hỏi người dùng (User Query)\n"Tìm tai nghe gaming không dây dưới 1 triệu, pin trâu";
+
+:2. Phân tích & Kiểm soát an toàn (Intent & Rate Limit)\n- AiRateLimiter (Check limit & cooldown)\n- Validate input length theo vai trò;
+
+fork
+    :3A. Semantic Vector Search (ChromaDB)\n- Embed truy vấn\n- Cosine Similarity search Top-5;
+fork again
+    :3B. Tra cứu CSDL Nghiệp vụ (SQLite Facts)\n- Trạng thái sản phẩm active\n- Tồn kho thực tế (stock_quantity > 0);
+end fork
+
+:4. Lọc & Xác thực chốt chặn (Anti-Hallucination Guard)\n- Loại bỏ sản phẩm hết hàng hoặc ẩn\n- Tạo Ground Truth Context chính xác 100%;
+
+:5. Nạp Prompt & Suy luận LLM (Gemini 3.6 Flash)\n- Ghép System Prompt + Facts + User Query\n- Sinh câu trả lời tư vấn bằng tiếng Việt\n*(Fallback tự động về kho nếu API gián đoạn)*;
+
+:6. Làm sạch bảo mật & Ghi kiểm toán (Sanitization & Audit)\n- Che giấu API Key / Secret\n- Ghi nhật ký ai_audit_logs;
+
+:7. Phản hồi hoàn chỉnh tới giao diện\n- Đoạn văn tư vấn phân tích\n- Danh sách sản phẩm gợi ý kèm nút mua hàng;
+stop
+@enduml
