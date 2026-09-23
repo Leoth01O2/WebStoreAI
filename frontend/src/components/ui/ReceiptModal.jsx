@@ -39,7 +39,9 @@ export const ReceiptModal = ({ isOpen, onClose, order, onNewOrder }) => {
       <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
         <CheckCircle size={36} color="var(--green-terminal)" style={{ margin: '0 auto 0.5rem' }} />
         <div style={{ color: 'var(--green-light)', fontWeight: 'bold', fontSize: '1rem' }}>
-          GIAO DỊCH HOÀN TẤT & TRỪ KHO THÀNH CÔNG
+          {order.status === 'pending'
+            ? 'ĐẶT HÀNG THÀNH CÔNG (CHỜ ADMIN DUYỆT)'
+            : 'GIAO DỊCH HOÀN TẤT & TRỪ KHO THÀNH CÔNG'}
         </div>
       </div>
 

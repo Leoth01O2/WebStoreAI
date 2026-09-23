@@ -107,6 +107,13 @@ export const AiAssistantPage = ({ onNavigate }) => {
       setImgSearchLoading(true);
       const data = await aiAPI.imageSearch(file, 6);
 
+      // Quota Exceeded Guard: nếu hết token/quota Gemini API
+      if (data.is_quota_exceeded) {
+        setImgSearchResult({ ...data, results: [] });
+        addToast(data.error_message || 'Hạn ngạch AI (Gemini Quota 429) đã hết. Không thể phân tích ảnh!', 'error');
+        return;
+      }
+
       // Non-product guard: nếu backend phát hiện ảnh không phải sản phẩm
       if (data.is_non_product) {
         setImgSearchResult({ ...data, results: [] });
@@ -701,52 +708,43 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     fontSize: '0.9rem',
                     color: 'var(--text-primary)',
                     fontFamily: 'var(--font-sans)',
-                    overflowY: 'auto',
-                    maxHeight: '600px',
                   }}
                 >
-                  <MarkdownRenderer content={recResult.ai_response} />
+                  <MarkdownRenderer
+                    content={recResult.ai_response}
+                    products={recResult.recommended_products}
+                    onViewProduct={(prod) => setSelectedProductDetail(prod)}
+                    onSelectProduct={(prod) => {
+                      if (onNavigate) {
+                        onNavigate('pos');
+                        addToast(`Đã chuyển tới POS. Mã sản phẩm: ${prod.sku}`, 'info');
+                      }
+                    }}
+                  />
 
-                  {/* Inline Interactive Product Cards directly under AI response */}
+                  {/* Grounded Action Banner directing user to verified products in the right column */}
                   {recResult.recommended_products && recResult.recommended_products.length > 0 && (
-                    <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px dashed var(--border-color)' }}>
-                      <div
-                        style={{
-                          fontSize: '0.82rem',
-                          fontWeight: 700,
-                          color: 'var(--accent-amber)',
-                          fontFamily: 'var(--font-mono)',
-                          marginBottom: '0.75rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                        }}
-                      >
-                        <Sparkles size={14} /> THẺ SẢN PHẨM KHUYẾN NGHỊ TƯƠNG TÁC (INTERACTIVE CARDS)
+                    <div
+                      style={{
+                        marginTop: '1.5rem',
+                        padding: '0.85rem 1.15rem',
+                        background: 'rgba(57, 211, 83, 0.08)',
+                        border: '1px solid rgba(57, 211, 83, 0.3)',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '0.75rem',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.83rem', color: 'var(--accent-green)', fontWeight: 600 }}>
+                        <ShieldCheck size={16} />
+                        <span>Đã đối chiếu <strong>{recResult.recommended_products.length} sản phẩm</strong> còn hàng trong kho SQLite (danh sách chi tiết ở cột bên phải).</span>
                       </div>
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                          gap: '0.85rem',
-                        }}
-                      >
-                        {recResult.recommended_products.map((p) => (
-                          <ProductCard
-                            key={`inline-${p.product_id || p.id || p.sku}`}
-                            product={p}
-                            compact={true}
-                            onViewDetail={(prod) => setSelectedProductDetail(prod)}
-                            onSelect={(prod) => {
-                              if (onNavigate) {
-                                onNavigate('pos');
-                                addToast(`Đã chuyển tới POS. Mã sản phẩm: ${prod.sku}`, 'info');
-                              }
-                            }}
-                            actionLabel={user?.role === 'customer' ? 'Thêm giỏ / POS' : 'Mở bán POS'}
-                          />
-                        ))}
-                      </div>
+                      <span style={{ fontSize: '0.76rem', color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                        👉 Chọn sản phẩm ở cột phải để Mở bán POS / Thêm giỏ hàng
+                      </span>
                     </div>
                   )}
                 </div>
@@ -1071,87 +1069,130 @@ export const AiAssistantPage = ({ onNavigate }) => {
           {/* Results Display */}
           {!imgSearchLoading && imgSearchResult && (
             <div>
-              {/* Extracted Features Banner */}
-              {imgSearchResult.query_features && (
+              {/* Quota Exceeded Notice — Ẩn hoàn toàn sản phẩm và hiển thị cảnh báo hạn ngạch */}
+              {imgSearchResult.is_quota_exceeded ? (
                 <div
                   style={{
-                    background: 'var(--panel-bg)',
-                    border: '1px solid var(--border-color)',
-                    borderLeft: imgSearchResult.is_non_product
-                      ? '4px solid var(--accent-amber)'
-                      : '4px solid var(--accent-cyan)',
+                    background: 'rgba(248, 81, 73, 0.08)',
+                    border: '1px solid var(--accent-red, #f85149)',
                     borderRadius: '4px',
-                    padding: '1rem 1.25rem',
-                    marginBottom: '1.5rem',
-                    boxShadow: 'var(--shadow-retro)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'var(--font-mono)' }}>
-                      <Terminal size={16} /> ĐẶC TRƯNG THỊ GIÁC TRÍCH XUẤT (AI VISUAL FEATURES)
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                      Thời gian xử lý: <span style={{ color: 'var(--accent-cyan)' }}>{imgSearchResult.execution_time_ms}ms</span> | Ứng viên đối chiếu: <span style={{ color: 'var(--accent-amber)' }}>{imgSearchResult.total_candidates}</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                    <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)', color: 'var(--accent-cyan)' }}>
-                      Loại thiết bị: <strong>{imgSearchResult.query_features.product_type || 'N/A'}</strong>
-                    </span>
-                    <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(255, 180, 84, 0.1)', border: '1px solid rgba(255, 180, 84, 0.3)', color: 'var(--accent-amber)' }}>
-                      Màu sắc chủ đạo: <strong>{imgSearchResult.query_features.dominant_color || 'N/A'}</strong>
-                    </span>
-                    <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(57, 211, 83, 0.1)', border: '1px solid rgba(57, 211, 83, 0.3)', color: 'var(--accent-green)' }}>
-                      Kiểu dáng: <strong>{imgSearchResult.query_features.shape_form || 'N/A'}</strong>
-                    </span>
-                  </div>
-
-                  {imgSearchResult.query_features.description && (
-                    <div style={{ fontSize: '0.83rem', color: 'var(--text-primary)', fontStyle: 'italic', marginTop: '0.25rem' }}>
-                      "{imgSearchResult.query_features.description}"
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Non-product notice — ẩn hoàn toàn phần kết quả */}
-              {imgSearchResult.is_non_product ? (
-                <div
-                  style={{
-                    background: 'var(--panel-bg)',
-                    border: '1px solid var(--accent-amber)',
-                    borderRadius: '4px',
-                    padding: '2.5rem',
+                    padding: '2.5rem 1.5rem',
                     textAlign: 'center',
-                    color: 'var(--text-muted)',
+                    boxShadow: '0 0 18px rgba(248, 81, 73, 0.15)',
+                    marginBottom: '1.5rem',
                   }}
                 >
-                  <AlertCircle size={36} style={{ color: 'var(--accent-amber)', opacity: 0.85, marginBottom: '0.75rem' }} />
-                  <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--accent-amber)', marginBottom: '0.4rem' }}>
-                    Ảnh không chứa sản phẩm
+                  <AlertCircle size={44} style={{ color: 'var(--accent-red, #f85149)', marginBottom: '0.85rem' }} />
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent-red, #f85149)', marginBottom: '0.5rem', fontFamily: 'var(--font-mono)' }}>
+                    [ CẢNH BÁO: HẠN NGẠCH AI GEMINI ĐÃ HẾT (429 RESOURCE EXHAUSTED) ]
                   </div>
-                  <div style={{ fontSize: '0.85rem', maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
-                    AI nhận diện đây không phải sản phẩm công nghệ hoặc thiết bị văn phòng.
-                    Vui lòng tải lên ảnh sản phẩm rõ ràng (chuột, bàn phím, tai nghe, loa...).
+                  <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', maxWidth: '580px', margin: '0 auto', lineHeight: 1.6 }}>
+                    {imgSearchResult.error_message || 'Dịch vụ AI Vision (Google AI Studio Free Tier limit 20 requests/ngày) đã sử dụng hết hạn ngạch truy vấn.'}
                   </div>
-                  {imgSearchResult.non_product_reason && (
-                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '0.75rem', fontFamily: 'var(--font-mono)', opacity: 0.7 }}>
-                      [{imgSearchResult.non_product_reason}]
+                  <div
+                    style={{
+                      padding: '1rem 1.25rem',
+                      background: 'var(--panel-bg)',
+                      border: '1px dashed rgba(248, 81, 73, 0.4)',
+                      borderRadius: '4px',
+                      maxWidth: '620px',
+                      margin: '1.25rem auto 0',
+                      textAlign: 'left',
+                      fontSize: '0.82rem',
+                      color: 'var(--text-muted)',
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, color: 'var(--accent-amber)', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <ShieldCheck size={16} /> Nguyên tắc bảo toàn tính chân thật dữ liệu:
                     </div>
-                  )}
+                    <div>• Hệ thống đã <strong>dừng tiến trình phân tích và KHÔNG hiển thị sản phẩm ngẫu nhiên</strong> để tránh gây hiểu lầm hoặc sai lệch dữ liệu kho hàng.</div>
+                    <div style={{ marginTop: '0.4rem' }}>• <strong>Khắc phục:</strong> Vui lòng đợi hạn ngạch đặt lại vào chu kỳ tiếp theo hoặc cập nhật <code>GEMINI_API_KEY</code> mới trong tệp cấu hình <code>backend/.env</code>.</div>
+                  </div>
                 </div>
               ) : (
                 <>
-                  {/* Product Cards Grid */}
-                  <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                      Kết quả đối chiếu kho hàng ({imgSearchResult.results?.length || 0})
-                    </h3>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'var(--font-mono)' }}>
-                      <ShieldCheck size={14} /> SQLite Truth Guard Verified
-                    </span>
-                  </div>
+                  {/* Extracted Features Banner */}
+                  {imgSearchResult.query_features && (
+                    <div
+                      style={{
+                        background: 'var(--panel-bg)',
+                        border: '1px solid var(--border-color)',
+                        borderLeft: imgSearchResult.is_non_product
+                          ? '4px solid var(--accent-amber)'
+                          : '4px solid var(--accent-cyan)',
+                        borderRadius: '4px',
+                        padding: '1rem 1.25rem',
+                        marginBottom: '1.5rem',
+                        boxShadow: 'var(--shadow-retro)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'var(--font-mono)' }}>
+                          <Terminal size={16} /> ĐẶC TRƯNG THỊ GIÁC TRÍCH XUẤT (AI VISUAL FEATURES)
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                          Thời gian xử lý: <span style={{ color: 'var(--accent-cyan)' }}>{imgSearchResult.execution_time_ms}ms</span> | Ứng viên đối chiếu: <span style={{ color: 'var(--accent-amber)' }}>{imgSearchResult.total_candidates}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)', color: 'var(--accent-cyan)' }}>
+                          Loại thiết bị: <strong>{imgSearchResult.query_features.product_type || 'N/A'}</strong>
+                        </span>
+                        <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(255, 180, 84, 0.1)', border: '1px solid rgba(255, 180, 84, 0.3)', color: 'var(--accent-amber)' }}>
+                          Màu sắc chủ đạo: <strong>{imgSearchResult.query_features.dominant_color || 'N/A'}</strong>
+                        </span>
+                        <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(57, 211, 83, 0.1)', border: '1px solid rgba(57, 211, 83, 0.3)', color: 'var(--accent-green)' }}>
+                          Kiểu dáng: <strong>{imgSearchResult.query_features.shape_form || 'N/A'}</strong>
+                        </span>
+                      </div>
+
+                      {imgSearchResult.query_features.description && (
+                        <div style={{ fontSize: '0.83rem', color: 'var(--text-primary)', fontStyle: 'italic', marginTop: '0.25rem' }}>
+                          "{imgSearchResult.query_features.description}"
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Non-product notice — ẩn hoàn toàn phần kết quả */}
+                  {imgSearchResult.is_non_product ? (
+                    <div
+                      style={{
+                        background: 'var(--panel-bg)',
+                        border: '1px solid var(--accent-amber)',
+                        borderRadius: '4px',
+                        padding: '2.5rem',
+                        textAlign: 'center',
+                        color: 'var(--text-muted)',
+                      }}
+                    >
+                      <AlertCircle size={36} style={{ color: 'var(--accent-amber)', opacity: 0.85, marginBottom: '0.75rem' }} />
+                      <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--accent-amber)', marginBottom: '0.4rem' }}>
+                        Ảnh không chứa sản phẩm
+                      </div>
+                      <div style={{ fontSize: '0.85rem', maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
+                        AI nhận diện đây không phải sản phẩm công nghệ hoặc thiết bị văn phòng.
+                        Vui lòng tải lên ảnh sản phẩm rõ ràng (chuột, bàn phím, tai nghe, loa...).
+                      </div>
+                      {imgSearchResult.non_product_reason && (
+                        <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '0.75rem', fontFamily: 'var(--font-mono)', opacity: 0.7 }}>
+                          [{imgSearchResult.non_product_reason}]
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      {/* Product Cards Grid */}
+                      <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                          Kết quả đối chiếu kho hàng ({imgSearchResult.results?.length || 0})
+                        </h3>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'var(--font-mono)' }}>
+                          <ShieldCheck size={14} /> SQLite Truth Guard Verified
+                        </span>
+                      </div>
 
                   {!imgSearchResult.results || imgSearchResult.results.length === 0 ? (
                     <div
@@ -1198,7 +1239,9 @@ export const AiAssistantPage = ({ onNavigate }) => {
                   )}
                 </>
               )}
-            </div>
+            </>
+          )}
+        </div>
           )}
         </div>
       )}

@@ -16,13 +16,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { RoleBadge } from '../ui/Badge';
-import { inventoryAPI } from '../../services/api';
+import { inventoryAPI, ordersAPI } from '../../services/api';
 import { ThemeToggle } from './ThemeToggle';
 
 export const Navbar = ({ activeTab, onSelectTab }) => {
   const { user, logout, isAdmin, isManager } = useAuth();
   const [time, setTime] = useState(new Date().toLocaleTimeString('vi-VN'));
   const [lowStockCount, setLowStockCount] = useState(0);
+  const [workflowCounts, setWorkflowCounts] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Digital clock update
@@ -32,6 +33,49 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Check workflow counts for operational badges
+  useEffect(() => {
+    if (!user) {
+      setWorkflowCounts(null);
+      return;
+    }
+    const checkWorkflowCounts = async () => {
+      try {
+        const counts = await ordersAPI.getWorkflowCounts();
+        setWorkflowCounts(counts);
+      } catch {
+        // Silently ignore if unauthorized or network error
+      }
+    };
+
+    checkWorkflowCounts();
+
+    const handleWorkflowUpdated = () => {
+      checkWorkflowCounts();
+    };
+
+    window.addEventListener('workflow-updated', handleWorkflowUpdated);
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkWorkflowCounts();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        checkWorkflowCounts();
+      }
+    }, 30000);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('workflow-updated', handleWorkflowUpdated);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [user]);
 
   // Check low stock count
   useEffect(() => {
@@ -48,6 +92,45 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
     const interval = setInterval(checkLowStock, 60000);
     return () => clearInterval(interval);
   }, [user]);
+
+  const getWorkflowBadge = () => {
+    if (!user || !workflowCounts) return null;
+    const role = user.role;
+    if (role === 'admin' || role === 'superadmin') {
+      const pending = workflowCounts.pending_count || 0;
+      if (pending > 0) {
+        return {
+          label: `Đơn chờ duyệt: ${pending}`,
+          shortLabel: `Chờ duyệt: ${pending}`,
+          type: 'danger',
+          count: pending,
+        };
+      }
+    } else if (role === 'staff') {
+      const approved = workflowCounts.approved_count || 0;
+      if (approved > 0) {
+        return {
+          label: `Đơn cần xử lý: ${approved}`,
+          shortLabel: `Cần xử lý: ${approved}`,
+          type: 'success',
+          count: approved,
+        };
+      }
+    } else if (role === 'customer') {
+      const pending = workflowCounts.my_pending_count || 0;
+      const processing = workflowCounts.my_processing_count || 0;
+      const total = pending + processing;
+      if (total > 0) {
+        return {
+          label: `Đơn của tôi: ${pending} chờ duyệt, ${processing} đang xử lý`,
+          shortLabel: `${total} đơn hoạt động`,
+          type: 'warning',
+          count: total,
+        };
+      }
+    }
+    return null;
+  };
 
   const navItems = [
     {
@@ -108,6 +191,7 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
+              const orderBadge = item.id === 'orders' ? getWorkflowBadge() : null;
               return (
                 <button
                   key={item.id}
@@ -116,6 +200,23 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
                 >
                   <Icon size={16} />
                   <span>{item.label}</span>
+                  {orderBadge && (
+                    <span
+                      className={`badge ${orderBadge.type === 'danger' ? 'badge-red' : orderBadge.type === 'success' ? 'badge-green' : 'badge-amber'}`}
+                      style={{
+                        marginLeft: '0.35rem',
+                        fontSize: '0.68rem',
+                        padding: '0.1rem 0.45rem',
+                        borderRadius: '999px',
+                        fontWeight: 700,
+                        fontFamily: 'var(--font-mono)',
+                        boxShadow: orderBadge.type === 'danger' ? '0 0 8px rgba(239, 68, 68, 0.4)' : 'none',
+                      }}
+                      title={orderBadge.label}
+                    >
+                      {orderBadge.shortLabel}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -251,6 +352,7 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
               {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
+                const orderBadge = item.id === 'orders' ? getWorkflowBadge() : null;
                 return (
                   <button
                     key={item.id}
@@ -259,6 +361,22 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
                   >
                     <Icon size={18} />
                     <span>{item.label}</span>
+                    {orderBadge && (
+                      <span
+                        className={`badge ${orderBadge.type === 'danger' ? 'badge-red' : orderBadge.type === 'success' ? 'badge-green' : 'badge-amber'}`}
+                        style={{
+                          marginLeft: 'auto',
+                          fontSize: '0.68rem',
+                          padding: '0.1rem 0.45rem',
+                          borderRadius: '999px',
+                          fontWeight: 700,
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                        title={orderBadge.label}
+                      >
+                        {orderBadge.shortLabel}
+                      </span>
+                    )}
                   </button>
                 );
               })}

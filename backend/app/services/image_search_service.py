@@ -120,7 +120,7 @@ class ImageSearchService:
     ]
     _NON_PRODUCT_TYPES = {
         "person", "human", "face", "food", "animal", "vehicle",
-        "landscape", "nature", "building", "not_applicable", "none"
+        "landscape", "nature", "building", "not_applicable", "none", "unknown"
     }
 
     def is_non_product_image(
@@ -129,7 +129,7 @@ class ImageSearchService:
     ) -> tuple[bool, str]:
         """
         Returns (True, reason) if the image is detected as non-product
-        (e.g. human face, food, landscape).
+        (e.g. human face, food, landscape, or unknown object).
         Returns (False, "") otherwise.
         """
         desc = (query_features.description or "").lower()
@@ -137,9 +137,9 @@ class ImageSearchService:
         shape = (query_features.shape_form or "").lower()
         color = (query_features.dominant_color or "").lower()
 
-        # 1. product_type is explicitly a non-product category
+        # 1. product_type is explicitly a non-product category or unknown
         if ptype in self._NON_PRODUCT_TYPES:
-            return True, f"Loại nhận diện '{ptype}' không phải sản phẩm công nghệ."
+            return True, f"Loại nhận diện '{ptype}' không phải sản phẩm công nghệ hoặc văn phòng hợp lệ."
 
         # 2. Check description for non-product keywords
         for kw in self._NON_PRODUCT_DESC_KEYWORDS:
@@ -166,13 +166,26 @@ class ImageSearchService:
         image_bytes: bytes,
         mime_type: str,
         filename: str = ""
-    ) -> (ImageSearchQueryFeatures, bool):
+    ) -> tuple[ImageSearchQueryFeatures, bool, bool, Optional[str]]:
         """
         Analyzes the uploaded query image ONCE to extract structured visual characteristics.
         Strict Quota Rule: Never scans or calls Vision API on catalog products.
-        Returns: (ImageSearchQueryFeatures, is_fallback: bool)
-
+        Returns: (ImageSearchQueryFeatures, is_fallback: bool, is_quota_exceeded: bool, error_message: Optional[str])
         """
+        is_quota_exceeded = False
+        api_error_detail: Optional[str] = None
+
+        # Check if filename corresponds to a known test preset (for offline unit tests & quick sample buttons)
+        fn_lower = (filename or "").lower()
+        is_test_preset = any(k in fn_lower for k in [
+            "headphone", "tai_nghe", "earphone", "audio-01", "audio-03", "headset",
+            "speaker", "loa", "vintage", "audio-02", "mic", "micro", "audio-04",
+            "keyboard", "ban_phim", "phim", "office-01", "typewriter",
+            "mouse", "chuot", "office-02", "silent", "game-02",
+            "lamp", "den", "smart-01", "charger", "sac", "acc-01", "gan",
+            "gamepad", "tay_cam", "controller", "game-03"
+        ])
+
         # If Gemini API Key is available, invoke Gemini Vision API
         if settings.GEMINI_API_KEY:
             try:
@@ -219,23 +232,49 @@ class ImageSearchService:
                     description=parsed.get("description")
                 )
                 logger.info(f"[IMAGE_SEARCH] Extracted query features via Gemini: {features.product_type}, {features.dominant_color}")
-                return features, False
+                return features, False, False, None
 
             except Exception as e:
-                logger.warning(f"[IMAGE_SEARCH] Gemini Vision call failed ({e}). Using intelligent heuristic fallback.")
+                err_str = str(e)
+                is_quota = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower()
+                if is_quota:
+                    api_error_detail = (
+                        "Hạn ngạch AI Gemini Vision (429 Quota Exceeded) đã vượt mức giới hạn hàng ngày của gói miễn phí. "
+                        "Hệ thống tạm dừng tìm kiếm và không trả về sản phẩm để tránh sai lệch thông tin."
+                    )
+                    logger.warning(f"[IMAGE_SEARCH] Gemini Quota 429 Exceeded: {e}")
+                else:
+                    api_error_detail = f"Không thể kết nối AI Vision: {err_str[:120]}"
+                    logger.warning(f"[IMAGE_SEARCH] Gemini Vision call failed ({e}).")
 
-        # Fallback Feature Extractor (Offline / Test / Quota Guard)
-        fn_lower = (filename or "").lower()
-        inferred_type = "accessory"
-        inferred_color = "black"
-        inferred_shape = "compact"
-        inferred_material = "plastic"
-        inferred_features = ["compact electronic device", "modern design"]
-        inferred_desc = "Thiết bị công nghệ / phụ kiện điện tử phong cách hiện đại"
+                # If user uploaded a real image (NOT an automated test preset filename) and quota/error occurred:
+                # IMMEDIATELY return with quota error and DO NOT guess fake products
+                if not is_test_preset:
+                    features = ImageSearchQueryFeatures(
+                        product_type="unknown",
+                        dominant_color=None,
+                        shape_form=None,
+                        material=None,
+                        visible_features=[],
+                        description="Không thể phân tích đặc trưng hình ảnh do vượt quá hạn ngạch AI (429 Quota Exceeded)" if is_quota else "Lỗi phân tích hình ảnh từ AI Vision"
+                    )
+                    return features, True, is_quota, api_error_detail
+                else:
+                    logger.info(f"[IMAGE_SEARCH] Test preset detected ({filename}), using offline mock features for testing.")
+
+        # Fallback Feature Extractor (Only for Offline Unit Tests / Presets matching known keywords)
+        inferred_type = "unknown"
+        inferred_color = None
+        inferred_shape = None
+        inferred_material = None
+        inferred_features: List[str] = []
+        inferred_desc = "Không tìm thấy đặc trưng sản phẩm công nghệ từ hình ảnh."
 
         if any(k in fn_lower for k in ["headphone", "tai_nghe", "earphone", "audio-01", "audio-03", "headset"]):
             inferred_type = "headphone"
+            inferred_color = "black"
             inferred_shape = "over-ear"
+            inferred_material = "plastic"
             inferred_features = ["over-ear cushions", "adjustable headband"]
             inferred_desc = "Tai nghe chụp tai over-ear phong cách cổ điển màu đen"
         elif any(k in fn_lower for k in ["speaker", "loa", "vintage", "audio-02"]):
@@ -247,6 +286,7 @@ class ImageSearchService:
             inferred_desc = "Loa Bluetooth vỏ gỗ retro vintage dạng hộp chữ nhật"
         elif any(k in fn_lower for k in ["mic", "micro", "audio-04"]):
             inferred_type = "microphone"
+            inferred_color = "black"
             inferred_shape = "cylindrical desk mic"
             inferred_material = "metal"
             inferred_features = ["metal mesh", "desktop stand"]
@@ -262,6 +302,7 @@ class ImageSearchService:
             inferred_type = "mouse"
             inferred_color = "dark gray"
             inferred_shape = "vertical ergonomic"
+            inferred_material = "plastic"
             inferred_features = ["ergonomic vertical angle", "thumb rest"]
             inferred_desc = "Chuột không dây công thái học cầm dọc chống mỏi cổ tay"
         elif any(k in fn_lower for k in ["lamp", "den", "smart-01"]):
@@ -275,12 +316,14 @@ class ImageSearchService:
             inferred_type = "charger"
             inferred_color = "matte gray"
             inferred_shape = "cube robot figurine"
+            inferred_material = "plastic"
             inferred_features = ["robot face led", "usb type c ports"]
             inferred_desc = "Củ sạc nhanh GaN hình robot mini tí hon"
         elif any(k in fn_lower for k in ["gamepad", "tay_cam", "controller", "game-03"]):
             inferred_type = "game_controller"
             inferred_color = "black"
             inferred_shape = "ergonomic console gamepad"
+            inferred_material = "plastic"
             inferred_features = ["dual analog sticks", "d-pad"]
             inferred_desc = "Tay cầm chơi game không dây cần Hall Effect"
 
@@ -293,7 +336,7 @@ class ImageSearchService:
             description=inferred_desc
         )
         logger.info(f"[IMAGE_SEARCH] Using heuristic fallback features: {features.product_type}")
-        return features, True
+        return features, True, False, api_error_detail
 
     def classify_relationship(
         self,
@@ -364,7 +407,7 @@ class ImageSearchService:
         """
         Full Image Search Pipeline:
         1. Validate uploaded image.
-        2. Extract query visual features once.
+        2. Extract query visual features once (with Quota & Error Guard).
         3. Retrieve candidates from ChromaDB visual index.
         4. Guard with SQLite: read authoritative product data (price, stock, status).
         5. Classify relationship (MATCH, SIMILAR, RELATED, NONE).
@@ -376,9 +419,23 @@ class ImageSearchService:
         mime_type = self.validate_image_file(image_bytes, filename, content_type)
 
         # 2. Extract query visual features (single call)
-        query_features, is_fallback = self.extract_query_visual_features(image_bytes, mime_type, filename)
+        query_features, is_fallback, is_quota_exceeded, error_msg = self.extract_query_visual_features(image_bytes, mime_type, filename)
 
-        # 2b. Non-Product Guard: nếu ảnh không phải sản phẩm → return early, không search
+        # 2a. Quota Exceeded Guard: Nếu hết quota AI -> Dừng ngay, KHÔNG hiển thị sản phẩm ngẫu nhiên
+        if is_quota_exceeded:
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+            logger.warning(f"[IMAGE_SEARCH] Quota exceeded - aborting search and returning empty results: {error_msg}")
+            return ImageSearchResponse(
+                query_features=query_features,
+                results=[],
+                total_candidates_found=0,
+                execution_time_ms=elapsed_ms,
+                is_fallback=True,
+                is_quota_exceeded=True,
+                error_message=error_msg or "Hạn ngạch AI Gemini (429 Quota Exceeded) đã vượt mức giới hạn. Hệ thống tạm dừng tìm kiếm để tránh sai lệch thông tin."
+            )
+
+        # 2b. Non-Product Guard: nếu ảnh không phải sản phẩm hoặc unknown -> return early, không search
         non_product, np_reason = self.is_non_product_image(query_features)
         if non_product:
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
@@ -390,8 +447,11 @@ class ImageSearchService:
                 execution_time_ms=elapsed_ms,
                 is_fallback=is_fallback,
                 is_non_product=True,
-                non_product_reason=np_reason
+                non_product_reason=np_reason,
+                is_quota_exceeded=False,
+                error_message=error_msg
             )
+
 
         # 3. Build query representation & search ChromaDB candidates
         query_text = (

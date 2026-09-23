@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.rbac import get_current_user, require_roles, get_customer_id_for_user
-from app.schemas.order import OrderCreate, OrderResponse, OrderItemResponse
+from app.schemas.order import OrderCreate, OrderResponse, OrderItemResponse, RejectOrderRequest, ForceActionRequest
 from app.services.inventory_service import InventoryService
 
 router = APIRouter(prefix="/orders", tags=["Orders & POS"])
@@ -13,7 +13,7 @@ class CancelOrderRequest(BaseModel):
 
 @router.get("", response_model=List[OrderResponse])
 def get_orders(
-    status: Optional[str] = Query(None, description="Lọc theo trạng thái: completed, cancelled"),
+    status: Optional[str] = Query(None, description="Lọc theo trạng thái: pending, admin_approved, processing, completed, rejected, cancelled"),
     search: Optional[str] = Query(None, description="Tìm theo mã đơn hàng hoặc tên khách hàng"),
     start_date: Optional[str] = Query(None, description="Từ ngày (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="Đến ngày (YYYY-MM-DD)"),
@@ -29,7 +29,10 @@ def get_orders(
         query = """
             SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
                    o.user_id, u.full_name as user_name, o.total_amount, o.discount_amount,
-                   o.final_amount, o.payment_method, o.payment_status, o.status, o.note, o.created_at
+                   o.final_amount, o.payment_method, o.payment_status, o.status, o.note,
+                   o.approved_by, o.approved_at, o.processed_by, o.processed_at,
+                   o.rejected_by, o.rejected_at, o.rejection_reason,
+                   o.created_at
             FROM orders o
             LEFT JOIN customers c ON o.customer_id = c.id
             LEFT JOIN users u ON o.user_id = u.id
@@ -48,8 +51,14 @@ def get_orders(
                 params.append(current_user["id"])
 
         if status:
-            query += " AND o.status = ?"
-            params.append(status)
+            if "," in status:
+                stat_list = [s.strip() for s in status.split(",") if s.strip()]
+                placeholders = ",".join("?" for _ in stat_list)
+                query += f" AND o.status IN ({placeholders})"
+                params.extend(stat_list)
+            else:
+                query += " AND o.status = ?"
+                params.append(status)
 
         if search:
             query += " AND (o.order_code LIKE ? OR c.name LIKE ? OR c.phone LIKE ?)"
@@ -82,6 +91,72 @@ def get_orders(
 
         return orders
 
+@router.get("/workflow-counts")
+def get_workflow_counts(current_user: dict = Depends(get_current_user)):
+    """
+    Trả về số lượng đơn hàng theo từng trạng thái phục vụ các chỉ số luồng vận hành (Phase 13F):
+    - Admin / SuperAdmin / Manager: pending_count, approved_count, processing_count
+    - Staff: approved_count, processing_count
+    - Customer: my_pending_count, my_processing_count (Chống IDOR - chỉ tính đơn của chính mình)
+    """
+    user_role = current_user.get("role")
+    with get_db() as conn:
+        cursor = conn.cursor()
+
+        if user_role in ("admin", "superadmin", "manager"):
+            cursor.execute("""
+                SELECT status, COUNT(*) as cnt
+                FROM orders
+                WHERE status IN ('pending', 'admin_approved', 'processing')
+                GROUP BY status
+            """)
+            counts = {row["status"]: row["cnt"] for row in cursor.fetchall()}
+            return {
+                "pending_count": counts.get("pending", 0),
+                "approved_count": counts.get("admin_approved", 0),
+                "processing_count": counts.get("processing", 0),
+            }
+
+        elif user_role == "staff":
+            cursor.execute("""
+                SELECT status, COUNT(*) as cnt
+                FROM orders
+                WHERE status IN ('admin_approved', 'processing')
+                GROUP BY status
+            """)
+            counts = {row["status"]: row["cnt"] for row in cursor.fetchall()}
+            return {
+                "approved_count": counts.get("admin_approved", 0),
+                "processing_count": counts.get("processing", 0),
+            }
+
+        elif user_role == "customer":
+            own_customer_id = get_customer_id_for_user(conn, current_user)
+            if own_customer_id:
+                cursor.execute("""
+                    SELECT status, COUNT(*) as cnt
+                    FROM orders
+                    WHERE (user_id = ? OR customer_id = ?)
+                      AND status IN ('pending', 'admin_approved', 'processing')
+                    GROUP BY status
+                """, (current_user["id"], own_customer_id))
+            else:
+                cursor.execute("""
+                    SELECT status, COUNT(*) as cnt
+                    FROM orders
+                    WHERE user_id = ?
+                      AND status IN ('pending', 'admin_approved', 'processing')
+                    GROUP BY status
+                """, (current_user["id"],))
+
+            counts = {row["status"]: row["cnt"] for row in cursor.fetchall()}
+            return {
+                "my_pending_count": counts.get("pending", 0),
+                "my_processing_count": counts.get("processing", 0),
+            }
+
+        return {}
+
 @router.get("/{order_id}", response_model=OrderResponse)
 def get_order_detail(order_id: int, current_user: dict = Depends(get_current_user)):
     """
@@ -94,7 +169,10 @@ def get_order_detail(order_id: int, current_user: dict = Depends(get_current_use
         cursor.execute(
             """SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
                       o.user_id, u.full_name as user_name, o.total_amount, o.discount_amount,
-                      o.final_amount, o.payment_method, o.payment_status, o.status, o.note, o.created_at
+                      o.final_amount, o.payment_method, o.payment_status, o.status, o.note,
+                      o.approved_by, o.approved_at, o.processed_by, o.processed_at,
+                      o.rejected_by, o.rejected_at, o.rejection_reason,
+                      o.created_at
                FROM orders o
                LEFT JOIN customers c ON o.customer_id = c.id
                LEFT JOIN users u ON o.user_id = u.id
@@ -135,12 +213,15 @@ def create_order(order_in: OrderCreate, current_user: dict = Depends(get_current
     """
     Tạo hóa đơn bán hàng POS mới (Atomic Transaction):
     - Khách hàng (Customer): không được mạo danh customer_id của người khác (Anti-IDOR).
-    - Tự động trừ tồn kho
+    - Đơn do Customer đặt từ xa bắt buộc khởi tạo ở trạng thái PENDING.
+    - Đơn do Staff / Admin / SuperAdmin lập tại quầy POS mặc định COMPLETED.
+    - Tự động trừ tồn kho (giữ chỗ)
     - Ghi log xuất nhập tồn
-    - Cập nhật tổng chi tiêu của khách
+    - Cập nhật tổng chi tiêu của khách nếu completed
     - Rollback toàn bộ nếu có lỗi hoặc không đủ tồn kho
     """
-    if current_user.get("role") == "customer":
+    user_role = current_user.get("role")
+    if user_role == "customer":
         with get_db() as conn:
             own_customer_id = get_customer_id_for_user(conn, current_user)
             if order_in.customer_id and own_customer_id and order_in.customer_id != own_customer_id:
@@ -150,8 +231,70 @@ def create_order(order_in: OrderCreate, current_user: dict = Depends(get_current
                 )
             if not order_in.customer_id and own_customer_id:
                 order_in.customer_id = own_customer_id
+        order_status = "pending"
+    else:
+        order_status = order_in.status or "completed"
 
-    return InventoryService.create_order(order_in, user_id=current_user["id"])
+    return InventoryService.create_order(order_in, user_id=current_user["id"], status=order_status)
+
+@router.post("/{order_id}/approve", response_model=OrderResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+def approve_order(
+    order_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Duyệt đơn hàng PENDING (Admin, SuperAdmin only):
+    - Bắt buộc đơn hàng phải ở trạng thái PENDING (nếu không -> 400 Bad Request)
+    - Chuyển trạng thái sang ADMIN_APPROVED
+    - Ghi nhận approved_by và approved_at
+    """
+    return InventoryService.approve_order(order_id, user_id=current_user["id"])
+
+@router.post("/{order_id}/reject", response_model=OrderResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+def reject_order(
+    order_id: int,
+    reject_in: Optional[RejectOrderRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Từ chối đơn hàng PENDING (Admin, SuperAdmin only):
+    - Bắt buộc đơn hàng phải ở trạng thái PENDING (nếu không -> 400 Bad Request)
+    - Nhận body { reason: "..." }
+    - Chuyển trạng thái sang REJECTED
+    - Ghi nhận rejected_by, rejected_at, rejection_reason
+    - Hoàn trả số lượng tồn kho tự động trong SQLite Atomic Transaction (return_cancel)
+    """
+    reason = reject_in.reason if reject_in and reject_in.reason else "Đơn hàng bị Admin từ chối"
+    return InventoryService.reject_order(order_id, user_id=current_user["id"], reason=reason)
+
+@router.post("/{order_id}/process", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+def process_order(
+    order_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Staff/Admin nhận xử lý đơn hàng đã được Admin duyệt:
+    - Nếu đơn đang PENDING -> Trả về 400 Bad Request ("Đơn hàng chưa được Admin duyệt")
+    - Bắt buộc trạng thái hiện tại là ADMIN_APPROVED
+    - Chuyển trạng thái sang PROCESSING
+    - Ghi nhận processed_by, processed_at
+    """
+    return InventoryService.process_order(order_id, user_id=current_user["id"])
+
+@router.post("/{order_id}/complete", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+def complete_order(
+    order_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Staff/Admin hoàn tất đơn hàng:
+    - Bắt buộc trạng thái hiện tại là PROCESSING hoặc ADMIN_APPROVED
+    - Nếu đơn đang PENDING -> Trả về 400 Bad Request
+    - Chuyển trạng thái sang COMPLETED
+    - Cập nhật tổng chi tiêu của khách hàng (total_spent)
+    - Doanh thu đơn hàng sẽ được tính vào báo cáo doanh thu thực tế
+    """
+    return InventoryService.complete_order(order_id, user_id=current_user["id"])
 
 @router.post("/{order_id}/cancel", dependencies=[Depends(require_roles("admin", "superadmin"))])
 def cancel_order(
@@ -167,3 +310,52 @@ def cancel_order(
     """
     reason = cancel_in.reason if cancel_in else None
     return InventoryService.cancel_order(order_id, user_id=current_user["id"], cancel_reason=reason)
+
+class CustomerCancelRequest(BaseModel):
+    reason: Optional[str] = "Khách hàng tự hủy đơn online"
+
+@router.post("/{order_id}/customer-cancel", response_model=OrderResponse, dependencies=[Depends(require_roles("customer"))])
+def customer_cancel_order(
+    order_id: int,
+    cancel_in: Optional[CustomerCancelRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Khách hàng (Customer) tự hủy đơn hàng online (Phase 13D):
+    - Chỉ cho phép Customer sở hữu đơn thực hiện (Anti-IDOR).
+    - Chỉ cho phép khi đơn hàng đang ở trạng thái PENDING.
+    - Nếu đơn đã duyệt (admin_approved, processing, completed) -> Trả lỗi 400 hướng dẫn liên hệ cửa hàng.
+    - Hoàn trả số lượng tồn kho tự động trong SQLite Atomic Transaction.
+    """
+    with get_db() as conn:
+        own_customer_id = get_customer_id_for_user(conn, current_user)
+
+    reason = cancel_in.reason if cancel_in and cancel_in.reason else "Khách hàng tự hủy đơn online"
+    return InventoryService.customer_cancel_order(
+        order_id=order_id,
+        user_id=current_user["id"],
+        own_customer_id=own_customer_id,
+        reason=reason
+    )
+
+@router.post("/{order_id}/force-action", response_model=OrderResponse, dependencies=[Depends(require_roles("superadmin"))])
+def superadmin_force_action(
+    order_id: int,
+    action_in: ForceActionRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Thao tác ngoại lệ trên đơn hàng (Chỉ dành riêng cho SuperAdmin - Chủ cửa hàng):
+    - Hỗ trợ: force_cancel, reopen_rejected, override_status.
+    - Bắt buộc nhập lý do can thiệp ngoại lệ.
+    - Tự động ghi vết kiểm toán vào order_audit_logs.
+    """
+    return InventoryService.superadmin_force_action(
+        order_id=order_id,
+        user_id=current_user["id"],
+        action=action_in.action,
+        reason=action_in.reason,
+        target_status=action_in.target_status
+    )
+
+

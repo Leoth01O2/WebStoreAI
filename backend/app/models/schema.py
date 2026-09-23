@@ -68,8 +68,15 @@ CREATE TABLE IF NOT EXISTS orders (
     final_amount REAL NOT NULL DEFAULT 0,
     payment_method TEXT NOT NULL DEFAULT 'cash' CHECK(payment_method IN ('cash', 'transfer', 'card')),
     payment_status TEXT NOT NULL DEFAULT 'completed' CHECK(payment_status IN ('pending', 'paid', 'completed')),
-    status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed', 'cancelled')),
+    status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('pending', 'admin_approved', 'processing', 'completed', 'rejected', 'cancelled')),
     note TEXT,
+    approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at TIMESTAMP,
+    processed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    processed_at TIMESTAMP,
+    rejected_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    rejected_at TIMESTAMP,
+    rejection_reason TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -146,6 +153,18 @@ CREATE TABLE IF NOT EXISTS product_visual_metadata (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 12. Bảng Nhật ký thao tác ngoại lệ đơn hàng (Order Audit Logs - Phase 13E)
+CREATE TABLE IF NOT EXISTS order_audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    previous_status TEXT NOT NULL,
+    resulting_status TEXT NOT NULL,
+    performed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reason TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Tạo Index để tối ưu truy vấn
 CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
@@ -155,8 +174,10 @@ CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_product ON inventory_logs(product_id);
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_visual_metadata_product ON product_visual_metadata(product_id);
 CREATE INDEX IF NOT EXISTS idx_visual_metadata_type ON product_visual_metadata(product_type);
+CREATE INDEX IF NOT EXISTS idx_order_audit_order_id ON order_audit_logs(order_id);
 """
 
 def init_db():
@@ -180,6 +201,70 @@ def init_db():
             cursor.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'completed'")
             conn.commit()
             print("[DB Migration] Added column 'payment_status' to orders table.")
+
+        # PHASE 13A: Migration các cột workflow cho bảng orders nếu chưa có
+        cursor.execute("PRAGMA table_info(orders)")
+        order_cols = [row["name"] for row in cursor.fetchall()]
+        new_order_cols = {
+            "approved_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "approved_at": "TIMESTAMP",
+            "processed_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "processed_at": "TIMESTAMP",
+            "rejected_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "rejected_at": "TIMESTAMP",
+            "rejection_reason": "TEXT",
+        }
+        for col_name, col_def in new_order_cols.items():
+            if col_name not in order_cols:
+                cursor.execute(f"ALTER TABLE orders ADD COLUMN {col_name} {col_def}")
+                conn.commit()
+                print(f"[DB Migration] Added column '{col_name}' to orders table.")
+
+        # PHASE 13A: Nâng cấp ràng buộc CHECK(status) của bảng orders để hỗ trợ workflow đa bước
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'")
+        orders_sql_row = cursor.fetchone()
+        if orders_sql_row and "('completed', 'cancelled')" in orders_sql_row["sql"]:
+            print("[DB Migration] Upgrading orders table CHECK constraint to multi-state workflow...")
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute("BEGIN TRANSACTION")
+            
+            cursor.execute("PRAGMA table_info(orders)")
+            existing_cols = [r["name"] for r in cursor.fetchall()]
+            cols_str = ", ".join(existing_cols)
+            
+            conn.execute("""
+            CREATE TABLE orders_workflow_migrated (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_code TEXT UNIQUE NOT NULL,
+                customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                total_amount REAL NOT NULL DEFAULT 0,
+                discount_amount REAL NOT NULL DEFAULT 0,
+                final_amount REAL NOT NULL DEFAULT 0,
+                payment_method TEXT NOT NULL DEFAULT 'cash' CHECK(payment_method IN ('cash', 'transfer', 'card')),
+                payment_status TEXT NOT NULL DEFAULT 'completed' CHECK(payment_status IN ('pending', 'paid', 'completed')),
+                status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('pending', 'admin_approved', 'processing', 'completed', 'rejected', 'cancelled')),
+                note TEXT,
+                approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                approved_at TIMESTAMP,
+                processed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                processed_at TIMESTAMP,
+                rejected_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                rejected_at TIMESTAMP,
+                rejection_reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            
+            conn.execute(f"INSERT INTO orders_workflow_migrated ({cols_str}) SELECT {cols_str} FROM orders")
+            conn.execute("DROP TABLE orders")
+            conn.execute("ALTER TABLE orders_workflow_migrated RENAME TO orders")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(order_code)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
+            conn.execute("COMMIT")
+            conn.execute("PRAGMA foreign_keys = ON")
+            print("[DB Migration] Upgraded orders table CHECK constraint successfully.")
 
     print("[DB] Database schema initialized successfully.")
 

@@ -36,3 +36,21 @@ export const RoleBadge = ({ role }) => {
       return <Badge variant="muted">{role}</Badge>;
   }
 };
+
+export const ORDER_STATUS_CONFIG = {
+  pending: { label: 'Chờ duyệt', variant: 'amber' },
+  admin_approved: { label: 'Đã duyệt', variant: 'blue' },
+  processing: { label: 'Đang xử lý', variant: 'amber' },
+  completed: { label: 'Hoàn thành', variant: 'green' },
+  rejected: { label: 'Đã từ chối', variant: 'red' },
+  cancelled: { label: 'Đã hủy', variant: 'red' },
+};
+
+export const OrderStatusBadge = ({ status }) => {
+  const config = ORDER_STATUS_CONFIG[status] || {
+    label: status || 'Chưa xác định',
+    variant: 'muted',
+  };
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+};
+

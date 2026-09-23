@@ -86,67 +86,73 @@
 }
 
 /* ==========================================================================
-   LIGHT MODE — VINTAGE EDITORIAL / RETRO PRINT DESIGN SYSTEM
-   Base Tone: Aged Paper & Cream (#E6CB94)
-   Ink: Espresso, Burnt Sienna, Vintage Olive, Blueprint Navy, Red Wax Stamp
+   LIGHT MODE — CLEAN OFF-WHITE / COOL-NEUTRAL + VINTAGE ACCENT DESIGN SYSTEM
+   Base Tone: Cool-Neutral & Off-White (#F0F0F4 / #FAFAFC)
+   Accents: Restrained Vintage Terracotta, Burnt Amber, Forest Green & Blueprint Navy
    ========================================================================== */
 [data-theme="light"] {
-  /* Vintage Editorial / Aged Parchment Backgrounds (Anchored at #E6CB94) */
-  --bg-app: #e6cb94;           /* Requested cream / aged paper anchor */
-  --bg-surface: #dcbf84;       /* Aged paper navigation & headers */
-  --bg-panel: #eeddb7;         /* Warm parchment panel */
-  --bg-card: #f6ebd0;          /* High contrast antique document sheet */
-  --bg-card-hover: #faeed4;    /* Pressed bright cream */
-  --bg-input: #fbf6e8;         /* Ivory ledger paper for crystal clear input contrast */
-  --bg-table-header: #d9be85;  /* Old ledger table header */
-  --bg-table-alt: #ebd8b0;     /* Alternating ledger row */
+  /* Clean Off-White & Cool-Neutral Backgrounds */
+  --bg-app: #F0F0F4;           /* Off-white / cool neutral main page background */
+  --bg-surface: #FAFAFC;       /* Clean neutral navbar, drawer & header surface */
+  --bg-panel: #F4F4F7;         /* Secondary neutral panel & sidebar */
+  --bg-card: #FAFAFC;          /* Clean white card surface */
+  --bg-card-hover: #FFFFFF;    /* Crisp bright hover state */
+  --bg-input: #FFFFFF;         /* Crisp white input background for high contrast */
+  --bg-table-header: #E7E7EC;  /* Muted cool-neutral table header */
+  --bg-table-alt: #F4F4F7;     /* Alternating row subtle surface */
 
-  /* Borders & Ruled Lines (Old Print / Engraved feeling) */
-  --border-subtle: #cbb281;    /* Faint print ruler */
-  --border-default: #a88950;   /* Classic print border */
-  --border-highlight: #7c5e2d; /* Heavy stamped border */
-  --border-focus: #9c5112;     /* Burnt terracotta ink */
+  /* Neutral Borders & Architectural Rulers */
+  --border-subtle: #D2D2D8;    /* Subtle separation border */
+  --border-default: #B8B8C0;   /* Primary structural border */
+  --border-highlight: #9898A2; /* Defined border highlight */
+  --border-focus: #b45309;     /* Restrained vintage burnt amber accent on focus */
 
-  /* Vintage Print / Letterpress Ink Palette */
-  --amber-primary: #9c5112;    /* Burnt sienna / terracotta press ink */
-  --amber-light: #b8681d;
-  --amber-dark: #743606;
-  --amber-glow: rgba(156, 81, 18, 0.2);
+  /* Restrained Vintage Print & Semantic Accent Palette (10% Accent) */
+  --amber-primary: #b45309;    /* Restrained vintage terracotta / burnt orange */
+  --amber-light: #d97706;      /* Lighter accent */
+  --amber-dark: #78350f;       /* Deep rich sienna */
+  --amber-glow: rgba(180, 83, 9, 0.18);
 
-  --green-terminal: #236738;   /* Vintage olive seal / press forest green */
-  --green-light: #1e562f;
-  --green-dark: #144021;
-  --green-glow: rgba(35, 103, 56, 0.2);
+  --green-terminal: #15803d;   /* Semantic success green */
+  --green-light: #16a34a;
+  --green-dark: #14532d;
+  --green-glow: rgba(21, 128, 61, 0.18);
 
-  --blue-cyber: #215282;       /* Classic fountain pen navy */
-  --blue-light: #19416a;
-  --blue-dark: #122f4e;
-  --blue-glow: rgba(33, 82, 130, 0.2);
+  --blue-cyber: #1d4ed8;       /* Classic blueprint navy */
+  --blue-light: #2563eb;
+  --blue-dark: #1e3a8a;
+  --blue-glow: rgba(29, 78, 216, 0.18);
 
-  --red-alert: #a82b24;        /* Crimson sealing wax / editor red stamp */
-  --red-light: #8b201a;
-  --red-dark: #6e1712;
-  --red-glow: rgba(168, 43, 36, 0.2);
+  --red-alert: #dc2626;        /* Semantic alert / danger red */
+  --red-light: #ef4444;
+  --red-dark: #991b1b;
+  --red-glow: rgba(220, 38, 38, 0.18);
 
-  --purple-neon: #673ab7;      /* Vintage typewriter violet ribbon */
-  --teal-matrix: #1b6563;      /* Patina copper / aged teal */
+  --purple-neon: #7c3aed;      /* Accent violet */
+  --teal-matrix: #0f766e;      /* Accent teal / patina */
 
-  /* Editorial Typography Colors (Ink on Paper) */
-  --text-main: #1e1309;        /* Espresso black letterpress ink */
-  --text-primary: #2b1b0e;     /* Rich dark ink */
-  --text-secondary: #5f452d;   /* Warm sepia caption ink */
-  --text-muted: #856a4e;       /* Faded pencil / muted rule note */
-  --text-inverted: #fbf6e8;    /* Ivory text for dark ink buttons */
+  /* High-Contrast Cool-Neutral Typography */
+  --text-main: #242428;        /* Primary crisp text */
+  --text-primary: #242428;     /* Primary crisp text */
+  --text-secondary: #68686F;   /* Secondary descriptive text */
+  --text-muted: #85858C;       /* Muted text / caption */
+  --text-inverted: #FFFFFF;    /* Pure white on dark/accent buttons */
 
-  /* Mechanical Shadows for Pressed Paper */
-  --shadow-press: 1px 1px 0px rgba(66, 44, 18, 0.5);
-  --shadow-retro: 2px 2px 0px rgba(66, 44, 18, 0.35);
-  --shadow-retro-lg: 4px 4px 0px rgba(66, 44, 18, 0.4);
-  --shadow-beveled: inset 1px 1px 0px rgba(255, 255, 255, 0.6), inset -1px -1px 0px rgba(66, 44, 18, 0.25);
+  /* Crisp Mechanical Shadows for Clean Paper */
+  --shadow-press: 1px 1px 0px rgba(0, 0, 0, 0.12);
+  --shadow-retro: 2px 2px 0px rgba(0, 0, 0, 0.08);
+  --shadow-retro-lg: 4px 4px 0px rgba(0, 0, 0, 0.1);
+  --shadow-beveled: inset 1px 1px 0px rgba(255, 255, 255, 0.9), inset -1px -1px 0px rgba(0, 0, 0, 0.05);
+
+  /* Surface & Border Target Palette Aliases */
+  --surface-primary: #FAFAFC;
+  --surface-secondary: #F4F4F7;
+  --surface-muted: #E7E7EC;
+  --border-primary: #B8B8C0;
 
   /* Overlays */
-  --overlay-bg: rgba(45, 31, 17, 0.72);
-  --overlay-dim: rgba(54, 38, 22, 0.65);
+  --overlay-bg: rgba(20, 20, 25, 0.55);
+  --overlay-dim: rgba(20, 20, 25, 0.4);
 }
 
 /* Base Reset & Typography */
@@ -189,11 +195,11 @@ body::before {
   opacity: 0.45;
 }
 
-/* Vintage Paper Texture & Fine Ledger Rules in Light Mode */
+/* Clean Blueprint/Grid Ruler in Light Mode */
 [data-theme="light"] body::before {
-  background: linear-gradient(rgba(120, 80, 40, 0.03) 50%, rgba(0, 0, 0, 0.03) 50%), linear-gradient(90deg, rgba(120, 80, 40, 0.02) 1px, transparent 1px);
-  background-size: 100% 4px, 12px 100%;
-  opacity: 0.35;
+  background: linear-gradient(rgba(0, 0, 0, 0.015) 50%, transparent 50%), linear-gradient(90deg, rgba(0, 0, 0, 0.015) 1px, transparent 1px);
+  background-size: 100% 4px, 16px 100%;
+  opacity: 0.2;
 }
 
 #root {
@@ -485,35 +491,48 @@ body::before {
   border-color: var(--border-subtle);
 }
 
-/* Light Mode Badges - Rich Print Ink Tones with High Contrast */
+/* Light Mode Badges - Refined Semantic Print Badges */
 [data-theme="light"] .badge-amber {
-  background: rgba(156, 81, 18, 0.12);
-  color: #743606;
-  border-color: rgba(156, 81, 18, 0.4);
+  background: rgba(180, 83, 9, 0.1);
+  color: #78350f;
+  border-color: rgba(180, 83, 9, 0.35);
 }
 
 [data-theme="light"] .badge-green {
-  background: rgba(35, 103, 56, 0.12);
-  color: #144021;
-  border-color: rgba(35, 103, 56, 0.4);
+  background: rgba(21, 128, 61, 0.1);
+  color: #14532d;
+  border-color: rgba(21, 128, 61, 0.35);
 }
 
 [data-theme="light"] .badge-blue {
-  background: rgba(33, 82, 130, 0.12);
-  color: #122f4e;
-  border-color: rgba(33, 82, 130, 0.4);
+  background: rgba(29, 78, 216, 0.1);
+  color: #1e3a8a;
+  border-color: rgba(29, 78, 216, 0.35);
 }
 
 [data-theme="light"] .badge-red {
-  background: rgba(168, 43, 36, 0.12);
-  color: #6e1712;
-  border-color: rgba(168, 43, 36, 0.4);
+  background: rgba(220, 38, 38, 0.1);
+  color: #991b1b;
+  border-color: rgba(220, 38, 38, 0.35);
 }
 
 [data-theme="light"] .badge-muted {
-  background: rgba(133, 106, 78, 0.16);
-  color: #3b2816;
+  background: rgba(133, 133, 140, 0.14);
+  color: #383840;
   border-color: var(--border-subtle);
+}
+
+/* Light Mode Form Controls - Crisp Off-White */
+[data-theme="light"] .form-control {
+  background: #FFFFFF;
+  color: var(--text-primary);
+  border-color: var(--border-default);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .form-control:focus {
+  border-color: var(--amber-primary);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 3px var(--amber-glow);
 }
 
 /* Retro Data Table */
@@ -697,32 +716,32 @@ body::before {
   color: var(--amber-light);
 }
 
-/* Light Mode Toasts - Clear High Contrast Ink */
+/* Light Mode Toasts - Clean Off-White Cards with Semantic Accent */
 [data-theme="light"] .toast {
   background: var(--bg-card);
   color: var(--text-primary);
   border-color: var(--border-default);
-  box-shadow: 0 4px 12px rgba(66, 44, 18, 0.15), var(--shadow-retro-lg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), var(--shadow-retro-lg);
 }
 
 [data-theme="light"] .toast-success {
   border-left: 4px solid var(--green-terminal);
-  color: #144021;
+  color: #14532d;
 }
 
 [data-theme="light"] .toast-error {
   border-left: 4px solid var(--red-alert);
-  color: #6e1712;
+  color: #991b1b;
 }
 
 [data-theme="light"] .toast-info {
   border-left: 4px solid var(--blue-cyber);
-  color: #122f4e;
+  color: #1e3a8a;
 }
 
 [data-theme="light"] .toast-warning {
   border-left: 4px solid var(--amber-primary);
-  color: #743606;
+  color: #78350f;
 }
 
 /* Theme Toggle Button */
@@ -778,28 +797,29 @@ body::before {
 
 /* "Xem chi tiết sản phẩm" overlay button on product card image */
 [data-theme="light"] .product-detail-overlay-btn {
-  background: rgba(230, 195, 148, 0.88) !important; /* Warm paper cream — readable on light card */
+  background: rgba(250, 250, 252, 0.92) !important;
   border-color: var(--border-default) !important;
-  color: var(--amber-dark) !important;
+  color: var(--text-primary) !important;
 }
 
 [data-theme="light"] .product-detail-overlay-btn:hover {
-  background: rgba(214, 175, 120, 0.95) !important;
+  background: #FFFFFF !important;
   color: var(--amber-primary) !important;
+  border-color: var(--amber-primary) !important;
 }
 
 /* AI Q&A Chat Bubble — AI (StoreFlow AI) message */
 [data-theme="light"] .ai-chat-bubble--ai {
-  background: var(--bg-panel) !important;   /* Warm parchment #eeddb7 — paper sheet */
-  border-color: var(--border-default) !important;
-  color: var(--text-primary) !important;    /* Espresso ink — high contrast */
+  background: #FFFFFF !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
 }
 
 /* AI Q&A Chat Bubble — User message */
 [data-theme="light"] .ai-chat-bubble--user {
-  background: rgba(156, 81, 18, 0.1) !important; /* Light terracotta tint */
-  border-color: rgba(156, 81, 18, 0.35) !important;
-  color: var(--amber-dark) !important;
+  background: #F4F4F7 !important;
+  border-color: var(--border-default) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Navbar & Header */
@@ -1874,9 +1894,9 @@ body::before {
 
 [data-theme="light"] .markdown-content :not(pre) > code,
 [data-theme="light"] .markdown-inline-code {
-  background: rgba(156, 81, 18, 0.08);
-  color: var(--amber-dark);
-  border-color: rgba(156, 81, 18, 0.25);
+  background: #E7E7EC;
+  color: var(--amber-primary);
+  border-color: var(--border-subtle);
 }
 
 /* Code Blocks */
@@ -1941,17 +1961,18 @@ pre.markdown-pre {
 }
 
 [data-theme="light"] .markdown-code-block {
-  background: #fbf6e8;
+  background: #FAFAFC;
   border-color: var(--border-default);
 }
 
 [data-theme="light"] .markdown-code-header {
-  background: rgba(156, 81, 18, 0.06);
+  background: #F4F4F7;
   border-bottom-color: var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 [data-theme="light"] pre.markdown-pre {
-  color: #2b1b0e;
+  color: var(--text-primary);
 }
 
 /* Markdown Tables */

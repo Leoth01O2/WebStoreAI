@@ -205,16 +205,44 @@ export const ordersAPI = {
     const queryString = query.toString();
     return request(`/orders${queryString ? `?${queryString}` : ''}`);
   },
+  getWorkflowCounts: () => request('/orders/workflow-counts'),
   getOrderDetail: (id) => request(`/orders/${id}`),
   createOrder: (orderData) =>
     request('/orders', {
       method: 'POST',
       body: JSON.stringify(orderData),
     }),
+  approveOrder: (id) =>
+    request(`/orders/${id}/approve`, {
+      method: 'POST',
+    }),
+  rejectOrder: (id, reason = 'Đơn hàng bị Admin từ chối') =>
+    request(`/orders/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  processOrder: (id) =>
+    request(`/orders/${id}/process`, {
+      method: 'POST',
+    }),
+  completeOrder: (id) =>
+    request(`/orders/${id}/complete`, {
+      method: 'POST',
+    }),
   cancelOrder: (id, reason = 'Khách yêu cầu hủy đơn') =>
     request(`/orders/${id}/cancel`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    }),
+  customerCancelOrder: (id, reason = 'Khách hàng tự hủy đơn') =>
+    request(`/orders/${id}/customer-cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  forceAction: (id, payload) =>
+    request(`/orders/${id}/force-action`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
 };
 

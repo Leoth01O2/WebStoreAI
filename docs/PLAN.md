@@ -1469,6 +1469,36 @@ Theo phản hồi trực tiếp từ Giảng viên hướng dẫn:
   - Chạy script kiểm tra schema và đọc lại các đơn hàng hiện có.
   - Chạy `pytest backend/tests/test_business_api.py` đảm bảo không có regression.
 
+- [x] **KẾT QUẢ THỰC HIỆN PHASE 13A: Order Multi-State Workflow Data Model & Migration** *(Đã hoàn thành 100%)*
+  - **Trạng thái**: COMPLETED
+  - **Thời điểm hoàn thành**: 2026-09-23 21:40 (Giờ hệ thống)
+  - **Những file đã tạo/sửa đổi**:
+    + `backend/app/models/schema.py`:
+      * Cập nhật `SCHEMA_SQL` mở rộng `CHECK(status IN ('pending', 'admin_approved', 'processing', 'completed', 'rejected', 'cancelled'))`.
+      * Bổ sung 7 cột truy vết có điều kiện: `approved_by`, `approved_at`, `processed_by`, `processed_at`, `rejected_by`, `rejected_at`, `rejection_reason`.
+      * Thêm index `idx_orders_status ON orders(status)`.
+      * Bổ sung migration an toàn và idempotent trong `init_db()`: tự động kiểm tra `PRAGMA table_info` và thêm cột thiếu, đồng thời nâng cấp ràng buộc CHECK constraint của bảng `orders` cũ mà không làm thất thoát dữ liệu lịch sử.
+    + `backend/app/schemas/order.py`:
+      * Khai báo `ORDER_STATUSES` và kiểu `OrderStatus = Literal[...]` gồm 6 trạng thái.
+      * Mở rộng `OrderResponse` chứa đầy đủ 7 trường truy vết và `status`.
+      * Cập nhật `OrderCreate` hỗ trợ trường `status`.
+    + `backend/app/api/v1/orders.py`:
+      * Cập nhật `SELECT` query trong `get_orders` và `get_order_detail` để trích xuất đầy đủ 7 trường truy vết workflow.
+    + `backend/app/services/inventory_service.py`:
+      * Bổ sung các giá trị mặc định cho 7 trường truy vết trong dictionary trả về của `create_order`.
+    + `backend/tests/test_order_workflow_model.py`:
+      * Tạo mới bộ kiểm thử toàn diện 6 bài test: kiểm tra sự tồn tại của các cột, kiểm tra lưu trữ thành công cả 6 trạng thái workflow, kiểm tra CHECK constraint chặn trạng thái bất hợp lệ, kiểm tra API đọc đơn hàng lịch sử không có regression, kiểm tra validate Pydantic model, và kiểm tra tính idempotent của `init_db()`.
+  - **Những gì được bảo tồn nguyên vẹn**:
+    + Toàn bộ 167 đơn hàng cũ và 168 chi tiết đơn hàng lịch sử được giữ nguyên vẹn 100%, không mất mát hoặc sai lệch.
+    + Khóa ngoại và quan hệ giữa các bảng không có bất kỳ lỗi nào (`PRAGMA foreign_key_check` trả về rỗng).
+    + Logic tính doanh thu (`status = 'completed'`) tiếp tục được bảo toàn.
+    + Chưa can thiệp vào logic duyệt đơn (để dành cho Phase 13B).
+  - **Kiểm thử cục bộ đã thực hiện**:
+    + `pytest backend/tests/test_order_workflow_model.py -v`: 6 passed / 6 tests (100% pass).
+    + `pytest backend/tests/test_business_api.py -v`: 9 passed / 9 tests (100% pass).
+  - **Hạn chế đã biết**:
+    + Trong phạm vi Phase 13A, mô hình dữ liệu và migration đã hoàn tất 100%. Các API duyệt đơn (`approve`), từ chối (`reject`) và hoàn trả kho tương ứng sẽ được triển khai ở Phase 13B.
+
 ---
 
 #### PHASE 13B: Admin Order Approval & Rejection Workflow Engine
@@ -1505,6 +1535,37 @@ Theo phản hồi trực tiếp từ Giảng viên hướng dẫn:
 - **Cách kiểm tra**:
   - Viết bộ test tự động Pytest bao phủ toàn bộ các kịch bản: Customer tạo đơn -> Staff cố duyệt (403) -> Staff cố xử lý (400) -> Admin duyệt (200) -> Admin từ chối hoàn kho thành công.
 
+- [x] **KẾT QUẢ THỰC HIỆN PHASE 13B: Admin Order Approval & Rejection Workflow Engine** *(Đã hoàn thành 100%)*
+  - **Trạng thái**: COMPLETED
+  - **Thời điểm hoàn thành**: 2026-09-23 22:30 (Giờ hệ thống)
+  - **Những file đã tạo/sửa đổi**:
+    + `backend/app/schemas/order.py`:
+      * Bổ sung Pydantic schema `RejectOrderRequest(reason: Optional[str])`.
+    + `backend/app/services/inventory_service.py`:
+      * Bổ sung helper `_get_order_detail_by_id(cursor, order_id)`.
+      * Cập nhật `create_order` hỗ trợ tham số `status`. Nếu đơn hàng `completed` mới tăng `total_spent`.
+      * Triển khai `approve_order(order_id, user_id)`: Atomic transaction kiểm tra bắt buộc trạng thái `pending`, cập nhật sang `admin_approved`, ghi nhận `approved_by` và `approved_at`.
+      * Triển khai `reject_order(order_id, user_id, reason)`: Atomic transaction kiểm tra bắt buộc trạng thái `pending`, hoàn trả tồn kho sản phẩm tự động, ghi log xuất nhập tồn `return_cancel`, cập nhật sang `rejected`, ghi nhận `rejected_by`, `rejected_at`, và `rejection_reason`.
+      * Triển khai `process_order(order_id, user_id)`: Kiểm tra chặn đơn `pending` trả về 400 "Đơn hàng chưa được Admin duyệt", bắt buộc đơn phải là `admin_approved` rồi chuyển sang `processing`.
+    + `backend/app/api/v1/orders.py`:
+      * Cập nhật `create_order`: Ép buộc vai trò `customer` đặt đơn luôn khởi tạo ở trạng thái `pending`, ngăn chặn mạo danh hoặc tự duyệt `completed`.
+      * Triển khai endpoint `POST /api/v1/orders/{id}/approve` (Quyền `admin`, `superadmin`).
+      * Triển khai endpoint `POST /api/v1/orders/{id}/reject` (Quyền `admin`, `superadmin`).
+      * Triển khai endpoint `POST /api/v1/orders/{id}/process` (Quyền `staff`, `admin`, `superadmin`) với kiểm tra chặt chẽ chặn đơn `pending`.
+      * Cập nhật tham số truy vấn `status` trong `get_orders` hỗ trợ cả 6 trạng thái workflow.
+    + `backend/tests/test_phase13b_approval_workflow.py`:
+      * Tạo mới bộ kiểm thử toàn diện 7 bài test: Customer tạo đơn khởi tạo `pending`, Staff bị chặn 403 khi duyệt/từ chối, Staff bị chặn 400 khi xử lý đơn `pending`, Admin duyệt đơn thành công `admin_approved`, Admin từ chối đơn thành công và hoàn trả kho chính xác kèm log `return_cancel`, đơn POS lập trực tiếp tại quầy giữ nguyên `completed`, Customer bị chặn 403 khi gọi các endpoint quản lý.
+  - **Những gì được bảo tồn nguyên vẹn**:
+    + Đơn POS tại quầy tiếp tục hoàn tất ngay (`completed`).
+    + SQLite Source of Truth bảo đảm tính nhất quán và nguyên tử khi hoàn tồn kho (`BEGIN IMMEDIATE`).
+    + Không có file giao diện hay logic ngoài scope bị can thiệp.
+  - **Kiểm thử cục bộ đã thực hiện**:
+    + `pytest backend/tests/test_phase13b_approval_workflow.py -v`: 7 passed / 7 tests (100% pass).
+    + `pytest backend/tests/test_order_workflow_model.py tests/test_public_storefront_phase7.py -v`: 13 passed / 13 tests (100% pass).
+    + `pytest backend/tests/test_rbac_phase6.py -v`: 10 passed / 10 tests (100% pass).
+  - **Hạn chế đã biết**:
+    + Trong phạm vi Phase 13B, luồng duyệt/từ chối của Admin và chặn quyền của Staff đã hoàn thành 100% ở Backend. Luồng xử lý chi tiết của Staff (chuyển sang `completed` và cập nhật báo cáo doanh thu) sẽ được hoàn thiện ở Phase 13C.
+
 ---
 
 #### PHASE 13C: Staff Processing Workflow for Approved Orders
@@ -1534,6 +1595,27 @@ Theo phản hồi trực tiếp từ Giảng viên hướng dẫn:
   - Doanh thu phản ánh đúng các đơn đã hoàn tất.
 - **Cách kiểm tra**:
   - Viết test Pytest: Thử Staff process đơn PENDING (thất bại 400) -> Admin duyệt -> Staff process (thành công) -> Staff complete (thành công) -> Kiểm tra doanh thu tăng đúng giá trị đơn hàng.
+
+- [x] **KẾT QUẢ THỰC HIỆN PHASE 13C: Staff Processing Workflow for Approved Orders** *(Đã hoàn thành 100%)*
+  - **Trạng thái**: COMPLETED
+  - **Thời điểm hoàn thành**: 2026-09-23 22:40 (Giờ hệ thống)
+  - **Những file đã tạo/sửa đổi**:
+    + `backend/app/services/inventory_service.py`:
+      * Triển khai hàm `complete_order(order_id, user_id)`: Atomic transaction kiểm tra tính hợp lệ trạng thái (chặn đơn `pending`, chặn đơn `rejected`/`cancelled`), cho phép đơn `processing` hoặc `admin_approved` chuyển sang `completed`, cập nhật `processed_by` và `processed_at`, đồng thời cộng dồn `total_spent` cho khách hàng.
+    + `backend/app/api/v1/orders.py`:
+      * Bổ sung endpoint `POST /api/v1/orders/{id}/complete` (Quyền `staff`, `admin`, `superadmin`).
+      * Hỗ trợ bộ lọc `status` trong `GET /api/v1/orders` để Staff dễ dàng lọc danh sách đơn `admin_approved` cần xử lý.
+    + `backend/tests/test_phase13c_staff_processing.py`:
+      * Tạo bộ kiểm thử tự động toàn diện 5 bài test: chu trình đầy đủ `pending` -> `admin_approved` -> `processing` -> `completed` và kiểm tra doanh thu trong ReportService chỉ tăng đúng khi đơn đạt `completed`; Staff lọc đơn `status=admin_approved`; hoàn tất trực tiếp từ `admin_approved`; chặn chuyển đổi trạng thái bất hợp lệ (cố hoàn tất/xử lý đơn `rejected`, `completed`); Customer bị chặn 403 khi gọi `/complete`.
+  - **Những gì được bảo tồn nguyên vẹn**:
+    + Báo cáo doanh thu chỉ tính các đơn có `status = 'completed'` qua SQLite Source of Truth.
+    + Staff tuyệt đối không tự duyệt đơn từ trạng thái `pending`.
+    + Đơn POS lập tại quầy giữ nguyên trạng thái `completed`.
+  - **Kiểm thử cục bộ đã thực hiện**:
+    + `pytest backend/tests/test_phase13c_staff_processing.py -v`: 5 passed / 5 tests (100% pass).
+    + `pytest backend/tests/test_order_workflow_model.py tests/test_phase13b_approval_workflow.py tests/test_phase13c_staff_processing.py -v`: 18 passed / 18 tests (100% pass).
+  - **Hạn chế đã biết**:
+    + Trong phạm vi Phase 13C, quy trình xử lý đơn hàng và ghi nhận doanh thu cho Staff đã hoàn tất 100% ở Backend. Giao diện theo dõi vòng đời đơn hàng và tính năng tự hủy đơn cho Customer sẽ được triển khai ở Phase 13D.
 
 ---
 
@@ -1568,6 +1650,35 @@ Theo phản hồi trực tiếp từ Giảng viên hướng dẫn:
 - **Cách kiểm tra**:
   - Test đăng nhập Customer: xem danh sách đơn, xem stepper trạng thái, thử hủy đơn PENDING thành công; thử xem đơn của Customer khác nhận 403.
 
+- [x] **KẾT QUẢ THỰC HIỆN PHASE 13D: Customer Order Status Lifecycle Tracking & Anti-IDOR** *(Đã hoàn thành 100%)*
+  - **Trạng thái**: COMPLETED
+  - **Thời điểm hoàn thành**: 2026-09-23 23:25 (Giờ hệ thống)
+  - **Những file đã tạo/sửa đổi**:
+    + `backend/app/services/inventory_service.py`:
+      * Triển khai hàm `customer_cancel_order(order_id, user_id, own_customer_id, reason)`: SQLite atomic transaction kiểm tra quyền sở hữu Anti-IDOR, chỉ cho phép hủy khi `status == 'pending'`, hoàn tồn kho chính xác (`return_cancel`), ghi nhận nhật ký kho và chặn hoàn tồn kho lặp lại (idempotency).
+    + `backend/app/api/v1/orders.py`:
+      * Bổ sung endpoint `POST /api/v1/orders/{order_id}/customer-cancel` có phân quyền `customer` và kiểm tra Anti-IDOR.
+      * Bảo đảm `GET /orders` và `GET /orders/{order_id}` chỉ trả về dữ liệu của chính Customer đang đăng nhập.
+    + `frontend/src/services/api.js`:
+      * Thêm hàm gọi API `ordersAPI.customerCancelOrder(id, reason)`.
+    + `frontend/src/pages/OrdersPage.jsx`:
+      * Tích hợp component **Order Lifecycle Stepper** hiển thị trực quan tiến trình 4 bước (`Chờ duyệt` -> `Đã duyệt` -> `Đang xử lý` -> `Hoàn thành`).
+      * Hiển thị cảnh báo đơn bị từ chối kèm `rejection_reason` hoặc đơn đã hủy.
+      * Bổ sung nút và modal xác nhận "Hủy đơn" chỉ hiển thị khi `status === 'pending'` cho role Customer.
+      * Tự động cập nhật tiêu đề trang `"ĐƠN HÀNG CỦA TÔI ({N} ĐƠN)"` cho Customer.
+    + `backend/tests/test_phase13d_customer_lifecycle.py`:
+      * Bộ kiểm thử tự động toàn diện 10 bài test bao phủ đầy đủ DoD: quyền xem đơn, chi tiết đơn, chặn 403 Anti-IDOR, hủy đơn pending, hoàn kho, chặn hủy lặp lại (idempotency), chặn hủy đơn đã duyệt/xử lý/hoàn tất, chặn hủy chéo đơn giữa các khách hàng.
+  - **Những gì được bảo tồn nguyên vẹn**:
+    + Không làm rò rỉ dữ liệu giữa các Customer.
+    + Không can thiệp hay làm ảnh hưởng workflow Phase 13A, 13B, 13C.
+    + Giữ nguyên giao diện retro và tính tương thích responsive.
+  - **Kiểm thử cục bộ đã thực hiện**:
+    + `pytest backend/tests/test_phase13d_customer_lifecycle.py -v`: 10 passed / 10 tests (100% pass).
+    + `pytest backend/tests/test_hotfix_order_status.py tests/test_phase13c_staff_processing.py tests/test_phase13b_approval_workflow.py -v`: 15 passed / 15 tests (100% pass).
+    + `npm run build`: Success (100% clean build).
+  - **Hạn chế còn lại**:
+    + Không có hạn chế trong scope Phase 13D. Quyền xử lý ngoại lệ cho SuperAdmin sẽ được triển khai ở Phase 13E.
+
 ---
 
 #### PHASE 13E: SuperAdmin Exception Handling & Management Segregation
@@ -1598,6 +1709,53 @@ Theo phản hồi trực tiếp từ Giảng viên hướng dẫn:
   - UI phân định rõ ràng các tính năng nâng cao giữa 2 cấp bậc quản trị.
 - **Cách kiểm tra**:
   - Pytest kiểm tra: Admin gọi force action bị 403, SuperAdmin gọi thành công; Admin gọi reports bị 403, SuperAdmin gọi thành công.
+
+- [x] **KẾT QUẢ THỰC HIỆN PHASE 13E: SuperAdmin Exception Handling & Management Segregation** *(Đã hoàn thành 100%)*
+  - **Trạng thái**: COMPLETED
+  - **Thời điểm hoàn thành**: 2026-09-23 23:40 (Giờ hệ thống)
+  - **Những file đã tạo/sửa đổi**:
+    + `backend/app/models/schema.py`:
+      * Khởi tạo bảng `order_audit_logs` (`id`, `order_id`, `action`, `previous_status`, `resulting_status`, `performed_by`, `reason`, `created_at`) kèm index `idx_order_audit_order_id` để lưu trữ nhật ký kiểm toán bất biến cho mọi thao tác ngoại lệ.
+    + `backend/app/schemas/order.py`:
+      * Bổ sung Pydantic schema `ForceActionRequest` kiểm soát chặt chẽ `action` (`force_cancel`, `reopen_rejected`, `override_status`), `reason` (bắt buộc, tối thiểu 5 ký tự) và `target_status`.
+    + `backend/app/services/inventory_service.py`:
+      * Hiện thực `InventoryService.superadmin_force_action`:
+        - `force_cancel`: Hoàn tồn kho an toàn trong transaction SQLite, tự động trừ `total_spent` của khách nếu đơn vốn đã `completed`, chặn hoàn tồn lặp lại (idempotent).
+        - `reopen_rejected`: Kiểm tra tồn kho trước khi mở lại đơn; tự động trừ tồn kho (`sale`) cho đơn được phục hồi về `pending`; từ chối với 400 nếu kho không còn đủ hàng.
+        - `override_status`: Kiểm soát chuyển trạng thái trong whitelist cho phép (`pending`, `admin_approved`, `processing`, `completed`), chặn ghi đè từ đơn đã hủy (`cancelled`) hoặc đã từ chối (`rejected`), đồng bộ hóa chỉ số tài chính `total_spent` của khách hàng một cách nhất quán.
+        - Tự động ghi chép `order_audit_logs` có cấu trúc và đính kèm nhật ký vào trường `note` của đơn hàng.
+    + `backend/app/api/v1/orders.py`:
+      * Bổ sung endpoint `POST /api/v1/orders/{order_id}/force-action` với bảo vệ phân quyền nghiêm ngặt `require_roles("superadmin")`. Toàn bộ các vai trò khác (`admin`, `staff`, `customer`) gọi vào đều nhận 403 Forbidden.
+    + `frontend/src/services/api.js`:
+      * Thêm hàm `ordersAPI.forceAction(id, payload)` phục vụ thao tác can thiệp ngoại lệ của SuperAdmin.
+    + `frontend/src/pages/OrdersPage.jsx`:
+      * Bổ sung khối giao diện chuyên biệt **"Thao tác ngoại lệ (SuperAdmin)"** trong modal chi tiết đơn hàng: Chỉ render khi người dùng đăng nhập với vai trò `superadmin` (hoàn toàn ẩn đối với `admin`, `staff`, `customer`).
+      * Hỗ trợ modal xác nhận can thiệp với ô nhập lý do bắt buộc và lựa chọn trạng thái đích khi ghi đè trạng thái.
+    + `backend/tests/test_phase13e_superadmin_exceptions.py`:
+      * Bộ kiểm thử tự động toàn diện 13 test case đáp ứng 100% Definition of Done (DoD):
+        1. Admin gọi force action nhận 403 Forbidden.
+        2. Staff gọi force action nhận 403 Forbidden.
+        3. Customer gọi force action nhận 403 Forbidden.
+        4. SuperAdmin gọi force_cancel thành công và hoàn tồn kho.
+        5. Idempotency: Không hoàn tồn kho hay tài chính 2 lần khi force_cancel lặp lại.
+        6. SuperAdmin gọi reopen_rejected khôi phục đơn về pending thành công.
+        7. reopen_rejected trừ tồn kho chính xác để giữ chỗ cho đơn được mở lại.
+        8. reopen_rejected bị chặn với HTTP 400 khi kho không đủ hàng.
+        9. override_status chuyển đổi pipeline hợp lệ thành công.
+        10. override_status chặn các chuyển đổi phi lý / nguy hiểm từ cancelled hoặc rejected.
+        11. Mọi force action đều sinh bản ghi kiểm toán cấu trúc trong `order_audit_logs`.
+        12. Admin gọi `/api/v1/reports/summary` nhận 403 Forbidden (bảo vệ doanh thu).
+        13. SuperAdmin gọi `/api/v1/reports/summary` nhận 200 OK kèm dữ liệu doanh thu.
+  - **Những gì được bảo tồn nguyên vẹn**:
+    + Giữ nguyên phân định trách nhiệm: Admin quản lý vận hành, duyệt/từ chối đơn nhưng không xem doanh thu.
+    + SuperAdmin độc quyền truy cập báo cáo doanh thu tài chính và xử lý ngoại lệ.
+    + Luồng đơn hàng chuẩn Phase 13A, 13B, 13C, 13D không bị thay đổi.
+  - **Kiểm thử cục bộ đã thực hiện**:
+    + `pytest backend/tests/test_phase13e_superadmin_exceptions.py -v`: 13 passed / 13 tests (100% pass).
+    + `pytest backend/tests/test_phase13d_customer_lifecycle.py tests/test_hotfix_order_status.py tests/test_phase13c_staff_processing.py tests/test_phase13b_approval_workflow.py -v`: 25 passed / 25 tests (100% pass).
+    + `npm run build`: Success (100% clean build).
+  - **Hạn chế còn lại**:
+    + Không có hạn chế trong scope Phase 13E. Các chỉ số thời gian thực và badge thông báo luồng xử lý sẽ được triển khai ở Phase 13F.
 
 ---
 
@@ -1636,6 +1794,47 @@ Theo phản hồi trực tiếp từ Giảng viên hướng dẫn:
   - Badge tự động cập nhật giảm/tăng ngay sau khi hoàn tất thao tác.
 - **Cách kiểm tra**:
   - Tạo một đơn hàng mới từ Customer -> Xác nhận Navbar của Admin nhảy badge "Đơn chờ duyệt: +1" -> Admin bấm Duyệt -> Badge Admin biến mất, Navbar của Staff hiện badge "Đơn cần xử lý: +1" -> Staff bấm hoàn tất -> Tất cả badge trở về 0.
+
+- [x] **KẾT QUẢ THỰC HIỆN PHASE 13F: Real-Time Workflow Indicators, Badges & Notifications** *(Đã hoàn thành 100%)*
+  - **Trạng thái**: COMPLETED
+  - **Thời điểm hoàn thành**: 2026-09-23 23:58 (Giờ hệ thống)
+  - **Những file đã tạo/sửa đổi**:
+    + `backend/app/api/v1/orders.py`:
+      * Bổ sung endpoint `GET /api/v1/orders/workflow-counts` đặt trước route động `/{order_id}` để tránh xung đột đường dẫn.
+      * Phân quyền theo role người gọi: Admin/SuperAdmin trả về `{ pending_count, approved_count, processing_count }`; Staff trả về `{ approved_count, processing_count }`; Customer trả về `{ my_pending_count, my_processing_count }` bảo vệ nghiêm ngặt Anti-IDOR.
+      * Nâng cấp bộ lọc `status` trong `get_orders` hỗ trợ danh sách trạng thái phân cách bằng dấu phẩy (vd: `cancelled,rejected`).
+    + `frontend/src/services/api.js`:
+      * Bổ sung các phương thức: `getWorkflowCounts`, `approveOrder`, `rejectOrder`, `processOrder`, `completeOrder`.
+    + `frontend/src/components/layout/Navbar.jsx`:
+      * Tích hợp lấy và cập nhật chỉ số đơn hàng theo chu kỳ 30s nhẹ nhàng và khi cửa sổ active (`window focus` / `document.visibilityState`).
+      * Lắng nghe sự kiện đồng bộ toàn cục `workflow-updated` để phản hồi tức thời ngay sau mỗi thao tác nghiệp vụ.
+      * Hiển thị badge nổi bật tại menu Đơn hàng:
+        - Admin: `Chờ duyệt: X` khi X > 0 (badge đỏ neon).
+        - SuperAdmin: `Chờ duyệt: X` khi X > 0 (badge đỏ neon).
+        - Staff: `Cần xử lý: Y` khi Y > 0 (badge xanh lá neon).
+        - Customer: `Z đơn hoạt động` khi có đơn chờ duyệt / đang xử lý.
+      * Đồng bộ hiển thị badge trên cả thanh điều hướng Desktop và Mobile Drawer Menu.
+    + `frontend/src/pages/OrdersPage.jsx`:
+      * Nút "Làm mới dữ liệu" tích hợp icon `RefreshCw` hiệu ứng xoay (spin-animation).
+      * Hệ thống Tab phân loại nhanh trực quan: `Tất cả` | `Chờ duyệt (X)` | `Đã duyệt (Y)` | `Đang xử lý (Z)` | `Hoàn thành` | `Đã hủy / Từ chối`.
+      * Thao tác nhanh (Quick Actions) trên từng hàng bảng và trong modal chi tiết:
+        - Admin/SuperAdmin: Nút `[Duyệt]` (xanh) và `[Từ chối]` (đỏ) cho đơn `pending`.
+        - Staff/Admin: Nút `[Nhận xử lý]` (vàng amber) cho đơn `admin_approved`, nút `[Hoàn tất]` (xanh lá) cho đơn `processing`.
+        - Modal từ chối đơn yêu cầu nhập lý do bắt buộc và tự động hoàn trả kho.
+        - Phát sự kiện `workflow-updated` sau mỗi thao tác thành công để cập nhật tức thì Navbar và các tab mà không cần reload trang.
+    + `backend/tests/test_phase13f_workflow_indicators.py`:
+      * Bộ kiểm thử tự động toàn diện gồm 13 test case đáp ứng 100% tiêu chí DoD và bảo vệ Anti-IDOR / RBAC / Revenue / Workflow lifecycle.
+  - **Những gì được bảo tồn nguyên vẹn**:
+    + Không thêm WebSocket hay thư viện ngoài phức tạp.
+    + Không làm quá tải hệ thống; chỉ polling 30s khi tab active.
+    + Bảo toàn 100% phong cách Retro-Futuristic và tương thích Dual Theme (Light/Dark).
+    + Luồng nghiệp vụ từ Phase 13A đến 13E hoạt động hoàn hảo và không bị ảnh hưởng.
+  - **Kiểm thử cục bộ đã thực hiện**:
+    + `pytest backend/tests/test_phase13f_workflow_indicators.py -v`: 13 passed / 13 tests (100% pass).
+    + `pytest regression (13E, 13D, hotfix, 13C, 13B) -v`: 38 passed / 38 tests (100% pass).
+    + `npm run build`: Success (100% clean build, 453ms).
+  - **Hạn chế còn lại**:
+    + Không có hạn chế trong scope Phase 13F. Đã hoàn thành trọn vẹn toàn bộ chuỗi Phase 13 (13A–13F).
 
 ---
 

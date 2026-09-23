@@ -120,4 +120,7 @@ class ImageSearchResponse(BaseModel):
     is_fallback: bool = False
     is_non_product: bool = Field(False, description="True khi ảnh không chứa sản phẩm công nghệ/văn phòng")
     non_product_reason: Optional[str] = Field(None, description="Lý do xác định ảnh không phải sản phẩm")
+    is_quota_exceeded: bool = Field(False, description="True khi gặp lỗi 429 Quota Exceeded từ AI Provider")
+    error_message: Optional[str] = Field(None, description="Thông báo lỗi chi tiết khi AI gặp sự cố")
+
 
