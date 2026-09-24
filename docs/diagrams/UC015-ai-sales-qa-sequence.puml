@@ -4,13 +4,13 @@ skinparam shadowing false
 
 actor "Người dùng (Các vai trò)" as User
 boundary "AiAssistantPage" as UI
-control "AiRouter (/api/v1/ai/chat)" as Router
+control "AiRouter (/api/v1/ai/sales-qa)" as Router
 control "AiService (RBAC Enforcer)" as AI
 entity "SQLite DB (`orders`)" as DB
 control "Google Gemini API" as Gemini
 
 User -> UI: Gửi câu hỏi "Doanh thu tháng này là bao nhiêu?"
-UI -> Router: POST /api/v1/ai/chat\n{message: "...", token: user_token}
+UI -> Router: POST /api/v1/ai/sales-qa\n{query: "...", token: user_token}
 Router -> AI: answer_sales_qa(query, current_user)
 
 AI -> AI: Phát hiện ý định: REVENUE_FINANCIAL_INTENT

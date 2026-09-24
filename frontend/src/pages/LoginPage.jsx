@@ -147,7 +147,7 @@ export const LoginPage = ({ onBack }) => {
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.6rem', textAlign: 'center', fontFamily: 'var(--font-mono)' }}>
               ⚡ CHỌN NHANH TÀI KHOẢN DEMO
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.35rem' }}>
+            <div className="login-demo-grid">
               <button
                 type="button"
                 className="btn btn-outline btn-sm"

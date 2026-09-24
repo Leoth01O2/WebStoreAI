@@ -10,7 +10,7 @@ start
 if (Có chọn file ảnh tải lên?) then (Có)
     :Gửi POST /api/v1/products/upload-image (Multipart);
     :Backend kiểm tra định dạng file (PNG, JPG, WEBP);
-    :Lưu file vào thư mục `backend/uploads/products/`;
+    :Lưu file vào thư mục tĩnh của hệ thống;
     :Trả về đường dẫn tĩnh `/uploads/products/{filename}`;
 else (Không)
     :Sử dụng ảnh mặc định của hệ thống;
@@ -26,7 +26,7 @@ if (SKU bị trùng lặp?) then (Có)
     stop
 else (SKU hợp lệ)
     :Thực thi INSERT / UPDATE vào bảng `products`;
-    :Kích hoạt cập nhật dữ liệu vector vào ChromaDB;
+    :Đồng bộ dữ liệu vector vào ChromaDB (storeflow_products & storeflow_product_visuals);
     :Backend trả HTTP 200 / 201 Thành công;
     :Frontend cập nhật danh sách sản phẩm;
     stop

@@ -2,15 +2,15 @@
 skinparam defaultFontName "Arial"
 skinparam shadowing false
 
-actor "Thu ngân / Khách hàng" as Cashier
+actor "Nhân viên thu ngân\n(Staff / Admin)" as Cashier
 boundary "PosPage (React)" as UI
 control "OrdersRouter" as Router
-control "OrderService" as Service
+control "InventoryService" as Service
 entity "SQLite DB (Atomic Trans)" as DB
 
 Cashier -> UI: Chọn sản phẩm vào giỏ, bấm Thanh toán
 UI -> Router: POST /api/v1/orders\n{customer_id, items, discount, payment_method}
-Router -> Service: create_pos_order(db, order_data, current_user)
+Router -> Service: create_order(db, order_data, current_user)
 Service -> DB: BEGIN IMMEDIATE (Khóa độc quyền ghi)
 
 loop Duyệt từng item trong đơn hàng
@@ -20,17 +20,17 @@ loop Duyệt từng item trong đơn hàng
         Service -> DB: ROLLBACK
         Service --> Router: InsufficientStockError
         Router --> UI: HTTP 400 Bad Request ("Hết hàng")
-        UI --> Cashier: Thông báo sản phẩm không đủ tồn
+        UI --> Cashier: Thông báo sản phẩm không đủ tồn kho
     end
 end
 
-Service -> DB: INSERT INTO orders (...) RETURNING id
+Service -> DB: INSERT INTO orders (..., status='completed') RETURNING id
 DB --> Service: order_id
 
 loop Duyệt từng item
     Service -> DB: INSERT INTO order_items (order_id, product_id, quantity, unit_price)
     Service -> DB: UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?
-    Service -> DB: INSERT INTO inventory_logs (change_type='sale', product_id, change_qty)
+    Service -> DB: INSERT INTO inventory_logs (change_type='sale', reference_code=order_code)
 end
 
 Service -> DB: COMMIT

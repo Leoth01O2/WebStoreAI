@@ -7,7 +7,7 @@ boundary "AiAssistantPage (React)" as UI
 control "AiRouter (/api/v1/ai)" as Router
 control "AiRateLimiter" as Limiter
 control "RagService" as RAG
-entity "ChromaDB (Vector)" as Chroma
+entity "ChromaDB (storeflow_products)" as Chroma
 entity "SQLite DB (`products`)" as DB
 control "PromptLoader" as Prompt
 control "Google Gemini API" as Gemini
@@ -46,7 +46,7 @@ else Gemini Timeout hoặc Quota Exhausted
 end
 
 Router -> Router: sanitize_output(ai_text)
-Router -> Audit: INSERT INTO ai_audit_logs (user_id, feature, query, latency, is_fallback)
+Router -> Audit: INSERT INTO ai_audit_logs (user_id, feature, query, latency)
 Router --> UI: HTTP 200 OK\n{recommendation: text, products: [...], is_fallback: bool}
-UI --> User: Hiển thị phản hồi AI & Card sản phẩm gợi ý
+UI --> User: Hiển thị phản hồi AI & Thẻ sản phẩm tương tác (Thêm giỏ / POS)
 @enduml

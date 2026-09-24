@@ -3,12 +3,12 @@ skinparam defaultFontName "Arial"
 skinparam shadowing false
 
 start
-:Nhân viên / Khách hàng mở trang Bán hàng POS;
+:Nhân viên thu ngân (Staff / Admin) mở màn hình Bán hàng POS tại quầy;
 :Tìm kiếm và bấm chọn sản phẩm vào Giỏ hàng;
 :Điều chỉnh số lượng từng món trong Giỏ hàng;
-:Chọn khách hàng hoặc để Trống (Khách lẻ);
+:Chọn khách hàng hoặc để trống (Khách lẻ);
 :Nhập số tiền chiết khấu / giảm giá (nếu có);
-:Chọn phương thức thanh toán (Tiền mặt / Chuyển khoản);
+:Chọn phương thức thanh toán (Tiền mặt / Chuyển khoản / Thẻ);
 :Bấm nút [THANH TOÁN & HOÀN TẤT ĐƠN HÀNG];
 
 :Frontend gửi POST /api/v1/orders;
@@ -32,11 +32,11 @@ partition "Ghi nhận hóa đơn & Trừ kho nguyên tử" {
     :INSERT INTO orders (customer_id, total_amount, discount, payment_method, status='completed');
     :Duyệt từng item: INSERT INTO order_items (...);
     :Duyệt từng item: UPDATE products SET stock_quantity = stock_quantity - ?;
-    :INSERT INTO inventory_logs (change_type='sale', reference_id=order_id);
+    :INSERT INTO inventory_logs (change_type='sale', reference_code=order_code);
     :Thực thi `COMMIT`;
 }
 
-:Backend trả HTTP 200 kèm chi tiết đơn hàng;
+:Backend trả HTTP 200/201 kèm chi tiết đơn hàng (status='completed');
 :Frontend mở modal In Hóa Đơn (ReceiptModal);
 :Làm trống Giỏ hàng và cập nhật tồn kho giao diện;
 stop

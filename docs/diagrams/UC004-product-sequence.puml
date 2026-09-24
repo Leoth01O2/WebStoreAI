@@ -6,7 +6,7 @@ actor "Admin / Staff" as User
 boundary "ProductsPage (React)" as UI
 control "ProductsRouter" as Router
 entity "SQLite DB (`products`)" as DB
-entity "ChromaDB (Vector RAG)" as Chroma
+entity "ChromaDB (Vector Collections)" as Chroma
 
 User -> UI: Nhập thông tin sản phẩm và chọn ảnh
 opt Có upload ảnh
@@ -28,7 +28,8 @@ else Mã SKU hợp lệ
     Router -> DB: INSERT INTO products (sku, name, category_id, cost_price, selling_price, stock_quantity, ...)
     DB --> Router: product_id mới
     Router -> Chroma: update_product_embedding(product_id, name, description)
-    Chroma --> Router: Vector indexed
+    Router -> Chroma: upsert_visual_metadata(product_id, visual_data)
+    Chroma --> Router: Vector collections indexed
     Router --> UI: HTTP 201 Created (Product Data)
     UI --> User: Đóng modal, tải lại danh sách sản phẩm
 end

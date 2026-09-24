@@ -2,32 +2,32 @@
 skinparam defaultFontName "Arial"
 skinparam shadowing false
 
-actor "SuperAdmin / Quản lý" as Admin
+actor "Quản trị viên\n(Admin / SuperAdmin)" as Admin
 boundary "OrdersPage (React)" as UI
 control "OrdersRouter" as Router
-control "OrderService" as Service
+control "InventoryService" as Service
 entity "SQLite DB (Atomic)" as DB
 
-Admin -> UI: Bấm nút Hủy đơn hàng #{id}
-UI -> Router: POST /api/v1/orders/{id}/cancel (Bearer Token)
-Router -> Router: require_roles(['superadmin', 'staff'])
-Router -> Service: cancel_order(db, order_id)
+Admin -> UI: Bấm nút Hủy đơn hàng #{id} hoặc Từ chối duyệt
+UI -> Router: POST /api/v1/orders/{id}/cancel (hoặc /reject)
+Router -> Router: require_roles("admin", "superadmin")
+Router -> Service: cancel_order(order_id) hoặc reject_order(...)
 Service -> DB: BEGIN IMMEDIATE
 Service -> DB: SELECT status FROM orders WHERE id = ?
-DB --> Service: status = 'completed'
+DB --> Service: status hiện tại
 
-Service -> DB: UPDATE orders SET status = 'cancelled' WHERE id = ?
+Service -> DB: UPDATE orders SET status = 'cancelled' (hoặc 'rejected') WHERE id = ?
 Service -> DB: SELECT product_id, quantity FROM order_items WHERE order_id = ?
-DB --> Service: List of items
+DB --> Service: Danh sách mặt hàng
 
-loop Với từng item
+loop Với từng item trong đơn hàng
     Service -> DB: UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?
-    Service -> DB: INSERT INTO inventory_logs (change_type='cancel_restoration', ...)
+    Service -> DB: INSERT INTO inventory_logs (change_type='return_cancel', ...)
 end
 
 Service -> DB: COMMIT
 DB --> Service: Success
-Service --> Router: Cancelled Order Object
+Service --> Router: Cancelled/Rejected Order Object
 Router --> UI: HTTP 200 OK
-UI --> Admin: Thông báo hoàn kho thành công
+UI --> Admin: Cập nhật giao diện và thông báo thành công
 @enduml

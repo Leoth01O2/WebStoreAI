@@ -30,37 +30,61 @@ skinparam cloud {
 }
 
 package "CLIENT TIER (Trình duyệt người dùng)" {
-    [React 18 + Vite SPA\n(Cyberpunk Dark/Light UI)] as UI
-    [AuthContext & Axios Interceptor\n(Bearer JWT Token)] as ClientAuth
-    [POS / Products / Dashboard\n/ AI Chatbot Component] as UIComp
+    [React 18 + Vite SPA\n(Vintage Editorial / Retro Print Catalog - Dual Theme)] as UI
+    [AuthContext & Axios Interceptor\n(Bearer JWT Token & 30s Periodic Polling)] as ClientAuth
+    [Public Storefront / POS Quầy / Multi-State Orders\nSuperAdmin Dashboard / AI Assistant (3 Tabs)] as UIComp
     UI -down-> ClientAuth
     UI -down-> UIComp
 }
 
 package "APPLICATION TIER (FastAPI Backend Server)" {
-    component "API Gateway & Router\n(/api/v1/*)" as Router
-    component "Security & Defense Layer\n(OAuth2, bcrypt, RBAC, AiRateLimiter)" as Security
-    component "Business Services\n(Product, Order, Inventory, Report)" as BizServices
-    component "AI & RAG Engine\n(Hybrid RAG Service, PromptLoader)" as AIEngine
+    component "API Gateway & Router (/api/v1/*)\n- auth, products, inventory, orders, purchases, reports, ai" as Router
+    component "Security & Defense Layer\n- OAuth2, bcrypt, RBAC (4 DB Roles), Anti-IDOR, AiRateLimiter" as Security
+    
+    package "Core Business Engine" {
+        component "Product & Inventory Service\n(Atomic Transactions & Log)" as InvService
+        component "Order Multi-State Workflow Engine\n(Pending -> Approved -> Processing -> Completed)" as OrderWorkflow
+        component "SuperAdmin Exception Engine\n(force_cancel, reopen_rejected, override_status)" as ExceptionEngine
+        component "Financial & Analytics Service\n(SuperAdmin Exclusive Access)" as ReportService
+    }
+    
+    package "AI & Multimodal Services" {
+        component "Semantic Product RAG Service\n(Candidate Retrieval & Context Grounding)" as RAGService
+        component "Image Search Service\n(Multi-Tier Classification: MATCH/SIMILAR/RELATED/NONE)" as ImgSearchService
+        component "Visual Index Service\n(Precomputed Visual Metadata & Sync)" as VisualIndex
+    }
     
     Router -down-> Security
-    Security -down-> BizServices
-    Security -down-> AIEngine
+    Security -down-> InvService
+    Security -down-> OrderWorkflow
+    Security -down-> ExceptionEngine
+    Security -down-> ReportService
+    Security -down-> RAGService
+    Security -down-> ImgSearchService
+    ImgSearchService -right-> VisualIndex
 }
 
 package "DATA PERSISTENCE TIER" {
-    database "SQLite 3 (WAL Mode)\n- users, products, categories\n- orders, order_items\n- inventory_logs, ai_audit_logs" as SQLite
-    database "ChromaDB (Vector Database)\n- 384-dim Product Embeddings\n- Semantic Cosine Similarity" as Chroma
+    database "SQLite 3 (WAL Mode) — Source of Truth\n12 Bảng CSDL Nghiệp vụ:\n- users, categories, products, customers\n- orders, order_items, inventory_logs\n- purchase_receipts, purchase_items\n- ai_audit_logs, product_visual_metadata\n- order_audit_logs" as SQLite
+    
+    database "ChromaDB (Vector Store)\nỨng viên Ngữ nghĩa (all-MiniLM-L6-v2):\n- storeflow_products\n- storeflow_product_visuals" as Chroma
 }
 
 cloud "EXTERNAL AI SERVICES" {
-    [Google Gemini 3.6 Flash API\n(Generative AI Model)] as Gemini
+    [Google Gemini Multimodal API\n- Generative Reasoning\n- Multimodal Visual Feature Extraction] as Gemini
 }
 
 UIComp --> Router : RESTful JSON API
-BizServices --> SQLite : ACID Transactions (BEGIN IMMEDIATE)
-AIEngine --> Chroma : Semantic Retrieval
-AIEngine --> SQLite : In-stock Verification (Ground Truth)
-AIEngine --> Gemini : Grounded Prompting & Inference
+InvService --> SQLite : ACID Transactions (BEGIN IMMEDIATE)
+OrderWorkflow --> SQLite : State Machine & Audit Trail
+ExceptionEngine --> SQLite : Ghi vết order_audit_logs
+ReportService --> SQLite : Tra cứu Báo cáo Tài chính
+RAGService --> Chroma : Semantic Candidate Retrieval
+RAGService --> SQLite : Ground Truth Verification (Price & In-stock)
+RAGService --> Gemini : Grounded Prompting & Inference
+ImgSearchService --> Gemini : Multimodal Visual Feature Extraction
+ImgSearchService --> Chroma : Truy vấn Collection storeflow_product_visuals
+ImgSearchService --> SQLite : Đối soát Thông tin Sản phẩm & Tồn kho thực tế
+VisualIndex --> Chroma : Đồng bộ Metadata Thị giác
 
 @enduml

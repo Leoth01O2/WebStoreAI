@@ -107,7 +107,7 @@ export const CustomersPage = () => {
         </div>
 
         <div style={{ padding: '0.85rem 1.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)' }}>
-          <div className="input-with-icon" style={{ minWidth: '240px', flex: 1 }}>
+          <div className="input-with-icon" style={{ minWidth: 'min(100%, 200px)', flex: '1 1 200px' }}>
             <Search size={15} />
             <input
               type="text"
@@ -120,7 +120,7 @@ export const CustomersPage = () => {
 
           <select
             className="form-control"
-            style={{ width: '180px' }}
+            style={{ flex: '1 1 160px', minWidth: '140px' }}
             value={groupFilter}
             onChange={(e) => setGroupFilter(e.target.value)}
           >
@@ -236,7 +236,7 @@ export const CustomersPage = () => {
         maxWidth="480px"
       >
         <form onSubmit={handleSave}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label">Mã khách hàng (*)</label>
               <input
@@ -272,7 +272,7 @@ export const CustomersPage = () => {
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label">Số điện thoại (*)</label>
               <input

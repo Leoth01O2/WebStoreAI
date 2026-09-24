@@ -527,7 +527,7 @@ export const OrdersPage = () => {
         </div>
 
         <div style={{ padding: '0.85rem 1.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)' }}>
-          <div className="input-with-icon" style={{ minWidth: '220px', flex: 1 }}>
+          <div className="input-with-icon" style={{ minWidth: 'min(100%, 200px)', flex: '1 1 200px' }}>
             <Search size={15} />
             <input
               type="text"
@@ -540,7 +540,7 @@ export const OrdersPage = () => {
 
           <select
             className="form-control"
-            style={{ width: '160px' }}
+            style={{ flex: '1 1 140px', minWidth: '120px' }}
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -553,23 +553,23 @@ export const OrdersPage = () => {
             <option value="cancelled">Đã hủy</option>
           </select>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Từ ngày:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flex: '1 1 130px' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Từ ngày:</span>
             <input
               type="date"
               className="form-control font-mono"
-              style={{ width: '135px', padding: '0.35rem' }}
+              style={{ width: '100%', minWidth: '110px', padding: '0.35rem' }}
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
             />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Đến ngày:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flex: '1 1 130px' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Đến ngày:</span>
             <input
               type="date"
               className="form-control font-mono"
-              style={{ width: '135px', padding: '0.35rem' }}
+              style={{ width: '100%', minWidth: '110px', padding: '0.35rem' }}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
             />
@@ -591,8 +591,8 @@ export const OrdersPage = () => {
         </div>
       </div>
 
-      {/* Orders Table */}
-      <div className="table-responsive">
+      {/* Desktop Orders Table */}
+      <div className="table-responsive orders-desktop-view">
         <table className="retro-table">
           <thead>
             <tr>
@@ -738,6 +738,133 @@ export const OrdersPage = () => {
         </table>
       </div>
 
+      {/* Mobile Card List View (Visible on screens <= 768px) */}
+      <div className="orders-mobile-card-list">
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            Đang tải danh sách hóa đơn...
+          </div>
+        ) : orders.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            Không tìm thấy hóa đơn nào phù hợp.
+          </div>
+        ) : (
+          orders.map((o) => (
+            <div key={o.id} className="order-mobile-card">
+              <div className="order-card-header">
+                <div>
+                  <span className="font-mono" style={{ fontWeight: 700, color: 'var(--amber-primary)', fontSize: '0.95rem' }}>
+                    {o.order_code}
+                  </span>
+                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
+                    {o.created_at ? new Date(o.created_at).toLocaleString('vi-VN') : '—'}
+                  </div>
+                </div>
+                <OrderStatusBadge status={o.status} />
+              </div>
+
+              <div className="order-card-row">
+                <span style={{ color: 'var(--text-muted)' }}>Khách hàng:</span>
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {o.customer_name || 'Khách vãng lai'}
+                  {o.customer_phone && ` (${o.customer_phone})`}
+                </span>
+              </div>
+
+              <div className="order-card-row">
+                <span style={{ color: 'var(--text-muted)' }}>Hình thức:</span>
+                <span className="badge badge-muted">
+                  {o.payment_method === 'cash' ? 'Tiền mặt' : o.payment_method === 'transfer' ? 'C.Khoản' : 'Thẻ'}
+                </span>
+              </div>
+
+              <div className="order-card-row" style={{ paddingTop: '0.25rem' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Tổng tiền:</span>
+                <span className="currency" style={{ fontSize: '1rem', fontWeight: 800, color: (o.status === 'cancelled' || o.status === 'rejected') ? 'var(--text-muted)' : 'var(--green-terminal)' }}>
+                  {formatVND(o.final_amount)}
+                </span>
+              </div>
+
+              {/* Action buttons with minimum 40px touch targets */}
+              <div className="order-card-actions">
+                {(isAdmin || isSuperAdmin) && o.status === 'pending' && (
+                  <>
+                    <button
+                      onClick={() => handleApproveOrder(o)}
+                      className="btn btn-outline btn-sm"
+                      style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
+                    >
+                      <Check size={14} /> Duyệt đơn
+                    </button>
+                    <button
+                      onClick={() => setRejectingOrder(o)}
+                      className="btn btn-outline btn-sm"
+                      style={{ color: 'var(--red-light)', borderColor: 'var(--red-light)' }}
+                    >
+                      <X size={14} /> Từ chối
+                    </button>
+                  </>
+                )}
+
+                {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'admin_approved' && (
+                  <button
+                    onClick={() => handleProcessOrder(o)}
+                    className="btn btn-outline btn-sm"
+                    style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)', width: '100%', flex: '1 1 100%' }}
+                  >
+                    <PackageCheck size={15} /> Nhận xử lý đơn
+                  </button>
+                )}
+
+                {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'processing' && (
+                  <button
+                    onClick={() => handleCompleteOrder(o)}
+                    className="btn btn-outline btn-sm"
+                    style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)', width: '100%', flex: '1 1 100%' }}
+                  >
+                    <CheckCircle2 size={15} /> Hoàn tất đơn
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setViewingOrder(o)}
+                  className="btn btn-outline btn-sm"
+                >
+                  <Eye size={14} /> Chi tiết
+                </button>
+
+                <button
+                  onClick={() => setReceiptOrder(o)}
+                  className="btn btn-outline btn-sm"
+                >
+                  <Printer size={14} /> In phiếu
+                </button>
+
+                {canCancel && o.status === 'completed' && (
+                  <button
+                    onClick={() => setCancellingOrder(o)}
+                    className="btn btn-outline btn-sm"
+                    style={{ color: 'var(--red-light)', borderColor: 'var(--border-subtle)' }}
+                  >
+                    <XCircle size={14} /> Hủy & hoàn kho
+                  </button>
+                )}
+
+                {isCustomer && o.status === 'pending' && (
+                  <button
+                    onClick={() => setCustomerCancellingOrder(o)}
+                    className="btn btn-outline btn-sm"
+                    style={{ color: 'var(--red-light)', borderColor: 'var(--border-subtle)', width: '100%', flex: '1 1 100%' }}
+                  >
+                    <XCircle size={14} /> Hủy đơn hàng
+                  </button>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
       {/* VIEW ORDER DETAIL MODAL */}
       <Modal
         isOpen={!!viewingOrder}
@@ -822,7 +949,7 @@ export const OrdersPage = () => {
               rejectionReason={viewingOrder.rejection_reason}
             />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '1rem', fontSize: '0.85rem' }}>
+            <div className="form-grid-2" style={{ gap: '0.6rem', marginBottom: '1rem', fontSize: '0.85rem' }}>
               <div><strong>Mã HĐ:</strong> <span className="font-mono">{viewingOrder.order_code}</span></div>
               <div><strong>Thời gian:</strong> {new Date(viewingOrder.created_at).toLocaleString('vi-VN')}</div>
               <div><strong>Khách hàng:</strong> {viewingOrder.customer_name || 'Khách vãng lai'}</div>

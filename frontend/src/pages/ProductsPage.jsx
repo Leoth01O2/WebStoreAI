@@ -285,7 +285,7 @@ export const ProductsPage = () => {
         {/* Filters for Products */}
         {activeTab === 'products' && (
           <div style={{ padding: '0.85rem 1.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)' }}>
-            <div className="input-with-icon" style={{ minWidth: '240px', flex: 1 }}>
+            <div className="input-with-icon" style={{ minWidth: 'min(100%, 200px)', flex: '1 1 200px' }}>
               <Search size={15} />
               <input
                 type="text"
@@ -298,7 +298,7 @@ export const ProductsPage = () => {
 
             <select
               className="form-control"
-              style={{ width: '180px' }}
+              style={{ flex: '1 1 160px', minWidth: '140px' }}
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
             >
@@ -489,7 +489,7 @@ export const ProductsPage = () => {
         maxWidth="580px"
       >
         <form onSubmit={handleSaveProduct}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label">Mã SKU (*)</label>
               <input
@@ -528,7 +528,7 @@ export const ProductsPage = () => {
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label">Giá vốn nhập kho (VNĐ)</label>
               <input
@@ -554,7 +554,7 @@ export const ProductsPage = () => {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+          <div className="form-grid-3">
             <div className="form-group">
               <label className="form-label">Tồn kho ban đầu</label>
               <input

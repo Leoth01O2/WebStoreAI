@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     code TEXT UNIQUE NOT NULL,
+    description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS products (
 -- 4. Bảng Khách hàng
 CREATE TABLE IF NOT EXISTS customers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     customer_code TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     phone TEXT,
@@ -186,6 +188,22 @@ def init_db():
         conn.executescript(SCHEMA_SQL)
         cursor = conn.cursor()
         
+        # Migration kiểm tra cột description trong bảng categories
+        cursor.execute("PRAGMA table_info(categories)")
+        cat_cols = [row["name"] for row in cursor.fetchall()]
+        if "description" not in cat_cols:
+            cursor.execute("ALTER TABLE categories ADD COLUMN description TEXT")
+            conn.commit()
+            print("[DB Migration] Added column 'description' to categories table.")
+
+        # Migration kiểm tra cột user_id trong bảng customers
+        cursor.execute("PRAGMA table_info(customers)")
+        cust_cols = [row["name"] for row in cursor.fetchall()]
+        if "user_id" not in cust_cols:
+            cursor.execute("ALTER TABLE customers ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
+            conn.commit()
+            print("[DB Migration] Added column 'user_id' to customers table.")
+
         # Migration kiểm tra cột image_url trong bảng products
         cursor.execute("PRAGMA table_info(products)")
         product_cols = [row["name"] for row in cursor.fetchall()]

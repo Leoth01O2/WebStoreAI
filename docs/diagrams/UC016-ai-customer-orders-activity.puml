@@ -4,7 +4,7 @@ skinparam shadowing false
 
 start
 :Khách hàng thành viên hỏi: "Đơn hàng gần nhất của tôi thế nào?";
-:Frontend gửi POST /api/v1/ai/chat kèm Bearer Token;
+:Frontend gửi POST /api/v1/ai/sales-qa kèm Bearer Token;
 
 :Backend giải mã JWT Token -> xác định `current_user.id`;
 :Kiểm tra vai trò người dùng là `customer`;

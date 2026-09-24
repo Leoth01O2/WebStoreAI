@@ -184,7 +184,7 @@ export const PurchasesPage = () => {
         {/* Logs Filter Bar */}
         {activeTab === 'logs' && (
           <div style={{ padding: '0.85rem 1.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)' }}>
-            <div className="input-with-icon" style={{ minWidth: '220px', flex: 1 }}>
+            <div className="input-with-icon" style={{ minWidth: 'min(100%, 200px)', flex: '1 1 200px' }}>
               <Search size={15} />
               <input
                 type="text"
@@ -197,7 +197,7 @@ export const PurchasesPage = () => {
 
             <select
               className="form-control"
-              style={{ width: '200px' }}
+              style={{ flex: '1 1 180px', minWidth: '150px' }}
               value={logTypeFilter}
               onChange={(e) => setLogTypeFilter(e.target.value)}
             >
@@ -381,7 +381,7 @@ export const PurchasesPage = () => {
         maxWidth="680px"
       >
         <form onSubmit={handleCreatePurchase}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label">Nhà cung cấp (*)</label>
               <input
@@ -422,17 +422,7 @@ export const PurchasesPage = () => {
             {purchaseItems.map((item, idx) => (
               <div
                 key={idx}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2fr 1fr 1.2fr auto',
-                  gap: '0.5rem',
-                  alignItems: 'center',
-                  marginBottom: '0.5rem',
-                  background: 'var(--bg-card)',
-                  padding: '0.4rem',
-                  borderRadius: 'var(--radius-xs)',
-                  border: '1px solid var(--border-subtle)',
-                }}
+                className="purchase-item-row-grid"
               >
                 <select
                   className="form-control"
@@ -510,7 +500,7 @@ export const PurchasesPage = () => {
       >
         {viewingReceipt && (
           <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '1rem', fontSize: '0.85rem' }}>
+            <div className="form-grid-2" style={{ gap: '0.6rem', marginBottom: '1rem', fontSize: '0.85rem' }}>
               <div><strong>Mã phiếu:</strong> <span className="font-mono">{viewingReceipt.receipt_code}</span></div>
               <div><strong>Thời gian:</strong> {new Date(viewingReceipt.created_at).toLocaleString('vi-VN')}</div>
               <div><strong>Nhà cung cấp:</strong> {viewingReceipt.supplier_name}</div>

@@ -21,38 +21,45 @@ def seed_database():
     with get_db() as conn:
         cursor = conn.cursor()
 
-        # 1. Seed Users
-        cursor.execute("SELECT COUNT(*) as cnt FROM users")
-        if cursor.fetchone()["cnt"] == 0:
-            print("[SEED] Đang tạo 4 tài khoản mặc định (SuperAdmin, Admin, Staff, Customer)...")
-            users = [
-                ("superadmin", hash_password("SuperAdmin@123"), "Lê Chủ Cửa Hàng", "superadmin"),
-                ("admin", hash_password("Admin@123"), "Nguyễn Quản Trị", "admin"),
-                ("staff", hash_password("Staff@123"), "Trần Thu Ngân", "staff"),
-                ("customer", hash_password("Customer@123"), "Hoàng Khách Mua", "customer"),
-            ]
-            cursor.executemany(
-                "INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, ?)",
-                users
-            )
-            print(f"[SEED] Đã tạo {len(users)} người dùng mặc định.")
+        # 1. Seed Users (Idempotent by username)
+        users = [
+            ("superadmin", hash_password("SuperAdmin@123"), "Lê Chủ Cửa Hàng", "superadmin"),
+            ("admin", hash_password("Admin@123"), "Nguyễn Quản Trị", "admin"),
+            ("staff", hash_password("Staff@123"), "Trần Thu Ngân", "staff"),
+            ("customer", hash_password("Customer@123"), "Nguyễn Văn An (Customer)", "customer"),
+            ("customer2", hash_password("Customer@123"), "Trần Thị Bình", "customer"),
+        ]
+        users_inserted = 0
+        for u in users:
+            cursor.execute("SELECT id FROM users WHERE username = ?", (u[0],))
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, ?)",
+                    u
+                )
+                users_inserted += 1
+        if users_inserted > 0:
+            print(f"[SEED] Đã tạo {users_inserted} người dùng mặc định.")
 
-        # 2. Seed Categories
-        cursor.execute("SELECT COUNT(*) as cnt FROM categories")
-        if cursor.fetchone()["cnt"] == 0:
-            print("[SEED] Đang tạo danh mục hàng hóa...")
-            categories = [
-                ("Âm thanh & Tai nghe", "CAT-AUDIO", "Tai nghe bluetooth, loa di động, micro thu âm"),
-                ("Chuột & Bàn phím", "CAT-OFFICE", "Chuột không dây, bàn phím cơ, phụ kiện văn phòng"),
-                ("Gia dụng thông minh", "CAT-SMART", "Đèn bàn bảo vệ mắt, máy hút ẩm, sạc không dây để bàn"),
-                ("Phụ kiện & Dây cáp", "CAT-ACCESSORY", "Củ sạc nhanh GaN, cáp Type-C to Lightning, hub chuyển đổi"),
-                ("Gaming Gear", "CAT-GAMING", "Tai nghe 7.1, lót chuột led RGB, quạt tản nhiệt laptop")
-            ]
-            cursor.executemany(
-                "INSERT INTO categories (name, code, description) VALUES (?, ?, ?)",
-                categories
-            )
-            print(f"[SEED] Đã tạo {len(categories)} danh mục.")
+        # 2. Seed Categories (Idempotent by code)
+        categories = [
+            ("Âm thanh & Tai nghe", "CAT-AUDIO", "Tai nghe bluetooth, loa di động, micro thu âm"),
+            ("Chuột & Bàn phím", "CAT-OFFICE", "Chuột không dây, bàn phím cơ, phụ kiện văn phòng"),
+            ("Gia dụng thông minh", "CAT-SMART", "Đèn bàn bảo vệ mắt, máy hút ẩm, sạc không dây để bàn"),
+            ("Phụ kiện & Dây cáp", "CAT-ACCESSORY", "Củ sạc nhanh GaN, cáp Type-C to Lightning, hub chuyển đổi"),
+            ("Gaming Gear", "CAT-GAMING", "Tai nghe 7.1, lót chuột led RGB, quạt tản nhiệt laptop")
+        ]
+        cats_inserted = 0
+        for cat in categories:
+            cursor.execute("SELECT id FROM categories WHERE code = ?", (cat[1],))
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO categories (name, code, description) VALUES (?, ?, ?)",
+                    cat
+                )
+                cats_inserted += 1
+        if cats_inserted > 0:
+            print(f"[SEED] Đã tạo {cats_inserted} danh mục mới.")
 
         # Lấy map category name -> id
         cursor.execute("SELECT id, name FROM categories")
@@ -315,130 +322,146 @@ def seed_database():
             }
         }
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM products")
-        if cursor.fetchone()["cnt"] == 0:
-            print("[SEED] Đang nạp 25+ sản phẩm mẫu...")
-            products = [
-                # Âm thanh
-                ("SP-AUDIO-01", "Tai nghe Bluetooth RetroSound A1", cat_map["Âm thanh & Tai nghe"], 220000, 350000, 24, 5, "chiếc", "active", IMAGE_MAP["SP-AUDIO-01"], "Tai nghe không dây pin 20 giờ, chống ồn chủ động ANC nhẹ, chất âm hoài niệm ấm áp, kết nối Bluetooth 5.3."),
-                ("SP-AUDIO-02", "Loa Bluetooth Gỗ Vintage Box", cat_map["Âm thanh & Tai nghe"], 450000, 690000, 15, 3, "chiếc", "active", IMAGE_MAP["SP-AUDIO-02"], "Loa vỏ gỗ tự nhiên phong cách retro thập niên 90, công suất 20W, pin 12 giờ, tích hợp đài FM và cổng AUX."),
-                ("SP-AUDIO-03", "Tai nghe chụp tai Monitor Studio Pro", cat_map["Âm thanh & Tai nghe"], 800000, 1250000, 8, 2, "chiếc", "active", IMAGE_MAP["SP-AUDIO-03"], "Tai nghe kiểm âm chụp tai có dây tháo rời, màng loa 50mm, âm thanh trung thực chi tiết cho phòng thu."),
-                ("SP-AUDIO-04", "Micro Thu Âm Podcasting USB M1", cat_map["Âm thanh & Tai nghe"], 550000, 890000, 10, 3, "chiếc", "active", IMAGE_MAP["SP-AUDIO-04"], "Micro condenser cắm cổng USB, chống rung kim loại, lọc tạp âm tốt, phù hợp livestream và họp trực tuyến."),
-                ("SP-AUDIO-05", "Tai nghe Earbuds Thể Thao RunFree", cat_map["Âm thanh & Tai nghe"], 180000, 290000, 0, 5, "chiếc", "active", IMAGE_MAP["SP-AUDIO-05"], "Tai nghe nhét tai kháng nước IPX7, đệm silicon chống rơi khi chạy bộ (TẠM HẾT HÀNG để kiểm tra guard)."),
+        # 3. Seed Products (Idempotent by sku)
+        products = [
+            # Âm thanh
+            ("SP-AUDIO-01", "Tai nghe Bluetooth RetroSound A1", cat_map["Âm thanh & Tai nghe"], 220000, 350000, 24, 5, "chiếc", "active", IMAGE_MAP["SP-AUDIO-01"], "Tai nghe không dây pin 20 giờ, chống ồn chủ động ANC nhẹ, chất âm hoài niệm ấm áp, kết nối Bluetooth 5.3."),
+            ("SP-AUDIO-02", "Loa Bluetooth Gỗ Vintage Box", cat_map["Âm thanh & Tai nghe"], 450000, 690000, 15, 3, "chiếc", "active", IMAGE_MAP["SP-AUDIO-02"], "Loa vỏ gỗ tự nhiên phong cách retro thập niên 90, công suất 20W, pin 12 giờ, tích hợp đài FM và cổng AUX."),
+            ("SP-AUDIO-03", "Tai nghe chụp tai Monitor Studio Pro", cat_map["Âm thanh & Tai nghe"], 800000, 1250000, 8, 2, "chiếc", "active", IMAGE_MAP["SP-AUDIO-03"], "Tai nghe kiểm âm chụp tai có dây tháo rời, màng loa 50mm, âm thanh trung thực chi tiết cho phòng thu."),
+            ("SP-AUDIO-04", "Micro Thu Âm Podcasting USB M1", cat_map["Âm thanh & Tai nghe"], 550000, 890000, 10, 3, "chiếc", "active", IMAGE_MAP["SP-AUDIO-04"], "Micro condenser cắm cổng USB, chống rung kim loại, lọc tạp âm tốt, phù hợp livestream và họp trực tuyến."),
+            ("SP-AUDIO-05", "Tai nghe Earbuds Thể Thao RunFree", cat_map["Âm thanh & Tai nghe"], 180000, 290000, 0, 5, "chiếc", "active", IMAGE_MAP["SP-AUDIO-05"], "Tai nghe nhét tai kháng nước IPX7, đệm silicon chống rơi khi chạy bộ (TẠM HẾT HÀNG để kiểm tra guard)."),
 
-                # Chuột & Phím
-                ("SP-OFFICE-01", "Bàn phím cơ Retro Typewriter T80", cat_map["Chuột & Bàn phím"], 650000, 990000, 18, 4, "chiếc", "active", IMAGE_MAP["SP-OFFICE-01"], "Bàn phím cơ layout 84 phím mô phỏng máy đánh chữ cổ điển, switch Blue tactile gõ giòn, đèn LED vàng ấm."),
-                ("SP-OFFICE-02", "Chuột không dây Công thái học Silent M3", cat_map["Chuột & Bàn phím"], 190000, 320000, 30, 5, "chiếc", "active", IMAGE_MAP["SP-OFFICE-02"], "Chuột cầm dọc chống mỏi cổ tay, nút bấm êm tuyệt đối không gây ồn, pin sạc Type-C dùng 40 ngày."),
-                ("SP-OFFICE-03", "Bàn phím không dây Slim Multi-Device", cat_map["Chuột & Bàn phím"], 280000, 450000, 12, 3, "chiếc", "active", IMAGE_MAP["SP-OFFICE-03"], "Bàn phím siêu mỏng kết nối cùng lúc 3 thiết bị máy tính, máy tính bảng, điện thoại qua Bluetooth và 2.4G."),
-                ("SP-OFFICE-04", "Chuột quang có dây Văn phòng Basic", cat_map["Chuột & Bàn phím"], 45000, 85000, 45, 10, "chiếc", "active", IMAGE_MAP["SP-OFFICE-04"], "Chuột có dây bền bỉ, cắm là chạy, độ phân giải 1200 DPI, phù hợp sử dụng công ty và học sinh."),
-                ("SP-OFFICE-05", "Bàn di chuột Da PU Cỡ lớn 90x40cm", cat_map["Chuột & Bàn phím"], 80000, 145000, 22, 5, "chiếc", "active", IMAGE_MAP["SP-OFFICE-05"], "Thảm lót bàn làm việc da cao cấp chống thấm nước, êm ái, màu nâu da bò phong cách vintage."),
+            # Chuột & Phím
+            ("SP-OFFICE-01", "Bàn phím cơ Retro Typewriter T80", cat_map["Chuột & Bàn phím"], 650000, 990000, 18, 4, "chiếc", "active", IMAGE_MAP["SP-OFFICE-01"], "Bàn phím cơ layout 84 phím mô phỏng máy đánh chữ cổ điển, switch Blue tactile gõ giòn, đèn LED vàng ấm."),
+            ("SP-OFFICE-02", "Chuột không dây Công thái học Silent M3", cat_map["Chuột & Bàn phím"], 190000, 320000, 30, 5, "chiếc", "active", IMAGE_MAP["SP-OFFICE-02"], "Chuột cầm dọc chống mỏi cổ tay, nút bấm êm tuyệt đối không gây ồn, pin sạc Type-C dùng 40 ngày."),
+            ("SP-OFFICE-03", "Bàn phím không dây Slim Multi-Device", cat_map["Chuột & Bàn phím"], 280000, 450000, 12, 3, "chiếc", "active", IMAGE_MAP["SP-OFFICE-03"], "Bàn phím siêu mỏng kết nối cùng lúc 3 thiết bị máy tính, máy tính bảng, điện thoại qua Bluetooth và 2.4G."),
+            ("SP-OFFICE-04", "Chuột quang có dây Văn phòng Basic", cat_map["Chuột & Bàn phím"], 45000, 85000, 45, 10, "chiếc", "active", IMAGE_MAP["SP-OFFICE-04"], "Chuột có dây bền bỉ, cắm là chạy, độ phân giải 1200 DPI, phù hợp sử dụng công ty và học sinh."),
+            ("SP-OFFICE-05", "Bàn di chuột Da PU Cỡ lớn 90x40cm", cat_map["Chuột & Bàn phím"], 80000, 145000, 22, 5, "chiếc", "active", IMAGE_MAP["SP-OFFICE-05"], "Thảm lót bàn làm việc da cao cấp chống thấm nước, êm ái, màu nâu da bò phong cách vintage."),
 
-                # Gia dụng thông minh
-                ("SP-SMART-01", "Đèn bàn LED Cổ điển Chống cận Edison", cat_map["Gia dụng thông minh"], 320000, 490000, 14, 3, "chiếc", "active", IMAGE_MAP["SP-SMART-01"], "Đèn bàn thân kim loại mạ đồng, bóng LED ánh sáng vàng bảo vệ mắt, có nút vặn chiết áp điều chỉnh độ sáng."),
-                ("SP-SMART-02", "Máy khuếch tán tinh dầu gốm Ceramic", cat_map["Gia dụng thông minh"], 210000, 350000, 16, 4, "chiếc", "active", IMAGE_MAP["SP-SMART-02"], "Máy xông tinh dầu công nghệ siêu âm phun sương mịn, vỏ gốm thủ công hoài cổ, dung tích 300ml, tự ngắt khi hết nước."),
-                ("SP-SMART-03", "Đồng hồ LED để bàn Giả lập Đèn Nixie", cat_map["Gia dụng thông minh"], 750000, 1190000, 5, 2, "chiếc", "active", IMAGE_MAP["SP-SMART-03"], "Đồng hồ retro-futuristic ống thủy tinh phát quang phong cách steampunk, hiển thị giờ, thời tiết và RGB."),
-                ("SP-SMART-04", "Cân điện tử thông minh đo 12 chỉ số", cat_map["Gia dụng thông minh"], 150000, 260000, 20, 5, "chiếc", "active", IMAGE_MAP["SP-SMART-04"], "Mặt kính cường lực, kết nối app điện thoại qua bluetooth theo dõi cân nặng, lượng mỡ, cơ bắp."),
-                ("SP-SMART-05", "Quạt mini để bàn Retro Turbine", cat_map["Gia dụng thông minh"], 110000, 195000, 25, 5, "chiếc", "active", IMAGE_MAP["SP-SMART-05"], "Quạt sạc pin USB hình động cơ máy bay cổ điển, 3 tốc độ gió, chạy êm ái mát mẻ."),
+            # Gia dụng thông minh
+            ("SP-SMART-01", "Đèn bàn LED Cổ điển Chống cận Edison", cat_map["Gia dụng thông minh"], 320000, 490000, 14, 3, "chiếc", "active", IMAGE_MAP["SP-SMART-01"], "Đèn bàn thân kim loại mạ đồng, bóng LED ánh sáng vàng bảo vệ mắt, có nút vặn chiết áp điều chỉnh độ sáng."),
+            ("SP-SMART-02", "Máy khuếch tán tinh dầu gốm Ceramic", cat_map["Gia dụng thông minh"], 210000, 350000, 16, 4, "chiếc", "active", IMAGE_MAP["SP-SMART-02"], "Máy xông tinh dầu công nghệ siêu âm phun sương mịn, vỏ gốm thủ công hoài cổ, dung tích 300ml, tự ngắt khi hết nước."),
+            ("SP-SMART-03", "Đồng hồ LED để bàn Giả lập Đèn Nixie", cat_map["Gia dụng thông minh"], 750000, 1190000, 5, 2, "chiếc", "active", IMAGE_MAP["SP-SMART-03"], "Đồng hồ retro-futuristic ống thủy tinh phát quang phong cách steampunk, hiển thị giờ, thời tiết và RGB."),
+            ("SP-SMART-04", "Cân điện tử thông minh đo 12 chỉ số", cat_map["Gia dụng thông minh"], 150000, 260000, 20, 5, "chiếc", "active", IMAGE_MAP["SP-SMART-04"], "Mặt kính cường lực, kết nối app điện thoại qua bluetooth theo dõi cân nặng, lượng mỡ, cơ bắp."),
+            ("SP-SMART-05", "Quạt mini để bàn Retro Turbine", cat_map["Gia dụng thông minh"], 110000, 195000, 25, 5, "chiếc", "active", IMAGE_MAP["SP-SMART-05"], "Quạt sạc pin USB hình động cơ máy bay cổ điển, 3 tốc độ gió, chạy êm ái mát mẻ."),
 
-                # Phụ kiện & Cáp
-                ("SP-ACC-01", "Củ sạc nhanh GaN 65W Retro Robot", cat_map["Phụ kiện & Dây cáp"], 290000, 480000, 35, 5, "chiếc", "active", IMAGE_MAP["SP-ACC-01"], "Củ sạc 3 cổng (2 Type-C, 1 USB-A) hình robot cổ điển có mắt LED biểu thị công suất sạc, hỗ trợ laptop và iPhone."),
-                ("SP-ACC-02", "Cáp sạc Bọc dù Kim loại Siêu bền Type-C 100W", cat_map["Phụ kiện & Dây cáp"], 60000, 110000, 50, 10, "sợi", "active", IMAGE_MAP["SP-ACC-02"], "Dây cáp sạc bọc vải dù chịu lực, đầu hợp kim kẽm chống gãy gập, truyền dữ liệu 480Mbps."),
-                ("SP-ACC-03", "Hub chuyển đổi 6 trong 1 Type-C sang HDMI 4K", cat_map["Phụ kiện & Dây cáp"], 250000, 420000, 19, 4, "chiếc", "active", IMAGE_MAP["SP-ACC-03"], "Vỏ nhôm tản nhiệt tốt, cổng HDMI 4K@60Hz, 3 cổng USB 3.0, khe thẻ nhớ SD/TF và sạc PD 100W."),
-                ("SP-ACC-04", "Pin sạc dự phòng Trong suốt Cyberpunk 20000mAh", cat_map["Phụ kiện & Dây cáp"], 380000, 590000, 12, 3, "chiếc", "active", IMAGE_MAP["SP-ACC-04"], "Pin sạc dự phòng lộ bảng mạch retro công nghệ, sạc nhanh 22.5W, màn hình LCD hiển thị phần trăm chính xác."),
-                ("SP-ACC-05", "Giá đỡ laptop Hợp kim nhôm Xoay 360 độ", cat_map["Phụ kiện & Dây cáp"], 180000, 290000, 15, 3, "chiếc", "active", IMAGE_MAP["SP-ACC-05"], "Chân đế nâng hạ độ cao công thái học, xoay 360 độ có tiếng click cơ học cực sướng tai."),
+            # Phụ kiện & Cáp
+            ("SP-ACC-01", "Củ sạc nhanh GaN 65W Retro Robot", cat_map["Phụ kiện & Dây cáp"], 290000, 480000, 35, 5, "chiếc", "active", IMAGE_MAP["SP-ACC-01"], "Củ sạc 3 cổng (2 Type-C, 1 USB-A) hình robot cổ điển có mắt LED biểu thị công suất sạc, hỗ trợ laptop và iPhone."),
+            ("SP-ACC-02", "Cáp sạc Bọc dù Kim loại Siêu bền Type-C 100W", cat_map["Phụ kiện & Dây cáp"], 60000, 110000, 50, 10, "sợi", "active", IMAGE_MAP["SP-ACC-02"], "Dây cáp sạc bọc vải dù chịu lực, đầu hợp kim kẽm chống gãy gập, truyền dữ liệu 480Mbps."),
+            ("SP-ACC-03", "Hub chuyển đổi 6 trong 1 Type-C sang HDMI 4K", cat_map["Phụ kiện & Dây cáp"], 250000, 420000, 19, 4, "chiếc", "active", IMAGE_MAP["SP-ACC-03"], "Vỏ nhôm tản nhiệt tốt, cổng HDMI 4K@60Hz, 3 cổng USB 3.0, khe thẻ nhớ SD/TF và sạc PD 100W."),
+            ("SP-ACC-04", "Pin sạc dự phòng Trong suốt Cyberpunk 20000mAh", cat_map["Phụ kiện & Dây cáp"], 380000, 590000, 12, 3, "chiếc", "active", IMAGE_MAP["SP-ACC-04"], "Pin sạc dự phòng lộ bảng mạch retro công nghệ, sạc nhanh 22.5W, màn hình LCD hiển thị phần trăm chính xác."),
+            ("SP-ACC-05", "Giá đỡ laptop Hợp kim nhôm Xoay 360 độ", cat_map["Phụ kiện & Dây cáp"], 180000, 290000, 15, 3, "chiếc", "active", IMAGE_MAP["SP-ACC-05"], "Chân đế nâng hạ độ cao công thái học, xoay 360 độ có tiếng click cơ học cực sướng tai."),
 
-                # Gaming Gear
-                ("SP-GAME-01", "Tai nghe Gaming 7.1 Rung Bass G200", cat_map["Gaming Gear"], 380000, 590000, 11, 3, "chiếc", "active", IMAGE_MAP["SP-GAME-01"], "Tai nghe âm thanh vòm 7.1 có động cơ rung chân thực theo tiếng nổ, mic lọc tiếng ồn, đệm tai êm ái."),
-                ("SP-GAME-02", "Chuột Gaming Không dây Siêu nhẹ 55g", cat_map["Gaming Gear"], 420000, 680000, 14, 4, "chiếc", "active", IMAGE_MAP["SP-GAME-02"], "Cảm biến quang học 26000 DPI, kết nối không dây 1000Hz không độ trễ, trọng lượng siêu nhẹ 55 gram."),
-                ("SP-GAME-03", "Tay cầm chơi game Không dây Hall Effect H1", cat_map["Gaming Gear"], 460000, 750000, 9, 3, "chiếc", "active", IMAGE_MAP["SP-GAME-03"], "Cần joystick từ tính chống trôi vĩnh viễn, hỗ trợ PC, Nintendo Switch, điện thoại Android/iOS."),
-                ("SP-GAME-04", "Tấm lót chuột Led RGB Cỡ cực đại", cat_map["Gaming Gear"], 120000, 210000, 18, 5, "chiếc", "active", IMAGE_MAP["SP-GAME-04"], "Bề mặt vải speed mượt mà, viền LED RGB 14 chế độ phát sáng, kích thước 80x30cm chống trượt."),
-                ("SP-GAME-05", "Đế tản nhiệt Laptop Gaming 6 quạt mạnh mẽ", cat_map["Gaming Gear"], 190000, 310000, 0, 4, "chiếc", "active", IMAGE_MAP["SP-GAME-05"], "Đế làm mát có màn hình LED điều chỉnh tốc độ, 6 quạt gió cực mát (TẠM HẾT HÀNG để test).")
-            ]
-            cursor.executemany(
-                """INSERT INTO products (
-                    sku, name, category_id, cost_price, selling_price,
-                    stock_quantity, min_stock_alert, unit, status, image_url, description
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                products
-            )
-            print(f"[SEED] Đã tạo {len(products)} sản phẩm.")
-        else:
-            # Nếu đã có sản phẩm nhưng chưa có ảnh, cập nhật ảnh từ IMAGE_MAP
-            print("[SEED] Cập nhật ảnh cho các sản phẩm hiện có nếu còn trống...")
-            for sku, img_url in IMAGE_MAP.items():
+            # Gaming Gear
+            ("SP-GAME-01", "Tai nghe Gaming 7.1 Rung Bass G200", cat_map["Gaming Gear"], 380000, 590000, 11, 3, "chiếc", "active", IMAGE_MAP["SP-GAME-01"], "Tai nghe âm thanh vòm 7.1 có động cơ rung chân thực theo tiếng nổ, mic lọc tiếng ồn, đệm tai êm ái."),
+            ("SP-GAME-02", "Chuột Gaming Không dây Siêu nhẹ 55g", cat_map["Gaming Gear"], 420000, 680000, 14, 4, "chiếc", "active", IMAGE_MAP["SP-GAME-02"], "Cảm biến quang học 26000 DPI, kết nối không dây 1000Hz không độ trễ, trọng lượng siêu nhẹ 55 gram."),
+            ("SP-GAME-03", "Tay cầm chơi game Không dây Hall Effect H1", cat_map["Gaming Gear"], 460000, 750000, 9, 3, "chiếc", "active", IMAGE_MAP["SP-GAME-03"], "Cần joystick từ tính chống trôi vĩnh viễn, hỗ trợ PC, Nintendo Switch, điện thoại Android/iOS."),
+            ("SP-GAME-04", "Tấm lót chuột Led RGB Cỡ cực đại", cat_map["Gaming Gear"], 120000, 210000, 18, 5, "chiếc", "active", IMAGE_MAP["SP-GAME-04"], "Bề mặt vải speed mượt mà, viền LED RGB 14 chế độ phát sáng, kích thước 80x30cm chống trượt."),
+            ("SP-GAME-05", "Đế tản nhiệt Laptop Gaming 6 quạt mạnh mẽ", cat_map["Gaming Gear"], 190000, 310000, 0, 4, "chiếc", "active", IMAGE_MAP["SP-GAME-05"], "Đế làm mát có màn hình LED điều chỉnh tốc độ, 6 quạt gió cực mát (TẠM HẾT HÀNG để test).")
+        ]
+        prods_inserted = 0
+        for prod in products:
+            cursor.execute("SELECT id FROM products WHERE sku = ?", (prod[0],))
+            if not cursor.fetchone():
                 cursor.execute(
-                    "UPDATE products SET image_url = ? WHERE sku = ? AND (image_url IS NULL OR image_url = '')",
-                    (img_url, sku)
+                    """INSERT INTO products (
+                        sku, name, category_id, cost_price, selling_price,
+                        stock_quantity, min_stock_alert, unit, status, image_url, description
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    prod
                 )
+                prods_inserted += 1
+        if prods_inserted > 0:
+            print(f"[SEED] Đã tạo {prods_inserted} sản phẩm mới.")
 
-        # 4. Seed Customers
-        cursor.execute("SELECT COUNT(*) as cnt FROM customers")
-        if cursor.fetchone()["cnt"] == 0:
-            print("[SEED] Đang tạo khách hàng mẫu...")
-            customers = [
-                ("KH-001", "Nguyễn Văn An", "0987654321", "an.nguyen@example.com", "Số 12 Phố Cổ, Hoàn Kiếm, Hà Nội", "vip", 4850000),
-                ("KH-002", "Trần Thị Bình", "0912345678", "binh.tran@example.com", "45 Nguyễn Trãi, Quận 1, TP.HCM", "retail", 850000),
-                ("KH-003", "Lê Hoàng Long", "0934567890", "long.le@example.com", "Tòa nhà FPT, Cầu Giấy, Hà Nội", "wholesale", 12500000),
-                ("KH-004", "Phạm Minh Đức", "0978901234", "duc.pham@example.com", "88 Lê Duẩn, Hải Châu, Đà Nẵng", "retail", 320000),
-                ("KH-005", "Vũ Thu Trang", "0905123456", "trang.vu@example.com", "15 Phan Chu Trinh, Vũng Tàu", "vip", 3200000)
-            ]
-            cursor.executemany(
-                "INSERT INTO customers (customer_code, name, phone, email, address, group_name, total_spent) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                customers
+        # Cập nhật ảnh cho các sản phẩm hiện có nếu còn trống
+        for sku, img_url in IMAGE_MAP.items():
+            cursor.execute(
+                "UPDATE products SET image_url = ? WHERE sku = ? AND (image_url IS NULL OR image_url = '')",
+                (img_url, sku)
             )
-            print(f"[SEED] Đã tạo {len(customers)} khách hàng.")
 
-        # 5. Seed Sample Orders & Inventory Logs (để dashboard có dữ liệu doanh thu ngay)
-        cursor.execute("SELECT COUNT(*) as cnt FROM orders")
-        if cursor.fetchone()["cnt"] == 0:
-            print("[SEED] Đang tạo một số hóa đơn mẫu để phục vụ báo cáo...")
-            # Lấy id của một số sản phẩm
+        # 4. Seed Customers (Idempotent by customer_code)
+        customers = [
+            ("KH-001", "Nguyễn Văn An", "0987654321", "an.nguyen@example.com", "Số 12 Phố Cổ, Hoàn Kiếm, Hà Nội", "vip", 4850000),
+            ("KH-002", "Trần Thị Bình", "0912345678", "binh.tran@example.com", "45 Nguyễn Trãi, Quận 1, TP.HCM", "retail", 850000),
+            ("KH-003", "Lê Hoàng Long", "0934567890", "long.le@example.com", "Tòa nhà FPT, Cầu Giấy, Hà Nội", "wholesale", 12500000),
+            ("KH-004", "Phạm Minh Đức", "0978901234", "duc.pham@example.com", "88 Lê Duẩn, Hải Châu, Đà Nẵng", "retail", 320000),
+            ("KH-005", "Vũ Thu Trang", "0905123456", "trang.vu@example.com", "15 Phan Chu Trinh, Vũng Tàu", "vip", 3200000)
+        ]
+        custs_inserted = 0
+        for cust in customers:
+            cursor.execute("SELECT id FROM customers WHERE customer_code = ?", (cust[0],))
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO customers (customer_code, name, phone, email, address, group_name, total_spent) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    cust
+                )
+                custs_inserted += 1
+        if custs_inserted > 0:
+            print(f"[SEED] Đã tạo {custs_inserted} khách hàng mới.")
+
+        # Liên kết tài khoản customer với hồ sơ khách hàng (Customer Role RBAC)
+        cursor.execute("SELECT id FROM users WHERE username = 'customer'")
+        u_cust = cursor.fetchone()
+        if u_cust:
+            cursor.execute("UPDATE customers SET user_id = ? WHERE customer_code = 'KH-001' AND (user_id IS NULL OR user_id != ?)", (u_cust["id"], u_cust["id"]))
+
+        cursor.execute("SELECT id FROM users WHERE username = 'customer2'")
+        u_cust2 = cursor.fetchone()
+        if u_cust2:
+            cursor.execute("UPDATE customers SET user_id = ? WHERE customer_code = 'KH-002' AND (user_id IS NULL OR user_id != ?)", (u_cust2["id"], u_cust2["id"]))
+
+        # 5. Seed Sample Orders & Inventory Logs (Idempotent by order_code and receipt_code)
+        # Hóa đơn 1 (Đã hoàn tất)
+        cursor.execute("SELECT id FROM orders WHERE order_code = 'HD-20260901-001'")
+        if not cursor.fetchone():
             cursor.execute("SELECT id, selling_price, stock_quantity FROM products WHERE sku = 'SP-AUDIO-01'")
             sp1 = cursor.fetchone()
             cursor.execute("SELECT id, selling_price, stock_quantity FROM products WHERE sku = 'SP-OFFICE-01'")
             sp2 = cursor.fetchone()
+            if sp1 and sp2:
+                cursor.execute(
+                    """INSERT INTO orders (order_code, customer_id, user_id, total_amount, discount_amount, final_amount, payment_method, status, note, created_at)
+                       VALUES ('HD-20260901-001', 1, 2, 1340000, 40000, 1300000, 'transfer', 'completed', 'Khách VIP mua trực tiếp', datetime('now', '-2 days'))"""
+                )
+                order1_id = cursor.lastrowid
+                cursor.execute(
+                    "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)",
+                    (order1_id, sp1["id"], 1, 350000, 350000)
+                )
+                cursor.execute(
+                    "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)",
+                    (order1_id, sp2["id"], 1, 990000, 990000)
+                )
+                cursor.execute(
+                    "INSERT INTO inventory_logs (product_id, change_type, reference_code, quantity_before, change_quantity, quantity_after, note, created_at) VALUES (?, 'sale', 'HD-20260901-001', ?, -1, ?, 'Bán hàng cho khách VIP', datetime('now', '-2 days'))",
+                    (sp1["id"], sp1["stock_quantity"] + 1, sp1["stock_quantity"])
+                )
+
+        # Hóa đơn 2 (Đã hoàn tất hôm nay)
+        cursor.execute("SELECT id FROM orders WHERE order_code = 'HD-20260903-002'")
+        if not cursor.fetchone():
             cursor.execute("SELECT id, selling_price, stock_quantity FROM products WHERE sku = 'SP-ACC-01'")
             sp3 = cursor.fetchone()
+            if sp3:
+                cursor.execute(
+                    """INSERT INTO orders (order_code, customer_id, user_id, total_amount, discount_amount, final_amount, payment_method, status, note, created_at)
+                       VALUES ('HD-20260903-002', 2, 2, 480000, 0, 480000, 'cash', 'completed', 'Khách lẻ thanh toán tiền mặt', datetime('now', '-2 hours'))"""
+                )
+                order2_id = cursor.lastrowid
+                cursor.execute(
+                    "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)",
+                    (order2_id, sp3["id"], 1, 480000, 480000)
+                )
 
-            # Hóa đơn 1 (Đã hoàn tất)
-            cursor.execute(
-                """INSERT INTO orders (order_code, customer_id, user_id, total_amount, discount_amount, final_amount, payment_method, status, note, created_at)
-                   VALUES ('HD-20260901-001', 1, 2, 1340000, 40000, 1300000, 'transfer', 'completed', 'Khách VIP mua trực tiếp', datetime('now', '-2 days'))"""
-            )
-            order1_id = cursor.lastrowid
-            cursor.execute(
-                "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)",
-                (order1_id, sp1["id"], 1, 350000, 350000)
-            )
-            cursor.execute(
-                "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)",
-                (order1_id, sp2["id"], 1, 990000, 990000)
-            )
-
-            # Ghi nhật ký inventory logs
-            cursor.execute(
-                "INSERT INTO inventory_logs (product_id, change_type, reference_code, quantity_before, change_quantity, quantity_after, note, created_at) VALUES (?, 'sale', 'HD-20260901-001', ?, -1, ?, 'Bán hàng cho khách VIP', datetime('now', '-2 days'))",
-                (sp1["id"], sp1["stock_quantity"] + 1, sp1["stock_quantity"])
-            )
-
-            # Hóa đơn 2 (Đã hoàn tất hôm nay)
-            cursor.execute(
-                """INSERT INTO orders (order_code, customer_id, user_id, total_amount, discount_amount, final_amount, payment_method, status, note, created_at)
-                   VALUES ('HD-20260903-002', 2, 2, 480000, 0, 480000, 'cash', 'completed', 'Khách lẻ thanh toán tiền mặt', datetime('now', '-2 hours'))"""
-            )
-            order2_id = cursor.lastrowid
-            cursor.execute(
-                "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)",
-                (order2_id, sp3["id"], 1, 480000, 480000)
-            )
-
-            # Phiếu nhập hàng ban đầu (Purchase Receipt)
+        # Phiếu nhập hàng ban đầu (Purchase Receipt)
+        cursor.execute("SELECT id FROM purchase_receipts WHERE receipt_code = 'PN-20260901-001'")
+        if not cursor.fetchone():
             cursor.execute(
                 """INSERT INTO purchase_receipts (receipt_code, supplier_name, user_id, total_amount, status, note)
                    VALUES ('PN-20260901-001', 'Tổng kho Phụ kiện DigiTech Sài Gòn', 1, 15000000, 'completed', 'Nhập lô hàng đầu tháng 9')"""
             )
-
-            print("[SEED] Đã tạo hóa đơn mẫu và phiếu nhập thành công.")
 
         # 6. Seed Product Visual Metadata (Phase 12B)
         cursor.execute("SELECT id, sku, image_url FROM products")

@@ -4,13 +4,13 @@ skinparam shadowing false
 
 actor "Khách hàng (Customer)" as Customer
 boundary "AiAssistantPage" as UI
-control "AiRouter" as Router
+control "AiRouter (/api/v1/ai/sales-qa)" as Router
 control "AiService" as AI
 entity "SQLite DB (`customers`, `orders`)" as DB
 control "Google Gemini API" as Gemini
 
 Customer -> UI: Nhập "Kiểm tra đơn hàng gần nhất của tôi"
-UI -> Router: POST /api/v1/ai/chat (Bearer Token của Customer)
+UI -> Router: POST /api/v1/ai/sales-qa (Bearer Token của Customer)
 Router -> Router: get_current_user -> current_user (id=10, role='customer')
 Router -> AI: answer_sales_qa(query, current_user)
 

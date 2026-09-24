@@ -79,19 +79,19 @@ class InventoryService:
 
                 if not product:
                     raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
+                        status_code=404,
                         detail=f"Không tìm thấy sản phẩm với ID {item.product_id}"
                     )
 
                 if product["status"] != "active":
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                        status_code=400,
                         detail=f"Sản phẩm '{product['name']}' (SKU: {product['sku']}) hiện đang ngừng kinh doanh"
                     )
 
                 if product["stock_quantity"] < item.quantity:
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                        status_code=400,
                         detail=(
                             f"Sản phẩm '{product['name']}' không đủ số lượng tồn kho. "
                             f"Tồn hiện tại: {product['stock_quantity']}, yêu cầu: {item.quantity}."

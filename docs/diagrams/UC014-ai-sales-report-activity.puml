@@ -11,20 +11,20 @@ start
 if (Vai trò là SuperAdmin?) then (Hợp lệ)
     :ReportService tổng hợp số liệu thực tế từ SQLite:
     - Doanh thu hôm nay, tuần này, tháng này
-    - Top 5 mặt hàng bán chạy nhất
+    - Top mặt hàng bán chạy nhất
     - Danh sách hàng tồn dưới mức an toàn;
     :Nạp Prompt `sales_report.txt`;
     :Đóng gói số liệu SQL Facts vào Prompt Context;
-    :Gọi Google Gemini 3.6 Flash;
+    :Gọi Google Gemini Generative Model;
     if (Gemini gọi thành công?) then (Có)
         :Gemini sinh nhận xét chiến lược và khuyến nghị nhập hàng;
     else (Lỗi API)
-        :Fallback: Sinh bản tóm tắt số liệu kinh doanh định dạng bảng;
+        :Fallback: Sinh bản tóm tắt số liệu kinh doanh định dạng bảng từ SQLite;
     endif
     :Bộ lọc Secret Sanitizer kiểm tra nội dung;
     :Ghi nhận vào `ai_audit_logs`;
-    :Backend trả kết quả Markdown;
-    :Frontend render giao diện phân tích tài chính;
+    :Backend trả kết quả Markdown phân tích;
+    :Frontend hiển thị giao diện phân tích tài chính thông minh;
     stop
 else (Không phải SuperAdmin)
     :Backend trả lỗi HTTP 403 Forbidden;

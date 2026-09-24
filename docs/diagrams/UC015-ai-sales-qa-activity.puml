@@ -3,7 +3,7 @@ skinparam defaultFontName "Arial"
 skinparam shadowing false
 
 start
-:Người dùng gửi câu hỏi qua Trợ lý AI (/api/v1/ai/chat);
+:Người dùng gửi câu hỏi qua Trợ lý AI (POST /api/v1/ai/sales-qa);
 :Backend kiểm tra Rate Limit & Cooldown;
 
 partition "1. Phòng thủ Prompt Injection" {

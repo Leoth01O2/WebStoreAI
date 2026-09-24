@@ -162,21 +162,12 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
   return (
     <>
       <header className="retro-navbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+        <div className="nav-left-section">
           {/* Mobile Hamburger Button */}
           <button
             className="mobile-menu-toggle"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             aria-label="Toggle navigation menu"
-            style={{
-              display: 'none',
-              background: 'transparent',
-              border: '1px solid var(--border-color)',
-              color: 'var(--text-primary)',
-              borderRadius: '4px',
-              padding: '0.4rem',
-              cursor: 'pointer',
-            }}
           >
             {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -196,7 +187,7 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
                 <button
                   key={item.id}
                   onClick={() => handleSelectTab(item.id)}
-                  className={`nav-item ${isActive ? 'active' : ''}`}
+                  className={`nav-item ${isActive ? 'active' : ''} ${orderBadge ? 'has-badge' : ''}`}
                 >
                   <Icon size={16} />
                   <span>{item.label}</span>
@@ -211,6 +202,7 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
                         fontWeight: 700,
                         fontFamily: 'var(--font-mono)',
                         boxShadow: orderBadge.type === 'danger' ? '0 0 8px rgba(239, 68, 68, 0.4)' : 'none',
+                        whiteSpace: 'nowrap',
                       }}
                       title={orderBadge.label}
                     >
@@ -229,7 +221,7 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
             <button
               onClick={() => handleSelectTab('products')}
               className="badge badge-amber nav-alert-btn"
-              style={{ cursor: 'pointer', border: '1px solid var(--amber-primary)', padding: '0.3rem 0.6rem' }}
+              style={{ cursor: 'pointer', border: '1px solid var(--amber-primary)' }}
               title={`${lowStockCount} sản phẩm sắp hết hàng`}
             >
               <AlertTriangle size={14} />
@@ -246,8 +238,8 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
 
           {user ? (
             <>
-              <div className="user-profile-badge" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{user?.full_name}</span>
+              <div className="user-profile-badge" title={user?.full_name}>
+                <span className="user-full-name">{user?.full_name}</span>
                 <RoleBadge role={user?.role} />
               </div>
 
@@ -265,7 +257,6 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
             <button
               onClick={() => handleSelectTab('login')}
               className="btn btn-primary btn-sm login-btn"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.35rem 0.85rem' }}
             >
               <LogIn size={14} />
               <span>Đăng Nhập</span>

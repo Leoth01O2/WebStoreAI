@@ -10,23 +10,25 @@ start
 if (Kiểm tra form hợp lệ?) then (Có)
     :Frontend gửi POST /api/v1/auth/login;
     :Backend truy vấn bảng `users` theo username;
-    if (Tìm thấy tài khoản?) then (Có)
+    if (Tìm thấy tài khoản & is_active == 1?) then (Có)
         :So khớp mật khẩu bằng bcrypt;
         if (Mật khẩu chính xác?) then (Có)
             :Sinh JWT Access Token (HMAC-SHA256, hạn 8h);
-            :Backend trả HTTP 200 kèm access_token;
+            :Backend trả HTTP 200 kèm access_token và user info (4 DB Roles);
             :Frontend lưu token vào localStorage;
-            :AuthContext cập nhật trạng thái isAuthenticated;
+            :AuthContext cập nhật trạng thái đăng nhập;
             if (Vai trò người dùng?) then (SuperAdmin)
-                :Chuyển hướng về trang POS / Dashboard;
-            else (Customer / Staff / Admin)
-                :Chuyển hướng về trang POS Storefront;
+                :Chuyển hướng về trang Dashboard / Báo cáo tài chính;
+            elseif (Admin / Staff) then (Admin/Staff)
+                :Chuyển hướng về trang Bán hàng POS / Quản lý đơn hàng;
+            else (Customer)
+                :Chuyển hướng về trang Storefront / Cửa hàng;
             endif
             stop
         else (Sai mật khẩu)
             :Backend trả HTTP 401 "Sai tên đăng nhập hoặc mật khẩu";
         endif
-    else (Không tồn tại)
+    else (Không tồn tại hoặc bị khóa)
         :Backend trả HTTP 401 "Sai tên đăng nhập hoặc mật khẩu";
     endif
 else (Dữ liệu rỗng)

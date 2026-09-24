@@ -342,7 +342,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
   };
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '1440px', margin: '0 auto' }}>
+    <div style={{ padding: 'clamp(0.65rem, 2.5vw, 1.5rem)', maxWidth: '1440px', margin: '0 auto' }}>
       {/* Top Banner / System Status */}
       <div
         style={{
@@ -557,7 +557,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
             </div>
 
             <form onSubmit={handleRecommendSubmit}>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '0.75rem', alignItems: 'flex-end' }}>
+              <div className="ai-query-grid">
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
                     Yêu cầu / Nhu cầu khách hàng:
@@ -668,7 +668,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
           )}
 
           {!recLoading && recResult && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '1.5rem' }}>
+            <div className="ai-results-split">
               {/* Left Column: AI Text Explanation in CRT Terminal style */}
               <div
                 style={{
@@ -833,7 +833,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1.2fr) 1fr', gap: '1.25rem' }}>
+            <div className="ai-image-search-split">
               {/* Drag and Drop Zone */}
               <div>
                 <input
@@ -1212,13 +1212,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
                       </div>
                     </div>
                   ) : (
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                        gap: '1.25rem',
-                      }}
-                    >
+                    <div className="ai-product-cards-grid">
                       {imgSearchResult.results.map((product) => (
                         <ProductCard
                           key={product.id || product.sku}
@@ -1518,7 +1512,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
               </h3>
 
               {previewUrl && selectedProductDetail.relationship ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', margin: '1rem 0' }}>
+                <div className="form-grid-2" style={{ gap: '1rem', margin: '1rem 0' }}>
                   {/* Uploaded Preview */}
                   <div style={{ border: '1px solid var(--border-color)', borderRadius: '4px', padding: '0.75rem', textAlign: 'center' }}>
                     <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
@@ -1560,7 +1554,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
                   marginBottom: '1rem',
                 }}
               >
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', fontSize: '0.85rem' }}>
+                <div className="form-grid-2" style={{ gap: '0.75rem', fontSize: '0.85rem' }}>
                   <div>
                     <span style={{ color: 'var(--text-muted)' }}>Giá bán niêm yết: </span>
                     <strong style={{ color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>

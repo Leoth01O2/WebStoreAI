@@ -221,7 +221,7 @@ export const DashboardPage = ({ onNavigate }) => {
       </div>
 
       {/* TWO COLUMNS: TOP SELLING PRODUCTS & LOW STOCK ALERTS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem' }}>
+      <div className="dashboard-two-col-grid">
         {/* Column 1: Top Selling Products */}
         <div className="retro-card">
           <div className="retro-card-header">

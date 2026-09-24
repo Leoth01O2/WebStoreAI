@@ -3,23 +3,23 @@ skinparam defaultFontName "Arial"
 skinparam shadowing false
 
 start
-:Người dùng chọn tab [Báo cáo doanh thu];
-:Frontend gửi request kèm JWT Token;
+:Người dùng chọn menu [Báo cáo Doanh thu];
+:Frontend gửi request kèm JWT Bearer Token;
 
 if (Kiểm tra vai trò người dùng?) then (SuperAdmin)
-    :Frontend gọi GET /api/v1/reports/overview;
-    :Backend kiểm tra require_roles(['superadmin']);
-    :Truy vấn tổng doanh thu (Hôm nay, 7 ngày, Tháng này, Toàn bộ);
-    :Truy vấn tổng số đơn hàng đã hoàn tất;
-    :Truy vấn Top 5 sản phẩm bán chạy nhất;
-    :Truy vấn danh sách sản phẩm cảnh báo hết hàng;
-    :Backend trả về dữ liệu JSON thống kê;
-    :Frontend vẽ biểu đồ RetroChart và các thẻ KPI;
+    :Frontend gọi GET /api/v1/reports/summary & revenue-trend;
+    :Backend kiểm tra require_roles("superadmin");
+    :Truy vấn tổng doanh thu (Hôm nay, 7 ngày, Tháng này, Toàn thời gian);
+    :Truy vấn tổng số đơn hàng đã hoàn tất (status='completed');
+    :Truy vấn Top sản phẩm bán chạy nhất;
+    :Truy vấn danh sách sản phẩm cảnh báo tồn kho thấp;
+    :Backend trả về dữ liệu JSON thống kê tài chính;
+    :Frontend hiển thị các thẻ KPI và biểu đồ phân tích xu hướng;
     stop
 else (Admin / Staff / Customer / Guest)
-    :Hệ thống chặn truy cập;
-    :Frontend tự động chuyển hướng về tab POS;
-    :Backend trả HTTP 403 Forbidden nếu gọi trực tiếp API;
+    :Hệ thống chặn truy cập tại cả Frontend và Backend;
+    :Backend lập tức trả HTTP 403 Forbidden;
+    :Frontend hiển thị thông báo từ chối truy cập;
     stop
 endif
 @enduml
