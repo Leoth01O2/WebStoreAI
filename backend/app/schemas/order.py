@@ -35,6 +35,9 @@ class OrderItemResponse(BaseModel):
 
 class OrderCreate(BaseModel):
     customer_id: Optional[int] = Field(None, description="ID khách hàng (nếu có)")
+    shipping_name: Optional[str] = Field(None, description="Tên người nhận hàng")
+    shipping_phone: Optional[str] = Field(None, description="Số điện thoại người nhận")
+    shipping_address: Optional[str] = Field(None, description="Địa chỉ giao hàng")
     discount_amount: float = Field(0.0, ge=0, description="Số tiền giảm giá")
     payment_method: str = Field("cash", description="Phương thức: cash, transfer, card")
     payment_status: Optional[str] = Field("completed", description="Trạng thái thanh toán: pending, paid, completed")
@@ -58,6 +61,11 @@ class OrderResponse(BaseModel):
     customer_phone: Optional[str] = None
     user_id: Optional[int] = None
     user_name: Optional[str] = None
+    assigned_to: Optional[int] = None
+    shipping_name: Optional[str] = None
+    shipping_phone: Optional[str] = None
+    shipping_address: Optional[str] = None
+    is_legacy_unverified: int = 0
     total_amount: float
     discount_amount: float
     final_amount: float

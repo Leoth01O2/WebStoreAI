@@ -115,15 +115,22 @@ class InventoryService:
 
             final_amount = max(0.0, total_amount - order_in.discount_amount)
             payment_status = getattr(order_in, "payment_status", None) or "completed"
+            # Bảo vệ chống Mass Assignment: assigned_to luôn NULL khi tạo đơn mới (chỉ gán qua claim_order có kiểm tra quyền ở R3)
+            # is_legacy_unverified luôn 0 cho mọi đơn mới tạo
+            shipping_name = getattr(order_in, "shipping_name", None)
+            shipping_phone = getattr(order_in, "shipping_phone", None)
+            shipping_address = getattr(order_in, "shipping_address", None)
 
             # 2. Tạo bản ghi Hóa đơn (Order)
             cursor.execute(
                 """INSERT INTO orders (
-                    order_code, customer_id, user_id, total_amount,
+                    order_code, customer_id, user_id, assigned_to, shipping_name,
+                    shipping_phone, shipping_address, is_legacy_unverified, total_amount,
                     discount_amount, final_amount, payment_method, payment_status, status, note, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, NULL, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    order_code, order_in.customer_id, user_id, total_amount,
+                    order_code, order_in.customer_id, user_id, shipping_name,
+                    shipping_phone, shipping_address, total_amount,
                     order_in.discount_amount, final_amount, order_in.payment_method,
                     payment_status, order_status, order_in.note, created_at
                 )
@@ -211,6 +218,11 @@ class InventoryService:
                 "rejected_by": None,
                 "rejected_at": None,
                 "rejection_reason": None,
+                "assigned_to": None,
+                "shipping_name": shipping_name,
+                "shipping_phone": shipping_phone,
+                "shipping_address": shipping_address,
+                "is_legacy_unverified": 0,
                 "created_at": created_at,
                 "items": result_items
             }

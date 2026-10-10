@@ -1,0 +1,693 @@
+# STOREFLOW AI 2.0 — COMPREHENSIVE SYSTEM AUDIT & MODERNIZATION ROADMAP
+
+> **Tài liệu Kế hoạch Kiểm toán & Lộ trình Hiện đại hóa Toàn diện Hệ thống**  
+> **Dự án**: StoreFlow AI — Hệ thống Quản lý Bán hàng Bán lẻ & POS Tích hợp AI Đa vai trò  
+> **Mã giai đoạn**: R0 (System Audit & Phased Architecture Plan — Phiên bản Chuẩn hóa Cuối cùng)  
+> **Phiên bản tài liệu**: 2.3.0-FINAL  
+> **Ngày cập nhật**: 10/10/2026  
+> **Môi trường mục tiêu**: Windows 11 | CPU Intel Core i5-11400H (6C/12T) | RAM 16GB | GPU NVIDIA GeForce RTX 3050 Laptop (4GB VRAM) | Python 3.12 / FastAPI / SQLite (WAL) / React 19 / Vite 8 / Native Fetch  
+> **Nguyên tắc thực hiện Giai đoạn R0**: **AUDIT + DESIGN PLAN ONLY — TUYỆT ĐỐI CHƯA SỬA APPLICATION CODE, DATABASE HOẶC TÀI LIỆU DOCX/PLANTUML.**
+
+---
+
+## MỤC LỤC TỔNG QUAN
+
+1. [Phần 1: Xác định Bản Code Nguồn Chuẩn & Kiểm toán Công nghệ Thực tế](#phần-1-xác-định-bản-code-nguồn-chuẩn--kiểm-toán-công-nghệ-thực-tế)
+2. [Phần 2: Chuẩn hóa Trường Trạng thái & Cơ chế Dữ liệu Lịch sử](#phần-2-chuẩn-hóa-trường-trạng-thái--cơ-chế-dữ-liệu-lịch-sử)
+3. [Phần 3: Quy trình Nghiệp vụ Thanh toán, Chuyển khoản & Xử lý Giao hàng Thất bại](#phần-3-quy-trình-nghiệp-vụ-thanh-toán-chuyển-khoản--xử-lý-giao-hàng-thất-bại)
+4. [Phần 4: Phân định Trách nhiệm RBAC, Tự Đăng ký & Backend Data Masking](#phần-4-phân-định-trách-nhiệm-rbac-tự-đăng-ký--backend-data-masking)
+5. [Phần 5: Kế hoạch AI RAG, Ngưỡng Cutoff & Benchmark Thực nghiệm AI Local](#phần-5-kế-hoạch-ai-rag-ngưỡng-cutoff--benchmark-thực-nghiệm-ai-local)
+6. [Phần 6: Kế hoạch UI/UX & Typography Be Vietnam Pro](#phần-6-kế-hoạch-uiux--typography-be-vietnam-pro)
+7. [Phần 7: Bảng Phân loại Lỗi & Rủi ro Bảo mật Ưu tiên](#phần-7-bảng-phân-loại-lỗi--rủi-ro-bảo-mật-ưu-tiên)
+8. [Phần 8: Lộ trình Triển khai Phân kỳ Chia nhỏ R1 – R8 (Kèm Điểm Dừng STOP)](#phần-8-lộ-trình-triển-khai-phân-kỳ-chia-nhỏ-r1--r8-kèm-điểm-dừng-stop)
+9. [Phần 9: Danh mục Quyết định Nghiệp vụ Cần Người Dùng Phê duyệt](#phần-9-danh-mục-quyết-định-nghiệp-vụ-cần-người-dùng-phê-duyệt)
+
+---
+
+## PHẦN 1: XÁC ĐỊNH BẢN CODE NGUỒN CHUẨN & KIỂM TOÁN CÔNG NGHỆ THỰC TẾ
+
+### 1.1. Hiện trạng Git Local & Đối chiếu GitHub Remote
+- **Current Branch**: `main`
+- **Current HEAD Commit SHA**: `cebd88f40994d4efdbe0badfec5841b05b0ea684`
+- **Remote Tracking**: `origin/main` ([https://github.com/Leoth01O2/WebStoreAI.git](https://github.com/Leoth01O2/WebStoreAI.git))
+- **Remote Branches hiện diện**: `origin/main`, `origin/kien335`, `origin/HEAD`
+- **So sánh `origin/main..HEAD`**: 0 commit (hoàn toàn đồng bộ, không rẽ nhánh cục bộ).
+- **So sánh `HEAD..origin/main`**: 0 commit (không có commit mới trên remote chưa fetch).
+- **Trạng thái Working Tree (`git status -sb`)**: Clean (`## main...origin/main`), không có uncommitted changes ngoài tệp kế hoạch này.
+- **Nguyên tắc bảo vệ mã nguồn**: Không tự động pull, reset, checkout, rebase, merge, push hoặc ghi đè trong suốt quá trình kiểm toán.
+
+### 1.2. Kiểm toán Công nghệ Thực tế (Đính chính Dựa trên Codebase Thực tế)
+- **Frontend Stack (Kiểm chứng qua `frontend/package.json` và `frontend/src/services/api.js`)**:
+  - **Framework UI**: **React 19** (`"react": "^19.2.8"`, `"react-dom": "^19.2.8"`). *(Không phải React 18)*
+  - **Build Tool**: **Vite 8** (`"vite": "^8.2.2"`), plugin `"@vitejs/plugin-react": "^6.1.0"`. *(Không phải Vite 5)*
+  - **Linter**: **Oxlint** (`"oxlint": "^1.79.0"`).
+  - **API Client**: **Native Fetch API** (được đóng gói trong `frontend/src/services/api.js:33-75` với interceptor xử lý JWT header, Bearer token và 401 redirect). **Codebase hoàn toàn KHÔNG sử dụng thư viện `axios`**.
+  - **UI Libraries**: `lucide-react` (`^1.41.0`), `react-markdown` (`^10.1.0`), `remark-gfm` (`^4.0.1`), `remark-breaks` (`^4.0.0`).
+- **Backend Stack**:
+  - Python 3.12, **FastAPI 0.115+**, Pydantic v2.
+  - Database: **SQLite 3** kích hoạt WAL mode (`PRAGMA journal_mode = WAL`), Foreign Keys (`PRAGMA foreign_keys = ON`), timeout 5000ms.
+  - Security: `bcrypt`, `pyjwt` (HS256).
+  - AI & Vector: `google-genai` SDK (`gemini-3.6-flash`), `chromadb 1.5.9` (PersistentClient).
+- **Kiểm kê Tệp Dữ liệu**:
+  - `backend/webstore.db`: Database SQLite hoạt động chính (585,728 bytes).
+  - `backend/storeflow.db`: Tệp rỗng (0 bytes). **Chưa xóa ngay trong R0**; cần kiểm tra cấu hình cũ trước khi dọn dẹp ở Phase R2.
+  - Thư mục ChromaDB: Tồn tại `backend/chroma_data`, `backend/chroma_db` và `./chroma.sqlite3`. Cần rà soát collection thực tế trước khi hợp nhất.
+
+---
+
+## PHẦN 2: CHUẨN HÓA TRƯỜNG TRẠNG THÁI & CƠ CHẾ DỮ LIỆU LỊCH SỬ
+
+### 2.1. Quyết Định Chuẩn Hóa Tên Trường Trạng Thái Đơn Hàng
+- **Thực trạng**: Toàn bộ codebase hiện tại (backend routing, service logic, database DDL và giao diện frontend) đang sử dụng trường **`orders.status`** để theo dõi vòng đời đơn hàng.
+- **Quyết định kiến trúc chuẩn hóa**:
+  - **Tiếp tục giữ nguyên tên trường `status` trong bảng `orders`** làm định danh duy nhất cho vòng đời đơn hàng.
+  - **TUYỆT ĐỐI KHÔNG tạo thêm trường `order_status` song song**:
+    - Không tạo 2 trường trạng thái trùng nghĩa thiếu đồng bộ. Việc tồn tại cả `status` và `order_status` sẽ dẫn đến nguy cơ sai lệch dữ liệu ("Split-Brain State"), gây khó khăn cho việc đồng bộ giao dịch.
+    - Ưu tiên cao nhất là tính tương thích ngược với API hiện hành (`OrderResponse`, `orders.py`), các bộ lọc truy vấn giao diện frontend (`OrdersPage.jsx`), hệ thống báo cáo doanh thu và toàn bộ 167+ bản ghi dữ liệu lịch sử.
+  - **Enum chính thức của `orders.status`**:
+    $$\text{Status Enum} = \{\text{'pending'}, \text{'admin_approved'}, \text{'processing'}, \text{'completed'}, \text{'rejected'}, \text{'cancelled'}\}$$
+
+---
+
+### 2.2. Chuẩn Hóa Đầy Đủ Enum của `payment_status` & Tách Cờ Lịch Sử
+- **Enum chính thức của `orders.payment_status`** (chỉ gồm 5 trạng thái chuẩn hóa duy nhất):
+  ```sql
+  CHECK(payment_status IN ('unpaid', 'pending_verification', 'paid', 'refund_pending', 'refunded'))
+  ```
+- **Phân định rạch ròi giữa trạng thái thanh toán hiện tại và cờ dữ liệu lịch sử**:
+  1. **Không sử dụng `cancelled_unpaid`**:
+     - `cancelled_unpaid` không thuộc enum thanh toán chính thức.
+     - Khi một đơn hàng chưa thanh toán bị hủy, trạng thái nghiệp vụ của đơn là `status = 'cancelled'`, và `payment_status` giữ nguyên là `'unpaid'` (bản chất tiền chưa từng phát sinh). Không làm phình to hoặc méo mó enum thanh toán.
+  2. **Tách biệt cờ lịch sử `is_legacy_unverified`**:
+     - `unverified_legacy` **KHÔNG PHẢI là một trạng thái thanh toán** và không được đưa vào enum `payment_status`.
+     - Thay vào đó, dữ liệu lịch sử cần đối soát được quản lý bằng một **cột cờ độc lập**:
+       ```sql
+       ALTER TABLE orders ADD COLUMN is_legacy_unverified INTEGER NOT NULL DEFAULT 0;
+       ```
+     - Toàn bộ các đơn hàng tạo trước đợt refactor sẽ được đánh dấu `is_legacy_unverified = 1` để Kế toán nhận diện và chạy quy trình đối soát riêng biệt. Tuyệt đối không tự động chuyển các đơn cũ thành `paid` và không làm sai lệch enum chuẩn.
+  3. **Bất biến Hoàn tiền (Refund Invariant)**:
+     - **Tuyệt đối không đánh dấu `refunded` khi chưa từng nhận tiền**.
+     - Đơn có `payment_status = 'unpaid'` khi hủy vẫn giữ `'unpaid'`. Chỉ những đơn đã xác minh thu tiền (`payment_status = 'paid'`) mới có thể chuyển sang `'refund_pending'` và sau đó là `'refunded'` khi kế toán thực hiện lệnh hoàn tiền có mã giao dịch trả tiền thực tế.
+
+---
+
+### 2.3. Trạng Thái Giao Vận Độc Lập (`fulfillment_status`)
+Để quản lý việc xuất kho và giao vận hàng hóa chính xác mà không làm lẫn lộn với vòng đời phê duyệt đơn hàng (`status`), hệ thống bổ sung cột độc lập:
+```sql
+CHECK(fulfillment_status IN ('unfulfilled', 'packing', 'shipping', 'delivered', 'delivery_failed', 'returned_to_inventory'))
+```
+
+---
+
+## PHẦN 3: QUY TRÌNH NGHIỆP VỤ THANH TOÁN, CHUYỂN KHOẢN & XỬ LÝ GIAO HÀNG THẤT BẠI
+
+### 3.1. Quy Trình Thanh Toán Chuyển Khoản & Đối Soát Ngân Hàng
+Tuyệt đối không tự động xác nhận đã thu tiền khi khách hàng chọn hình thức chuyển khoản:
+
+1. **Chuẩn hóa 3 mốc trạng thái chuyển khoản**:
+   - `unpaid`: Đơn mới tạo chọn hình thức chuyển khoản $\rightarrow$ Khởi tạo mặc định là `payment_status = 'unpaid'` (Chưa thanh toán / Chưa báo đã chuyển). Tuyệt đối không tự động coi là đã thanh toán hay tự động kích hoạt xuất kho.
+   - `pending_verification`: Khách hàng (hoặc nhân viên ghi nhận yêu cầu) gửi thông báo đã chuyển tiền kèm mã giao dịch ngân hàng / ảnh chụp bill $\rightarrow$ Đơn chuyển sang trạng thái chờ đối soát.
+   - `paid`: Đã xác minh tiền thực nhận vào tài khoản ngân hàng thụ hưởng của cửa hàng.
+
+2. **Sơ đồ luồng trạng thái chuyển khoản**:
+```
+[1. Khách đặt đơn chọn Chuyển khoản]
+       │
+       ▼
+   payment_status = 'unpaid' (Đơn tạo mới, chưa nhận tiền, chưa báo chuyển)
+       │
+       ▼ (Khách hàng thông báo đã chuyển tiền kèm mã tham chiếu giao dịch)
+   payment_status = 'pending_verification' (Chờ đối soát)
+       │
+       ▼ (Admin / Kế toán đối soát biến động số dư ngân hàng thực tế)
+   ┌────────────────────────────────────────────────────────────────┐
+   │ BẰNG CHỨNG HỢP LỆ: Sao kê tài khoản / Biến động số dư thực nhận│
+   │ KHÔNG CHẤP NHẬN: Ảnh chụp màn hình từ khách (dễ bị fake bill)  │
+   │                  (Ảnh bill chỉ là tài liệu tham chiếu mã GD)   │
+   └────────────────────────────────────────────────────────────────┘
+       │
+   ├── [Xác nhận tiền thực nhận vào tài khoản] ──► payment_status = 'paid' (Cho phép xuất kho)
+   └── [Quá hạn / Không nhận được tiền]        ──► Từ chối duyệt, giữ/trả về payment_status = 'unpaid'
+```
+
+3. **Thẩm quyền chuyển trạng thái & Yêu cầu bằng chứng**:
+   - **Từ `unpaid` sang `pending_verification`**: Khách hàng (Customer) hoặc Nhân viên bán hàng (Staff) có quyền gửi thông báo đã chuyển tiền qua endpoint `POST /orders/{id}/notify-transfer`.
+   - **Từ `pending_verification` sang `paid`**: **DUY NHẤT Admin hoặc SuperAdmin** (đóng vai trò Kế toán / Chủ cơ sở) mới có quyền gọi endpoint `POST /orders/{id}/verify-payment` để xác nhận đã thu tiền.
+   - **Yêu cầu bằng chứng bắt buộc**:
+     - Bằng chứng hợp lệ là bản sao kê tài khoản ngân hàng, thông báo biến động số dư SMS/App ngân hàng chính thức từ phía tài khoản thụ hưởng của cửa hàng.
+     - Ảnh chụp màn hình chuyển khoản từ khách hàng chỉ có giá trị tham khảo mã tham chiếu (Transaction Ref/FT code), tuyệt đối KHÔNG được dùng làm căn cứ tự động xác nhận đã nhận tiền.
+     - Hệ thống lưu vết bắt buộc: `payment_verified_by` (User ID), `payment_verified_at` (Timestamp), và `bank_transaction_code` (Mã giao dịch ngân hàng).
+
+---
+
+### 3.2. Quy Tắc Hoàn Tiền Chặt Chẽ (Refund Invariant)
+- **Quy tắc bất biến cốt lõi**: **TUYỆT ĐỐI KHÔNG ĐÁNH DẤU `refunded` KHI CHƯA TỪNG THU TIỀN**.
+  - **Đơn hàng chưa thanh toán (`payment_status = 'unpaid'`)**: Nếu đơn bị hủy (bởi khách, nhân viên hoặc hệ thống), trạng thái đơn cập nhật `status = 'cancelled'`, còn `payment_status` **giữ nguyên là `'unpaid'`**. Tuyệt đối không chuyển sang `refunded` hay tạo thêm enum rác `cancelled_unpaid`.
+  - **Đơn hàng đã thanh toán thực tế (`payment_status = 'paid'`)**: Nếu đơn bị hủy hoặc trả hàng sau khi tiền đã thực nhận:
+    1. Hệ thống chuyển sang `payment_status = 'refund_pending'` để ghi nhận công nợ phải trả lại cho khách hàng.
+    2. Chỉ chuyển sang `payment_status = 'refunded'` khi Admin/Kế toán đã thực hiện lệnh hoàn tiền qua ngân hàng và nhập mã ủy nhiệm chi / mã giao dịch hoàn tiền.
+
+---
+
+### 3.3. Quy Trình Giao Hàng Thất Bại & Bảo Toàn Tồn Kho (Delivery Failed Invariant)
+1. **Quy tắc bảo vệ tồn kho**:
+   - Khi Shipper báo không giao được hàng (không liên lạc được, khách đổi ý, sai địa chỉ): Hệ thống cập nhật `fulfillment_status = 'delivery_failed'`.
+   - **TUYỆT ĐỐI KHÔNG TỰ ĐỘNG CỘNG LẠI TỒN KHO VÀO THỜI ĐIỂM NÀY**: Hàng hóa vật lý vẫn đang nằm trên xe vận chuyển hoặc tại bưu cục trung chuyển của đơn vị giao vận, chưa được hoàn trả về kho của cửa hàng.
+2. **Quy trình hoàn kho vật lý**:
+   - Kiện hàng được đơn vị vận chuyển hoàn trả vật lý về quầy kho.
+   - Thủ kho / Nhân viên kho thực hiện kiểm kê, đánh giá tình trạng nguyên vẹn của hàng hóa.
+   - Thủ kho bấm nút *"Xác nhận nhập kho hàng hoàn"* qua endpoint `POST /orders/{id}/confirm-return`:
+     - Cập nhật `fulfillment_status = 'returned_to_inventory'`.
+     - Cập nhật `status = 'cancelled'` (nếu hủy toàn bộ).
+     - Thực hiện hoàn tồn kho **ĐÚNG 1 LẦN DUY NHẤT** trong transaction nguyên tử:
+       ```sql
+       UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?;
+       ```
+     - Ghi nhận nhật ký tồn kho: `INSERT INTO inventory_logs (product_id, change_type, quantity, ...) VALUES (?, 'return_cancel', ?, ...);`.
+     - **Cơ chế Idempotency Guard (Chống hoàn kho 2 lần)**: Kiểm tra điều kiện tiên quyết `WHERE fulfillment_status = 'delivery_failed'`. Nếu đơn đã ở trạng thái `returned_to_inventory`, hệ thống từ chối thực hiện lại (trả về lỗi HTTP 400/409), ngăn chặn triệt để rủi ro cộng thừa tồn kho do bấm đúp hoặc gọi API lặp lại.
+3. **Tách biệt hoàn toàn xử lý Hoàn tiền và Hoàn hàng**:
+   - **Hoàn hàng (Physical Logistics)**: Do Thủ kho / Nhân viên quản lý qua `fulfillment_status: delivery_failed -> returned_to_inventory`.
+   - **Hoàn tiền (Financial Refund)**: Nếu đơn hàng đã thanh toán trước (`paid`), Kế toán / Admin xử lý riêng biệt qua `payment_status: paid -> refund_pending -> refunded`.
+   - Hai luồng hoàn toàn độc lập: Việc nhận lại hàng không tự động chi tiền hoàn, và việc xử lý hoàn tiền không can thiệp vào tồn kho vật lý.
+
+---
+
+### 3.4. Thao Tác Nguyên Tử Chống Nhận Trùng Đơn (Atomic Claim Lock)
+- Để bảo đảm 2 nhân viên không thể cùng nhận một đơn hàng, thao tác nhận đơn sử dụng câu lệnh SQL nguyên tử trong transaction `BEGIN IMMEDIATE`:
+  ```sql
+  UPDATE orders
+  SET status = 'processing',
+      assigned_to = ?,
+      processed_by = ?,
+      processed_at = CURRENT_TIMESTAMP
+  WHERE id = ? AND status = 'admin_approved' AND assigned_to IS NULL;
+  ```
+- Nếu `cursor.rowcount == 0`: Trả về thông báo lỗi HTTP 409 Conflict / 400 Bad Request rõ ràng: *"Đơn hàng này đã được nhân viên khác tiếp nhận xử lý hoặc trạng thái đơn đã thay đổi"*.
+- **SuperAdmin Reassign**: SuperAdmin có quyền gán lại (`reassign`) đơn hàng sang nhân viên khác khi có sự cố, bắt buộc nhập lý do và tự động lưu vết vào `order_audit_logs`.
+
+---
+
+## PHẦN 4: PHÂN ĐỊNH TRÁCH NHIỆM RBAC, TỰ ĐĂNG KÝ & BACKEND DATA MASKING
+
+### 4.1. Phân Tách 3 Cấp Độ Trách Nhiệm
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          3 CẤP ĐỘ TRÁCH NHIỆM RBAC                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 1. NGƯỜI CHỊU TRÁCH NHIỆM THƯỜNG XUYÊN (Operational Owners)                 │
+│    - Staff: Bán hàng tại quầy POS, nhận đơn (claim), đóng gói, thu tiền COD.│
+│    - Admin: Duyệt/từ chối đơn hàng online, xác nhận tiền chuyển khoản.      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 2. NGƯỜI KIỂM TRA, GIÁM SÁT (Operational Supervisors)                       │
+│    - Admin: Giám sát đơn hàng và ca làm việc của Staff.                     │
+│    - SuperAdmin: Giám sát toàn bộ hoạt động của Admin và Staff.             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 3. NGƯỜI CÓ QUYỀN CAN THIỆP NGOẠI LỆ (Emergency Authority)                  │
+│    - SuperAdmin: Không loại bỏ quyền. Giữ thẩm quyền can thiệp ngoại lệ     │
+│      (Force Cancel, Reopen, Reassign) kèm lý do (>= 5 ký tự) và Audit Log. │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 4.2. Bảo Vệ Dữ Liệu Khách Hàng (Backend-Enforced Data Masking)
+- **Nguyên tắc an toàn bắt buộc**:
+  - **Data Masking PHẢI ĐƯỢC THỰC THI TẠI TẦNG BACKEND (Server-side Enforcement)** thông qua Pydantic response schemas và endpoint dependencies phân quyền.
+  - **Frontend masking chỉ là tầng hiển thị bổ trợ (Cosmetic/Format only)**, tuyệt đối không được coi là giải pháp bảo mật.
+  - **TUYỆT ĐỐI KHÔNG trả nguyên vẹn email và địa chỉ chi tiết cho Staff qua API rồi chỉ dùng CSS (`display: none`) hoặc JavaScript để che giấu trên giao diện**. Mọi nhân viên mở Developer Tools (F12) Network Tab đều có thể trích xuất toàn bộ dữ liệu cá nhân (PII) nếu backend không mask.
+- **Thiết kế Schemas phân quyền tại Backend**:
+  - `CustomerAdminResponse` (Dành cho Admin / SuperAdmin):
+    - Trả đầy đủ PII: `id`, `customer_code`, `name`, `phone`, `email`, `address`, `group_name`, `total_spent`, `created_at`.
+  - `CustomerStaffResponse` (Dành cho Staff tra cứu phục vụ bán hàng tại quầy POS):
+    - Trả thông tin vận hành cần thiết: `id`, `customer_code`, `name`, `phone` (đủ số để tìm khách tại quầy), `group_name`, `total_spent`.
+    - **Masking email tại backend**: `a***@example.com` (hoặc `None`).
+    - **Masking address tại backend**: Chỉ trả Quận/Huyện, Tỉnh/Thành phố; loại bỏ hoàn toàn số nhà, tên đường chi tiết (hoặc `None`).
+- **Thứ tự thực thi phân kỳ chuẩn hóa**:
+  - Backend Data Masking được hoàn thành và kiểm thử độc lập tại **Phase R1C** (bảo vệ dữ liệu ngay từ đầu).
+  - Giao diện tra cứu khách hàng của Staff trên frontend chỉ được mở ở **Phase R7** sau khi tầng backend đã bảo vệ dữ liệu an toàn 100%.
+
+---
+
+### 4.3. Bổ Sung Chức Năng Tự Đăng Ký Tài Khoản Khách Hàng (Public Customer Registration)
+- **Vấn đề hiện tại**: Chỉ Admin mới có quyền tạo User qua endpoint nội bộ `/auth/users`. Khách mua hàng online không thể tự đăng ký tài khoản thành viên.
+- **Giải pháp chuẩn hóa**: Bổ sung endpoint `POST /api/v1/auth/register` (triển khai tại **Phase R1B**, trước khi nghiệm thu hệ thống):
+  1. **Khóa cứng vai trò (Anti-Role Escalation Guard)**:
+     - Public register **CHỈ ĐƯỢC PHÉP TẠO ROLE `customer` 100%**.
+     - Bỏ qua hoặc từ chối dứt khoát nếu client cố tình truyền các role đặc quyền (`admin`, `staff`, `superadmin`). Tuyệt đối không cho client tự chọn quyền.
+  2. **Tạo liên kết nguyên tử an toàn giữa `users` và `customers`**:
+     - Thực thi trong 1 database transaction duy nhất (`BEGIN IMMEDIATE`):
+       - Tạo bản ghi trong bảng `users`: `username`, `password_hash` (bcrypt), `role = 'customer'`, `is_active = 1`.
+       - Tạo bản ghi hồ sơ tương ứng trong bảng `customers`: `user_id = users.id`, `customer_code = 'CUS-XXXX'`, `name`, `phone`, `email`, `group_name = 'Thành viên mới'`, `status = 'active'`.
+     - **Chống trùng lặp dữ liệu**: Kiểm tra duy nhất (Unique check) cho `username`, `email` và `phone` trước khi insert, xử lý biệt lệ xung đột (`IntegrityError`) và trả mã lỗi HTTP 409 Conflict rõ ràng nếu đã tồn tại.
+  3. **Xác thực dữ liệu (Validation) & Giới hạn tần suất (Rate Limiting)**:
+     - Validation: `username` (3-30 ký tự an toàn), `password` (tối thiểu 6 ký tự), `phone` (chuẩn số di động Việt Nam 10 chữ số), `email` (định dạng chuẩn RFC 5322).
+     - Rate limit nghiêm ngặt: Tối đa 3 lượt đăng ký / IP / 10 phút để triệt tiêu nguy cơ spam tài khoản ảo bằng bot.
+
+---
+
+## PHẦN 5: KẾ HOẠCH AI RAG, NGƯỠNG CUTOFF & BENCHMARK THỰC NGHIỆM AI LOCAL
+
+### 5.1. Hiệu Chỉnh Kế Hoạch RAG: Sửa Lỗi Retrieval Trước Khi Đổi Mô Hình
+- **Nguyên tắc kỹ thuật**: Việc đổi mô hình AI không thể tự sửa lỗi retrieval nếu ChromaDB tiếp tục trả về các sản phẩm ngoài danh mục.
+- **Kế hoạch khảo nghiệm ngưỡng Cosine Cutoff**:
+  - Không hardcode cố định 0.45.
+  - Khảo nghiệm trên tập giá trị: $\{0.35, 0.40, 0.45, 0.50, 0.55\}$.
+  - Bộ câu hỏi kiểm thử đối chứng 20 câu:
+    - 5 câu hỏi khớp chính xác sản phẩm catalog.
+    - 5 câu hỏi diễn đạt tương đương về công năng.
+    - 5 câu hỏi mơ hồ ở ranh giới danh mục.
+    - 5 câu hỏi hoàn toàn ngoài danh mục (thực phẩm, xe cộ, gia dụng ngoài...).
+  - Đo đạc: Precision@K, Recall@K, False Acceptance Rate (FAR $\approx 0\%$) và Tỷ lệ từ chối hợp lý.
+- **Quy tắc render Product Cards**:
+  - **Chỉ render thẻ sản phẩm khi có bằng chứng liên quan vượt ngưỡng (Distance $\le \text{Threshold}$)** VÀ sản phẩm còn hàng (`stock_quantity > 0`).
+  - Nếu toàn bộ ứng viên bị loại: Chatbot giải thích lịch sự, **0 thẻ sản phẩm nào bị hiển thị sai**.
+
+---
+
+### 5.2. Kế Hoạch Benchmark Thực Nghiệm AI Local Trên RTX 3050 Laptop (4GB VRAM)
+- **Mục tiêu**: Đo đạc số liệu thực tế trên máy tính mục tiêu thay vì tuyên bố lý thuyết.
+- **Đính chính mô hình**:
+  - **Gemma 3 4B**: Là mô hình đa phương thức (Multimodal), được đưa vào danh sách benchmark Vision local cùng với **Qwen2.5-VL 3B / Qwen3-VL 4B**.
+  - **Text LLM**: Ưu tiên thử nghiệm **Qwen3 4B / Qwen2.5 3B** và **Gemma 3 4B**, không tự ý chốt trước khi đo.
+- **Tiêu chí đo kiểm thực tế**:
+  1. *Peak VRAM Allocation*: Đo bằng `nvidia-smi` (Ngưỡng an toàn không tràn: $\le 3.5\text{ GB}$).
+  2. *Tốc độ suy luận thực tế*: Đo số tokens/giây thực nhận.
+  3. *Thời gian phản hồi hình ảnh*: Mốc $< 2.5\text{ giây}$ là **mục tiêu benchmark tham chiếu (benchmark target)**, KHÔNG PHẢI điều kiện nghiệm thu (DoD) cứng ép buộc trước khi đo kiểm thực tế.
+  4. *Xử lý khi phần cứng laptop không đáp ứng*: Nếu các mô hình local gây tràn VRAM sang shared memory (>3.5GB), giật lag hoặc OOM trên GPU RTX 3050 Laptop 4GB, **hệ thống PHẢI báo cáo hạn chế phần cứng một cách minh bạch và kích hoạt Tier 3 (Deterministic Search / Keyword Search) an toàn**, tuyệt đối không tuyên bố thành công giả tạo hoặc ép buộc đạt chuẩn lý thuyết khi phần cứng không cho phép.
+- **Nguyên tắc chọn mô hình**: **Phase R8 sẽ sử dụng mô hình chiến thắng từ kết quả benchmark thực tế của Phase R5**, tuyệt đối không hardcode trước bất kỳ mô hình cụ thể nào (như `qwen2.5:3b` hay tên model cố định).
+
+---
+
+## PHẦN 6: KẾ HOẠCH UI/UX & TYPOGRAPHY BE VIETNAM PRO
+
+1. **Chuyển đổi Typography sang `Be Vietnam Pro`**:
+   - `Space Grotesk` hiện tại bị lỗi chân chữ và lệch baseline khi hiển thị tiếng Việt có dấu.
+   - Chuyển font chính (Headings, Body, Buttons, Tables) sang **`Be Vietnam Pro`** (Google Fonts, weights 400, 500, 600, 700) để tối ưu hóa 100% hiển thị dấu tiếng Việt.
+   - Tiếp tục giữ **`JetBrains Mono`** cho các trường dữ liệu kỹ thuật: Mã SKU, mã đơn hàng, giá tiền VND, ngày giờ và terminal logs.
+2. **Bảo tồn Visual Identity**:
+   - Giữ nguyên 100% bản sắc **Vintage Editorial / Retro-Futuristic Print**: Đường viền cơ học, đổ bóng retro (`--shadow-retro`), bảng màu CRT Phosphor (Amber, Green, Red) trên cả Dark Slate Mode và Light Off-White Vintage Paper Mode.
+3. **Mở giao diện Khách hàng cho Staff (Sau khi có Backend Masking)**:
+   - Staff được mở menu Khách hàng trên Navbar để tra cứu số điện thoại tại quầy POS, dữ liệu hiển thị đã qua backend masking an toàn.
+   - Loại bỏ hoàn toàn role ma `manager` trên toàn bộ giao diện.
+
+---
+
+## PHẦN 7: BẢNG PHÂN LOẠI LỖI & RỦI RO BẢO MẬT ƯU TIÊN
+
+| ID | Phân loại | Tên Lỗi / Rủi ro | Vị trí File & Function | Bằng chứng Mã nguồn & Kế hoạch Khắc phục |
+| :---: | :---: | :--- | :--- | :--- |
+| **SEC-01** | **CONFIRMED** | **Lộ Giá Vốn (`cost_price`) cho Customer** | `products.py:216-229`<br/>`schemas/product.py` | API `GET /api/v1/products` không lọc role, trả `cost_price` cho Customer. **Khắc phục ngay tại Phase R1A**. |
+| **SEC-02** | **CONFIRMED** | **Bảo mật SECRET_KEY Production** | `core/config.py:15`<br/>`core/security.py` | Đang dùng dev key mặc định. **Cần bắt buộc từ chối khởi động (`raise RuntimeError`) nếu production dùng dev key**. |
+| **SEC-03** | **CONFIRMED** | **Thiếu Rate Limiter Đăng nhập** | `api/v1/auth.py:11-51` | Endpoint `/auth/login` không có rate limit. Bổ sung giới hạn 5 lần thử/phút tại **Phase R1A**. |
+| **SEC-04** | **CONFIRMED** | **Thiếu Đăng ký Tài khoản Khách hàng** | `api/v1/auth.py` | Không có public registration. Bổ sung `/auth/register` (Role Customer only) tại **Phase R1B**. |
+| **SEC-05** | **CONFIRMED** | **Staff Xem Toàn Bộ Email & Địa Chỉ Khách** | `customers.py:9-36` | Chưa có data masking tại backend. Tạo `CustomerStaffResponse` tại **Phase R1C**. |
+| **BUG-01** | **CONFIRMED** | **`payment_status` luôn là `'completed'` cho đơn online** | `inventory_service.py:117-128`<br/>`PosPage.jsx:273` | Đơn COD khởi tạo bị coi là đã trả tiền. Tách trường và chuẩn hóa enum tại **Phase R2C / R3**. |
+| **BUG-02** | **CONFIRMED** | **Ảo giác Cưỡng bức khi AI Upstream Lỗi / Quota 429** | `ai_service.py:121-137`<br/>`rag_service.py:137-158` | Retrieval thiếu ngưỡng cutoff; fallback khẳng định bừa. Khảo nghiệm ngưỡng cutoff tại **Phase R4**. |
+| **BUG-03** | **CONFIRMED** | **Tồn tại Role ma `manager` trên Frontend** | `Navbar.jsx:140-148`<br/>`App.jsx:16` | Dọn sạch role `manager` không có trong database tại **Phase R7**. |
+| **BUG-04** | **CONFIRMED** | **Ghi DML bằng `get_db()` thay vì `get_db_transaction()`** | `products.py:126, 163, 178, 314` | Ghi dữ liệu bằng autocommit context. Chuẩn hóa sang `get_db_transaction()` tại **Phase R1C**. |
+| **RSK-01** | **SUSPECTED** | **Nguy cơ Xử lý Trùng Đơn giữa nhiều Nhân viên** | `orders.py:270-298`<br/>`inventory_service.py:323-360` | Đơn đã duyệt hiển thị chung. Triển khai Atomic Claim Lock tại **Phase R3**. |
+| **RSK-02** | **SUSPECTED** | **Rủi ro Sao lưu Database khi Đang Chạy WAL Mode** | `core/database.py` | Phải dùng `VACUUM INTO` snapshot trước mọi migration tại **Phase R2A**. |
+
+---
+
+## PHẦN 8: LỘ TRÌNH TRIỂN KHAI PHÂN KỲ CHIA NHỎ R1 – R8 (KÈM ĐIỂM DỪNG STOP)
+
+```mermaid
+gantt
+    title LỘ TRÌNH HIỆN ĐẠI HÓA STOREFLOW AI 2.0 (PHASES R1 - R8)
+    dateFormat  X
+    axisFormat %d
+
+    section Phase R1 - Bảo Mật & Nền Tảng (Không Đổi Schema)
+    R1A: Urgent Security & Boot Safety (COMPLETED) :done, r1a, 0, 1
+    R1B: Customer Registration & Ownership Check (COMPLETED) :done, r1b, 1, 2
+    R1C: Backend Data Masking & DML Normalization (COMPLETED) :done, r1c, 2, 3
+
+    section Phase R2 - Database Backup & Schema Phased
+    R2A: Safe DB Backup & Versioning (COMPLETED) :done, r2a, 3, 4
+    R2B: Phased Column Expansion (COMPLETED)      :done, r2b, 4, 5
+    R2C-A: Payment & Fulfillment Design + Dry Run (COMPLETED) :done, r2ca, 5, 6
+    R2C-B: Production Migration & Enum Upgrade   :r2cb, 6, 7
+
+    section Phase R3 - Vận Hành & Nghiệp Vụ
+    R3: Order Workflow, Claim Lock & Payments     :r3, 6, 7
+
+    section Phase R4 - Trí Tuệ Nhân Tạo RAG
+    R4: RAG Retrieval Calibration & Cutoff        :r4, 7, 8
+
+    section Phase R5 - AI Local Benchmark
+    R5: Pluggable AI Providers & Local Benchmark  :r5, 8, 9
+
+    section Phase R6 - Image Search
+    R6: Image Search Multimodal Pipeline          :r6, 9, 10
+
+    section Phase R7 - Giao Diện & Typography
+    R7: UI/UX, Be Vietnam Pro Typography & Masking:r7, 10, 11
+
+    section Phase R8 - Nghiệm Thu & Bàn Giao
+    R8: Full Testing, Security Audit & Academic Prep:r8, 11, 12
+```
+
+---
+
+### CHI TIẾT TỪNG BƯỚC TRIỂN KHAI (SUB-PHASES):
+
+#### PHASE R1A: Urgent Security Hotfix & Boot Safety — [COMPLETED ✅ 10/10/2026]
+- **Trạng thái**: **HOÀN THÀNH (100% Passed 9/9 Targeted Tests)**
+- **Mục tiêu**: Vá ngay lỗ hổng lộ giá vốn `cost_price` và khóa an toàn khởi động production mà **hoàn toàn không sửa schema database và không sửa frontend**.
+- **Kết quả triển khai thực tế**:
+  1. *Bảo vệ giá vốn*: Tách schema `ProductAdminResponse` (có `cost_price` cho Admin/SuperAdmin) và `ProductPublicResponse` (ẩn hoàn toàn `cost_price` cho Staff, Customer và Guest). Truy vấn SQL phân tách theo role: Staff/Customer/Guest không bao giờ SELECT `cost_price`.
+  2. *Boot Safety Guard*: Bổ sung `validate_boot_safety()` trong `core/config.py` và `main.py:lifespan`: từ chối khởi động (`raise RuntimeError`) nếu `APP_ENV=production/staging` mà dùng SECRET_KEY mặc định, rỗng hoặc $< 32$ ký tự.
+  3. *Login Rate Limiting*: Bổ sung `LoginRateLimiter` trong `core/rate_limiter.py` và tích hợp vào `/api/v1/auth/login`. Tối đa 5 lần thử thất bại/phút theo cặp `(client_ip, normalized_username)` chống brute-force và tránh khóa nhầm người dùng khác trên cùng IP. Lần thứ 6 trả về HTTP 429 Too Many Requests kèm header `Retry-After`.
+- **Files đã sửa**:
+  - `backend/app/core/config.py`
+  - `backend/app/core/rate_limiter.py`
+  - `backend/app/api/v1/auth.py`
+  - `backend/app/schemas/product.py`
+  - `backend/app/api/v1/products.py`
+  - `backend/app/main.py`
+- **File kiểm thử mới**: `backend/tests/test_phase_r1a_security.py`
+- **Kết quả kiểm thử**: **9/9 tests PASSED (14.54s)** trên cơ sở dữ liệu cách ly `test_webstore.db`. Không làm ảnh hưởng `backend/webstore.db` chính.
+- **DoD**: Đạt 100% tiêu chí nghiệm thu R1A.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R1A.**
+
+---
+
+#### PHASE R1B: Customer Registration & Ownership Check — [COMPLETED ✅ 10/10/2026]
+- **Trạng thái**: **HOÀN THÀNH (100% Passed 14/14 Targeted Tests)**
+- **Mục tiêu**: Bổ sung chức năng tự đăng ký cho Khách hàng (`POST /api/v1/auth/register`) và siết chặt kiểm tra quyền sở hữu khi tạo đơn (`POST /api/v1/orders`).
+- **Kết quả triển khai thực tế**:
+  1. *Public Customer Registration*: Endpoint `POST /api/v1/auth/register` cho phép khách vãng lai (Guest) tự đăng ký tài khoản `customer`.
+     - Tuyệt đối khóa cứng role `customer`: Pydantic schema `CustomerRegisterRequest` chặn trường `role` nếu khác `customer`, chặn các trường nội bộ (`user_id`, `customer_id`, `is_active`).
+     - Hash mật khẩu an toàn bằng `get_password_hash`. Không trả về `password_hash` trong JSON response (`CustomerRegisterResponse`).
+  2. *Validation & Chống Trùng*:
+     - Username 3–30 ký tự, password >= 6 và <= 128 ký tự.
+     - Số điện thoại chuẩn Việt Nam 10 chữ số (Regex `^(03|05|07|08|09)[0-9]{8}$`), email hợp lệ (Regex RFC5322).
+     - Kiểm tra trùng `username`, `phone`, `email` trong database (cả bảng `users` và `customers`). Trả về HTTP 409 Conflict với thông điệp rõ ràng khi trùng lặp.
+  3. *Atomic Profile Creation*:
+     - Thực thi trong một giao dịch SQLite duy nhất bằng `get_db_transaction()` (`BEGIN IMMEDIATE`): Tạo `users` (role `customer`) $\rightarrow$ Tạo `customers` (mã tự sinh `KH-xxx`, liên kết `user_id = user.id`) $\rightarrow$ `COMMIT`. Nếu có bất kỳ lỗi nào, toàn bộ transaction tự động `ROLLBACK`, đảm bảo không bao giờ sinh user mồ côi hoặc customer profile không có user.
+     - An toàn hồ sơ cũ: Nếu phát hiện phone/email đã tồn tại trong bảng `customers` (dù chưa liên kết `user_id`), từ chối đăng ký với HTTP 409, không tự động chiếm quyền hồ sơ khách hàng cũ.
+  4. *Anti-IDOR trong Create Order*:
+     - Cập nhật `create_order` trong `backend/app/api/v1/orders.py`. Với role `customer`, backend tự động truy vấn hồ sơ khách hàng liên kết (`customers.user_id = current_user.id`).
+     - Tự động gán `customer_id = own_customer_id`. Nếu client gửi `customer_id` khác hồ sơ của mình, trả về HTTP 403 Forbidden (IDOR violation).
+     - Nếu tài khoản Customer không có hồ sơ liên kết hợp lệ, từ chối tạo đơn với HTTP 400 Bad Request, không cho phép mượn `customer_id` của người khác.
+     - Luôn ép trạng thái đơn hàng khởi tạo của Customer là `pending`.
+  5. *Registration Rate Limiter*:
+     - `RegisterRateLimiter` độc lập trong `backend/app/core/rate_limiter.py`: 3 lượt đăng ký / IP / 10 phút (sliding window 600s). Trả HTTP 429 Too Many Requests kèm header `Retry-After`.
+- **Files đã sửa**:
+  - `backend/app/schemas/auth.py`
+  - `backend/app/core/rate_limiter.py`
+  - `backend/app/api/v1/auth.py`
+  - `backend/app/api/v1/orders.py`
+- **File kiểm thử mới**: `backend/tests/test_phase_r1b_registration.py`
+- **Kết quả kiểm thử**: **14/14 tests PASSED (9.26s)** trên cơ sở dữ liệu cách ly `test_webstore.db`. Không làm ảnh hưởng `backend/webstore.db` chính.
+- **Kiểm tra tương thích ngược**: `backend/tests/test_phase_r1a_security.py` tiếp tục **9/9 tests PASSED (10.11s)**.
+- **DoD**: Đạt 100% tiêu chí nghiệm thu R1B.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R1B.**
+
+---
+
+#### PHASE R1C: Backend Data Masking & DML Normalization — [COMPLETED ✅ 10/10/2026]
+- **Trạng thái**: **HOÀN THÀNH (100% Passed 17/17 Targeted Tests, 23/23 Regression Tests)**
+- **Mục tiêu**: Thực thi che giấu dữ liệu khách hàng (PII Backend Data Masking) cho Staff tại quầy POS và chuẩn hóa toàn bộ lệnh ghi DML trong `products.py` sang giao dịch SQLite nguyên tử.
+- **Kết quả triển khai thực tế**:
+  1. *Backend Data Masking cho Staff*:
+     - Bổ sung `CustomerStaffResponse` trong `backend/app/schemas/customer.py`: chỉ giữ các trường cần thiết cho nghiệp vụ POS (`id`, `customer_code`, `name`, `phone`, `group_name`, `total_spent`, `created_at`).
+     - Hàm `mask_email()` che giấu email an toàn (`an.nguyen@example.com` $\rightarrow$ `a***@example.com`).
+     - Tuyệt đối không trả về địa chỉ chi tiết (`address: None`) để tránh lộ số nhà do trường địa chỉ là chuỗi tự do.
+     - Loại bỏ hoàn toàn `user_id` nội bộ khỏi response của Staff.
+  2. *Bảo vệ toàn diện Customer API*:
+     - Cập nhật các endpoint trong `backend/app/api/v1/customers.py`: danh sách `GET /customers`, tìm kiếm `?search=...`, chi tiết `GET /customers/{id}`, tạo mới `POST /customers`, và cập nhật `PUT /customers/{id}`:
+       - Staff: Nhận `CustomerStaffResponse` (email masked, address `None`, không `user_id`).
+       - Admin & SuperAdmin: Nhận `CustomerAdminResponse` đầy đủ.
+       - Customer: Bị chặn xem danh sách (403) và chỉ được xem chính mình qua `/me` hoặc ID của mình (chống IDOR 403).
+       - Guest: Bị chặn 401 Unauthorized.
+  3. *DML Normalization trong Products*:
+     - Chuyển toàn bộ các thao tác ghi dữ liệu nhiều bước trong `backend/app/api/v1/products.py` sang `get_db_transaction()` (`BEGIN IMMEDIATE`):
+       - `create_category`, `update_category`, `delete_category`: Đảm bảo tính nguyên tử; kiểm tra ràng buộc khóa ngoại trước khi xóa danh mục (từ chối 400 nếu danh mục đang có sản phẩm).
+        - `create_product`, `update_product`, `delete_product`: Bảo vệ toàn vẹn khóa ngoại `category_id`, rollback toàn bộ khi lỗi.
+        - Tách việc đồng bộ vector sang ChromaDB thực hiện sau khi SQLite transaction commit thành công.
+- **Files đã sửa**:
+  - `backend/app/schemas/customer.py`
+  - `backend/app/api/v1/customers.py`
+  - `backend/app/api/v1/products.py`
+- **File kiểm thử mới**: `backend/tests/test_phase_r1c_masking_transactions.py`
+- **Kết quả kiểm thử**:
+  - **17/17 targeted tests PASSED (10.65s)** trên cơ sở dữ liệu cách ly `test_webstore.db`.
+  - **23/23 regression tests PASSED (14.48s)** (R1A: 9/9 tests, R1B: 14/14 tests).
+  - Hoàn toàn không ghi dữ liệu test vào `backend/webstore.db` chính.
+- **DoD**: Đạt 100% tiêu chí nghiệm thu R1C.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R1C.**
+
+---
+
+#### PHASE R2A: Safe DB Backup & Versioning — [COMPLETED ✅ 10/10/2026]
+- **Trạng thái**: **HOÀN THÀNH (100% Passed 11/11 Targeted Tests, 51/51 Total Suite Tests)**
+- **Mục tiêu**: Thiết lập cơ chế sao lưu SQLite an toàn không khóa dữ liệu (SQLite Online Backup API), kiểm chứng khả năng khôi phục và xây dựng cơ chế schema versioning cho các migration tiếp theo.
+- **Kết quả triển khai thực tế**:
+  1. *Cơ chế sao lưu an toàn*:
+     - Module `backend/app/core/backup.py` triển khai `create_database_backup()` sử dụng SQLite Online Backup API chính thức (`source_conn.backup(dest_conn)`), không copy thô nhị phân khi WAL mode đang hoạt động.
+     - Tự động tạo thư mục `backend/backups/` và sinh tên file có timestamp độc nhất kèm UUID suffix (`webstore_backup_YYYYMMDD_HHMMSS_<suffix>.db`), tuyệt đối không ghi đè file cũ.
+     - Đã thêm `backups/`, `backend/backups/`, `*.bak` vào `.gitignore`.
+  2. *Xác minh và kiểm chứng khôi phục*:
+     - Hàm `verify_database_backup()` mở độc lập bản backup, kiểm tra tính toàn vẹn (`PRAGMA integrity_check == 'ok'`), kiểm tra khóa ngoại (`PRAGMA foreign_key_check == 0 errors`), đối chiếu 100% số lượng bản ghi của 12 bảng nghiệp vụ giữa source và backup.
+     - Hàm `trial_restore_query()` kiểm thử khôi phục và truy vấn trên thư mục tạm thành công.
+     - Tính mã băm SHA-256 quản lý tính toàn vẹn bản sao:
+       - File backup: `backend/backups/webstore_backup_20261010_152615_beca91.db` (585,728 bytes).
+       - SHA-256: `7de967ec5d007c41b19638da88c72b88bc88b33a01b8af12fc984f5bbcd4f6b4`.
+       - Trạng thái: **BACKUP VERIFIED 100%**.
+  3. *Schema Versioning Metadata*:
+     - Bảng `schema_version (version INTEGER PRIMARY KEY, description TEXT NOT NULL, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, checksum TEXT)` được tích hợp vào `backend/app/models/schema.py`.
+     - Đã kiểm thử tính Idempotency và Rollback khi lỗi trên database clone cách ly trước khi áp dụng vào DB chính.
+     - Khởi tạo thành công bản ghi baseline Version 1 trên `backend/webstore.db` (`version = 1`, `description = 'R2A: Initial schema versioning baseline'`).
+     - Tuyệt đối chưa sửa schema hay thêm cột nào vào các bảng nghiệp vụ trong Phase R2A.
+  4. *Ghi nhận 2 rủi ro kỹ thuật chuẩn bị cho R2B/R2C*:
+     - **Rủi ro A (Legacy flag)**: Khi chạy R2B, không dùng câu `UPDATE orders` không giới hạn để đánh dấu toàn bộ đơn hàng; phải xác định chính xác tập 317 đơn cũ lịch sử trước khi áp dụng migration.
+     - **Rủi ro B (Legacy payment status)**: Database hiện tại chứa `payment_status = 'completed'`, không nằm trong enum mới (`unpaid`, `pending_verification`, `paid`, `refund_pending`, `refunded`); R2C phải có chiến lược ánh xạ an toàn (VD: `'completed'` $\rightarrow$ `'paid'`), không mặc định mọi đơn cũ đều đã thanh toán nếu chưa có đối soát.
+- **Files đã sửa/tạo**:
+  - `backend/app/core/backup.py` (Mới)
+  - `backend/app/models/schema.py` (Cập nhật `schema_version`)
+  - `.gitignore` (Cập nhật bỏ qua thư mục `backups/`)
+  - `backend/tests/test_phase_r2a_backup_versioning.py` (Mới: 11 tests)
+- **Kết quả kiểm thử**:
+  - **11/11 targeted tests PASSED (2.68s)** trên database clone độc lập (`tempfile.TemporaryDirectory`).
+  - **51/51 total regression tests PASSED (21.38s)** (R2A: 11/11, R1A: 9/9, R1B: 14/14, R1C: 17/17).
+- **DoD**: Đạt 100% tiêu chí nghiệm thu R2A.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R2A. CHƯA THỰC HIỆN R2B HOẶC R2C.**
+
+---
+
+#### PHASE R2B: Phased Column Expansion — [COMPLETED ✅ 10/10/2026]
+- **Trạng thái**: **HOÀN THÀNH (100% Passed 12/12 Targeted Tests, 63/63 Total Suite Tests)**
+- **Mục tiêu**: Bổ sung an toàn các cột mới cho bảng `orders` mà không làm thay đổi hay reset bảng cũ, bảo toàn 100% dữ liệu lịch sử.
+- **Kết quả triển khai thực tế**:
+  1. *Backup mới độc lập trước R2B (VERIFIED 100%)*:
+     - File backup: `backend/backups/webstore_backup_20261010_153257_264ba0.db` (585,728 bytes).
+     - SHA-256: `65a50e3a64f2385068bc41286c1fe8509534ee65b62f2efdca1d056d0a93fedb`.
+     - Xác minh: `PRAGMA integrity_check = ok`, `PRAGMA foreign_key_check = 0 errors`, trial restoration truy vấn thành công. Không ghi đè backup R2A.
+  2. *Cột mới bổ sung vào `orders`*:
+     - `assigned_to INTEGER NULL REFERENCES users(id)` (hỗ trợ atomic order claim sau này).
+     - `shipping_name TEXT NULL`
+     - `shipping_phone TEXT NULL`
+     - `shipping_address TEXT NULL`
+     - `is_legacy_unverified INTEGER NOT NULL DEFAULT 0`
+  3. *Khắc phục lỗi nhận diện đơn hàng lịch sử (Sửa lỗi đề xuất `id <= 317` của R2A)*:
+     - Số lượng bản ghi `orders` là 317, nhưng dải ID thực tế từ 1 đến 346 với các khoảng trống (ID gaps: 81, 107..134). Ngưỡng `id <= 317` là sai lầm vì bỏ sót các ID từ 318 đến 346 và giả định sai ID là dãy liên tục.
+     - Cơ chế chuẩn: Snapshot chính xác tập ID thực tế (`SELECT id FROM orders`) ngay bên trong cùng transaction `BEGIN IMMEDIATE` của migration.
+     - Đánh dấu theo tập ID thực: `UPDATE orders SET is_legacy_unverified = 1 WHERE id IN (...)` theo batch an toàn (500 ID/batch).
+     - Không dựa vào `COUNT(*)` làm cutoff. Các đơn hàng tạo mới sau migration tự động có `is_legacy_unverified = 0`.
+     - Không chạy câu UPDATE toàn bảng vô điều kiện mỗi khi khởi động ứng dụng.
+  4. *Migration Versioning & Idempotency*:
+     - Ghi nhận `schema_version = 2` (`R2B: Phased column expansion for orders and legacy order tagging`).
+     - Tái chạy migration an toàn (no-op, không chạy lại, trả về `False`).
+     - Cơ chế rollback an toàn nếu DDL hoặc DML gặp sự cố giữa chừng.
+  5. *Bảo toàn Tuyệt đối Dữ liệu & Đính chính Số liệu Báo cáo*:
+     - Số lượng bản ghi thực tế được đối chiếu chính xác qua SQLite `SELECT COUNT(*)` trên cả 3 bản (R2A Backup, Pre-R2B Backup, Main DB): `orders`: 317 đơn, `order_items`: 322 bản ghi, `products`: 30 sản phẩm, `categories`: 5 danh mục, `customers`: 7 khách hàng, `users`: 6 tài khoản, `inventory_logs`: 456 bản ghi. Giữ nguyên 100% không đổi. (Đính chính: Số liệu 798/40/8/21 trong text báo cáo trước đó là lỗi nhầm lẫn văn bản, không có dữ liệu lạ nào phát sinh trong DB).
+     - Toàn bộ giá trị `payment_status` lịch sử thực tế trong DB: `completed`: 232 đơn, `paid`: 73 đơn, `pending`: 12 đơn (tổng 317 đơn) được giữ nguyên 100%. Tuyệt đối không tự ý chuyển `completed` sang `paid`.
+  6. *Hotfix Bảo Mật Mass Assignment (OrderCreate)*:
+     - Loại bỏ hoàn toàn `assigned_to` và không cho phép `is_legacy_unverified` trong schema `OrderCreate`.
+     - Phân định rõ schema ghi (`OrderCreate`) và schema đọc (`OrderResponse`).
+     - Khóa cứng trong `inventory_service.py:create_order`: Đơn mới tạo luôn có `assigned_to = NULL` và `is_legacy_unverified = 0`.
+     - Khách hàng (Customer) hoặc nhân viên (Staff) gửi `assigned_to` hoặc `is_legacy_unverified` trong payload đều bị vô hiệu hóa, không thể tự gán quyền hoặc cờ legacy.
+- **Files đã sửa**:
+  - `backend/app/schemas/order.py` (Bổ sung shipping fields vào `OrderCreate`; loại bỏ `assigned_to` khỏi `OrderCreate`; giữ 5 trường trong `OrderResponse`)
+  - `backend/app/models/schema.py` (Hàm `run_migration_v2_r2b`, tích hợp version 2 runner trong `init_db`)
+  - `backend/app/api/v1/orders.py` (Bổ sung 5 trường vào query `get_orders`, `get_order_detail`)
+  - `backend/app/services/inventory_service.py` (Bổ sung 5 trường vào `INSERT INTO orders` với `assigned_to = NULL` và `is_legacy_unverified = 0`, trả về đủ trường trong dictionary)
+- **Files kiểm thử mới**:
+  - `backend/tests/test_phase_r2b_column_expansion.py` (12 tests)
+  - `backend/tests/test_phase_r2b_hotfix_mass_assignment.py` (6 tests)
+- **Kết quả kiểm thử**:
+  - **18/18 targeted tests PASSED** (R2B Column Expansion: 12/12, Mass Assignment Hotfix: 6/6).
+  - **69/69 total regression tests PASSED (25.92s)** (R2B Hotfix: 6, R2B Base: 12, R2A: 11, R1A: 9, R1B: 14, R1C: 17).
+- **DoD**: Đạt 100% tiêu chí nghiệm thu R2B và Hotfix an toàn bảo mật.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R2B và Hotfix. TUYỆT ĐỐI CHƯA THỰC HIỆN R2C.**
+
+---
+
+#### PHASE R2C: Payment & Fulfillment Enum Upgrade
+- **Tiểu giai đoạn R2C-A (Design & Clone Dry-Run)**: **[COMPLETED ✅ 10/10/2026 — SẴN SÀNG CHỜ PHÊ DUYỆT]**
+- **Tiểu giai đoạn R2C-B (Production Execution)**: **[PENDING APPROVAL — CHƯA THỰC HIỆN TRÊN DATABASE CHÍNH]**
+- **Mục tiêu**: Nâng cấp an toàn bảng `orders` để hỗ trợ đầy đủ enum `payment_status` (`unpaid`, `pending_verification`, `paid`, `refund_pending`, `refunded`, `unverified_legacy`), bổ sung `payment_status_raw` và `fulfillment_status`. Giữ nguyên tên trường `status`.
+- **Kết quả Thực hiện Dry-Run R2C-A trên Bản Clone Độc Lập**:
+  1. *Bảo tồn Dữ liệu Gốc với `payment_status_raw`*:
+     - Cột `payment_status_raw TEXT NOT NULL` lưu trữ 100% giá trị trạng thái thanh toán gốc ban đầu của từng đơn hàng: `completed` (232 đơn), `paid` (73 đơn), `pending` (12 đơn).
+     - Tuyệt đối không xóa hoặc ghi đè trạng thái thanh toán lịch sử.
+  2. *Giải pháp Trạng thái Thanh toán Lịch sử (Khuyến nghị Phương án A)*:
+     - Bổ sung `unverified_legacy` làm giá trị thứ 6 trong enum `payment_status`.
+     - Ánh xạ an toàn không bóp méo số liệu:
+       - 232 đơn `'completed'` $ightarrow$ chuyển sang `payment_status = 'unverified_legacy'`.
+       - 73 đơn `'paid'` (chưa đối soát tiền thực nhận) $ightarrow$ chuyển sang `payment_status = 'unverified_legacy'`.
+       - 12 đơn `'pending'` $ightarrow$ chuyển sang `payment_status = 'unpaid'`.
+     - **Cam kết**: 0 đơn lịch sử nào bị tự ý gán là `'paid'`. Báo cáo doanh thu thực thu (`WHERE payment_status = 'paid'`) trả về đúng 0 VNĐ cho các đơn chưa xác minh.
+  3. *Thiết kế Giao Vận `fulfillment_status`*:
+     - Cột `fulfillment_status TEXT NOT NULL CHECK(fulfillment_status IN ('unfulfilled', 'packing', 'shipping', 'delivered', 'delivery_failed', 'returned_to_inventory', 'legacy_unknown'))`.
+     - 317 đơn lịch sử được gán `'legacy_unknown'` (trung thực với lịch sử hệ thống chưa theo dõi vận chuyển).
+     - Đơn mới tạo tại quầy POS: mặc định `'delivered'`. Đơn online/remote: mặc định `'unfulfilled'`.
+  4. *Quy trình Rebuild Bảng An toàn (12 Bước SQLite Standard)*:
+     - Tắt `PRAGMA foreign_keys = OFF` ngoài transaction trước khi `BEGIN IMMEDIATE`.
+     - Tạo `orders_new` $ightarrow$ Copy chuyển đổi $ightarrow$ Drop `orders` $ightarrow$ Rename `orders_new` sang `orders`.
+     - Tái tạo 5 Indexes: `idx_orders_status`, `idx_orders_created`, `idx_orders_code`, `idx_orders_payment_status`, `idx_orders_fulfillment`.
+     - `PRAGMA foreign_key_check` đạt 0 lỗi, `PRAGMA integrity_check` trả về `'ok'`.
+     - Đã kiểm chứng tính Idempotency và Rollback khi lỗi trên bản clone.
+  5. *Kết quả Đo kiểm trên Clone*:
+     - 317/317 đơn hàng và 322/322 order_items giữ nguyên vẹn 100%.
+     - Tổng doanh thu `final_amount`: 461,534,000 VNĐ giữ nguyên 100%.
+     - CHECK constraint hoạt động chuẩn: Chặn đứng các giá trị lạ không thuộc enum.
+- **Files kiểm thử mới**: `backend/tests/test_phase_r2c_dryrun.py` (10/10 tests PASSED trên bản clone độc lập).
+- **Trạng thái Database Chính (`backend/webstore.db`)**: **HOÀN TOÀN KHÔNG BỊ THAY ĐỔI**. Vẫn giữ nguyên schema Version 2.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành R2C-A. Báo cáo phương án và ĐỢI PHÊ DUYỆT trước khi áp dụng R2C-B lên database chính.**
+
+---
+
+#### PHASE R3: Order Workflow, Claim Lock & Payments
+- **Mục tiêu**: Triển khai luồng đơn hàng hoàn chỉnh: Đơn COD tạo mới là `unpaid`; Đơn chuyển khoản qua đối soát ngân hàng; Atomic Claim Lock; Tách hoàn tiền và hoàn hàng khi giao thất bại.
+- **Phạm vi**:
+  - Cập nhật `create_order`:
+    - Đơn COD tạo mới khởi tạo là `payment_status = 'unpaid'`.
+    - Đơn chuyển khoản tạo mới khởi tạo là `payment_status = 'unpaid'`. Tuyệt đối không tự động coi là đã thu tiền.
+  - Triển khai `notify_transfer`: Khách/nhân viên gửi thông báo đã chuyển tiền kèm mã giao dịch $\rightarrow$ chuyển sang `payment_status = 'pending_verification'`.
+  - Triển khai `verify_transfer_payment`: Chỉ Admin/SuperAdmin xác nhận tiền ngân hàng thực nhận qua sao kê/biến động số dư $\rightarrow$ cập nhật `payment_status = 'paid'`.
+  - Triển khai `claim_order`: Sử dụng câu lệnh SQL nguyên tử `WHERE assigned_to IS NULL` chống 2 nhân viên cùng nhận đơn.
+  - Triển khai quy tắc hoàn hàng khi giao thất bại:
+    - Khi `delivery_failed`: Hàng KHÔNG tự động cộng tồn kho.
+    - Chỉ hoàn kho khi thủ kho nhận hàng vật lý và bấm `confirm_return` $\rightarrow$ chuyển `returned_to_inventory`, hoàn kho 1 lần duy nhất kèm log `return_cancel` và Idempotency guard chống hoàn kho lặp lại.
+  - Triển khai quy tắc hoàn tiền: Đơn hủy chưa thanh toán giữ `unpaid`, đơn đã thanh toán chuyển `refund_pending` $\rightarrow$ `refunded`. Tách biệt hoàn toàn luồng hoàn tiền của Kế toán và luồng hoàn hàng của Thủ kho.
+  - SuperAdmin Reassign & Force Cancel có audit log.
+- **File dự kiến**: `backend/app/services/inventory_service.py`, `backend/app/api/v1/orders.py`, `backend/app/schemas/order.py`.
+- **Không thay đổi**: Chưa sửa AI service, chưa sửa font chữ frontend.
+- **Tiền đề**: Hoàn thành Phase R2.
+- **Kiểm thử**: Test 2 nhân viên claim đồng thời (1 thành công, 1 lỗi 409); test COD và chuyển khoản mới tạo đều là `unpaid`; test delivery_failed không tăng stock; test confirm_return tăng stock đúng 1 lần; test gọi lại confirm_return lần 2 bị chặn.
+- **DoD**: Chu trình vận hành chuẩn xác, bảo đảm tính toàn vẹn tồn kho và tài chính.
+- **STOP Condition**: **DỪNG LẠI báo cáo trước khi sang R4.**
+
+---
+
+#### PHASE R4: RAG Retrieval Calibration & Cutoff
+- **Mục tiêu**: Khắc phục triệt để lỗi gợi ý sản phẩm không phù hợp bằng cách khảo nghiệm thực nghiệm tập ngưỡng Cosine Distance và phân loại chi tiết các mã lỗi AI.
+- **Phạm vi**:
+  - Xây dựng bộ test benchmark 20 câu hỏi (khớp chính xác, ngữ nghĩa tương đương, mơ hồ, ngoài danh mục).
+  - Khảo nghiệm tập ngưỡng Cosine Distance: $\{0.35, 0.40, 0.45, 0.50, 0.55\}$, lựa chọn ngưỡng tối ưu đạt Precision cao và False Acceptance Rate $\approx 0\%$.
+  - Cập nhật `rag_service.py`: Lọc bỏ ứng viên vượt ngưỡng khoảng cách trước khi đưa vào SQL verification.
+  - Cập nhật `ai_service.py`: Phân tách minh bạch lỗi Quota 429, lỗi mạng, lỗi không tìm thấy hàng. Fallback không tự động gắn danh sách sản phẩm sai vào câu trả lời khẳng định.
+- **File dự kiến**: `backend/app/services/rag_service.py`, `backend/app/services/ai_service.py`, `backend/app/schemas/ai.py`.
+- **Không thay đổi**: Chưa chuyển đổi sang Ollama local ở phase này (để đánh giá độc lập tầng Retrieval).
+- **Tiền đề**: Hoàn thành Phase R1.
+- **Kiểm thử**: Hỏi "trái cây tươi", "xe máy" $\rightarrow$ Chatbot trả lời lịch sự không có hàng, 0 thẻ sản phẩm bị render sai; Hỏi "tai nghe retro", "bàn phím cơ" $\rightarrow$ Trả về đúng sản phẩm catalog.
+- **DoD**: Báo cáo kết quả khảo nghiệm ngưỡng Cosine rõ ràng, hiện tượng đổ sản phẩm bừa bãi khi lỗi được loại bỏ 100%.
+- **STOP Condition**: **DỪNG LẠI báo cáo bảng số liệu khảo nghiệm RAG trước khi sang R5.**
+
+---
+
+#### PHASE R5: Pluggable AI Providers & Local Benchmark
+- **Mục tiêu**: Xây dựng kiến trúc Pluggable AI Providers (Strategy Pattern) với lifecycle quản lý hoàn chỉnh; Thực hiện benchmark đo kiểm thực tế các mô hình AI Local trên GPU RTX 3050 Laptop 4GB.
+- **Phạm vi**:
+  - Xây dựng module `app/services/ai_providers/` (`base.py`, `gemini_provider.py`, `ollama_provider.py`, `deterministic_provider.py`).
+  - Tích hợp Provider Lifecycle: Health check định kỳ, Timeout cấu hình được, Cold-start handling, Hàng đợi yêu cầu, và Nhãn hiển thị nguồn AI minh bạch.
+  - Thực hiện bộ benchmark đo kiểm thực tế trên máy tính mục tiêu:
+    - Text: Đo kiểm Qwen3 4B / Qwen2.5 3B, Gemma 3 4B, và Qwen 7B đối chứng (đo Peak VRAM, tok/s thực tế, cold-start latency).
+    - Vision: Đưa Gemma 3 4B (Multimodal) và Qwen2.5-VL 3B vào đo kiểm thực tế cho tác vụ phân tích ảnh. Mốc $< 2.5\text{s}$ là mục tiêu benchmark tham chiếu (benchmark target), không phải DoD cứng trước khi đo.
+  - **Xử lý khi phần cứng laptop không đáp ứng**: Nếu mô hình local gây tràn VRAM (>3.5GB) hoặc giật lag trên card RTX 3050 Laptop 4GB, hệ thống báo cáo minh bạch hạn chế phần cứng và kích hoạt Tier 3 (Deterministic Search) an toàn, tuyệt đối không tuyên bố thành công giả tạo.
+  - Chọn lựa mô hình chính thức dựa trên số liệu đo kiểm thực tế.
+- **File dự kiến**: `backend/app/services/ai_providers/` (mới), `backend/app/services/ai_service.py`, `backend/app/core/config.py`.
+- **Không thay đổi**: Không phá vỡ API schema hiện có của endpoint `/recommend`, `/sales-report`, `/sales-qa`.
+- **Tiền đề**: Hoàn thành Phase R4.
+- **Kiểm thử**: Tắt Internet / tắt API key $\rightarrow$ Hệ thống tự động chuyển sang Ollama Provider mượt mà; Kiểm tra `nvidia-smi` xác nhận VRAM không bị tràn xuống shared memory.
+- **DoD**: Bảng số liệu benchmark thực tế đầy đủ; failover hoạt động ổn định và thông báo rõ ràng cho người dùng.
+- **STOP Condition**: **DỪNG LẠI báo cáo kết quả benchmark phần cứng trước khi sang R6.**
+
+---
+
+#### PHASE R6: Image Search Multimodal Pipeline
+- **Mục tiêu**: Hoàn thiện pipeline tìm kiếm bằng hình ảnh, tích hợp Vision local provider (sử dụng mô hình chiến thắng từ Phase R5), tiền xử lý giới hạn kích thước ảnh tránh OOM, và giữ vững chốt chặn SQLite Truth Guard.
+- **Phạm vi**:
+  - Cập nhật `image_search_service.py`: Tích hợp fallback gọi mô hình Vision local đã nghiệm thu (Gemma 3 4B hoặc Qwen-VL thắng benchmark R5) khi Gemini Vision quá hạn ngạch.
+  - Thêm bước tiền xử lý ảnh: Resize ảnh truy vấn về tối đa $512 \times 512$ trước khi đưa vào mô hình thị giác local để bảo đảm an toàn cho 4GB VRAM.
+  - Tinh chỉnh bộ lọc phi sản phẩm `is_non_product_image` và bộ phân loại 4 mức độ (`Match`, `Similar`, `Related`, `None`).
+- **File dự kiến**: `backend/app/services/image_search_service.py`, `backend/app/services/visual_index_service.py`.
+- **Không thay đổi**: Không quét lại toàn bộ catalog bằng Vision API tại mỗi request (bảo toàn precomputed visual index).
+- **Tiền đề**: Hoàn thành Phase R5.
+- **Kiểm thử**: Tải ảnh tai nghe mẫu $\rightarrow$ Phân loại đúng Match/Similar; Tải ảnh khuôn mặt/phong cảnh $\rightarrow$ Phân loại đúng None/Non-product; Thử nghiệm ngắt mạng $\rightarrow$ Vision Local xử lý thành công không gây OOM.
+- **DoD**: Image Search hoạt động được cả Online (Gemini) và Offline (Local Vision).
+- **STOP Condition**: **DỪNG LẠI báo cáo trước khi sang R7.**
+
+---
+
+#### PHASE R7: UI/UX, Be Vietnam Pro Typography & Masking
+- **Mục tiêu**: Hiện đại hóa typography toàn diện sang `Be Vietnam Pro` (khắc phục triệt để lỗi dấu tiếng Việt), giữ `JetBrains Mono` cho các trường kỹ thuật, mở màn hình Khách hàng cho Staff (sau khi Backend Data Masking từ R1C đã sẵn sàng), loại bỏ role ảo `manager`, và tối ưu touch targets di động $\ge 44px$.
+- **Phạm vi**:
+  - `frontend/index.html`: Nhúng font Google `Be Vietnam Pro` (400, 500, 600, 700) và giữ `JetBrains Mono`.
+  - `frontend/src/index.css`: Cập nhật `--font-display: 'Be Vietnam Pro', -apple-system, sans-serif;`. Bảo toàn 100% bản sắc Vintage Editorial / Retro Print.
+  - `frontend/src/components/layout/Navbar.jsx` và `App.jsx`:
+    - Mở quyền truy cập menu Khách hàng cho Staff.
+    - Loại bỏ hoàn toàn role ma `manager`.
+    - Hiển thị nhãn trạng thái AI Provider đang kết nối (Cloud / Local / Safe).
+  - `frontend/src/pages/CustomersPage.jsx`: Nhận dữ liệu đã qua backend masking an toàn cho Staff.
+  - Tối ưu hóa các nút thao tác bảng biểu đạt kích thước tối thiểu 44px trên mobile.
+- **File dự kiến**: `frontend/index.html`, `frontend/src/index.css`, `frontend/src/components/layout/Navbar.jsx`, `frontend/src/App.jsx`, `frontend/src/pages/CustomersPage.jsx`, `frontend/src/pages/OrdersPage.jsx`.
+- **Không thay đổi**: Không thay đổi bảng màu CRT Phosphor, giữ nguyên layout cơ cấu màn hình.
+- **Tiền đề**: Hoàn thành Phase R1C, R3, R4.
+- **Kiểm thử**: Kiểm tra giao diện trên mobile 390px, tablet 768px, desktop 1440px; Đăng nhập Staff xác nhận mở được Khách hàng và dữ liệu cá nhân bị masked; `npm run build` thành công 100% (0 errors, 0 warnings).
+- **DoD**: Giao diện tiếng Việt chuẩn mực, không lỗi font, responsive mượt mà.
+- **STOP Condition**: **DỪNG LẠI báo cáo trước khi sang R8.**
+
+---
+
+#### PHASE R8: Full Testing, Security Audit & Academic Prep
+- **Mục tiêu**: Chạy kiểm thử tự động toàn diện cách ly trên `test_webstore.db`, kiểm toán bảo mật chống IDOR/RBAC, đóng gói script chạy ứng dụng 1-click, và chuẩn bị bộ tài liệu minh chứng học thuật sẵn sàng cho buổi bảo vệ đồ án (sử dụng mô hình local chiến thắng từ benchmark Phase R5, không hardcode `qwen2.5:3b`).
+- **Phạm vi**:
+  - Rà soát toàn bộ 23 test suites, bổ sung test case cho các tính năng mới (Claim lock, Payment status, Provider failover, RAG cutoff).
+  - Kiểm tra tính nguyên vẹn tuyệt đối của file `backend/webstore.db` gốc (0 byte rác sau khi test).
+  - Đóng gói kịch bản demo đối chứng cho hội đồng chấm thi: Demo Online (Gemini) $\leftrightarrow$ Demo Offline ngắt mạng (với mô hình thắng benchmark R5) $\leftrightarrow$ Demo Zero-Hallucination Fallback.
+  - **Lưu ý nguyên tắc**: Việc cập nhật chính thức 3 tệp DOCX, PlantUML và quyển báo cáo chỉ được thực hiện sau khi Phase R8 này nghiệm thu phần mềm thành công 100%.
+- **File dự kiến**: `backend/tests/` (toàn bộ test suites), `README.md`.
+- **Không thay đổi**: Không sửa dữ liệu demo đã nghiệm thu.
+- **Tiền đề**: Hoàn thành toàn bộ Phase R1 – R7.
+- **Kiểm thử**: Chạy `pytest` đạt 100% PASS; Kiểm tra checksum hash của file database chính không bị biến động sau khi chạy test session.
+- **DoD**: Toàn bộ hệ thống hoàn chỉnh 100%, bảo mật vững chắc, tài liệu và kịch bản demo sẵn sàng cho bảo vệ điểm tối đa.
+- **STOP Condition**: **Hoàn thành toàn bộ dự án StoreFlow AI 2.0.**
+
+---
+
+## PHẦN 9: DANH MỤC QUYẾT ĐỊNH NGHIỆP VỤ CẦN NGƯỜI DÙNG PHÊ DUYỆT
+
+Trước khi bắt đầu thực thi Phase R1A, các quyết định nghiệp vụ và kiến trúc cốt lõi sau đây đã được hoàn thiện để Bạn xem xét và xác nhận lần cuối:
+
+- [ ] **Quyết định 1 (Tên trường trạng thái)**: Thống nhất giữ nguyên tên trường **`status`** trong bảng `orders` cho vòng đời đơn hàng; tuyệt đối không tạo thêm `order_status` trùng lặp gây xung đột đồng bộ và phá vỡ tương thích ngược API/dữ liệu lịch sử?
+- [ ] **Quyết định 2 (Enum Payment Status & Cờ Legacy)**: Thống nhất enum `payment_status` gồm 5 giá trị chuẩn hóa (`unpaid`, `pending_verification`, `paid`, `refund_pending`, `refunded`), không dùng `cancelled_unpaid`, không đánh dấu `refunded` khi chưa từng thu tiền, và dùng cờ `is_legacy_unverified = 1` riêng để đối soát dữ liệu lịch sử?
+- [ ] **Quyết định 3 (Quy trình Chuyển khoản)**: Thống nhất đơn chuyển khoản khởi tạo là `unpaid`, chuyển sang `pending_verification` khi khách/nhân viên thông báo đã chuyển, và chỉ chuyển sang `paid` khi Admin/Kế toán đối soát sao kê ngân hàng thực nhận; ảnh chụp bill từ khách chỉ là bằng chứng tham khảo?
+- [ ] **Quyết định 4 (Tự đăng ký Khách hàng)**: Thống nhất bổ sung endpoint `/auth/register` tại Phase R1B, khóa cứng tạo role `customer` (chặn role escalation), tự động liên kết hồ sơ khách hàng, chống trùng và có rate limit?
+- [ ] **Quyết định 5 (Backend Data Masking cho Staff)**: Thống nhất che giấu dữ liệu khách hàng (ẩn email, ẩn địa chỉ chi tiết) được thực thi tại Backend schema ở Phase R1C trước khi mở giao diện cho Staff ở Phase R7; frontend masking chỉ là bổ trợ?
+- [ ] **Quyết định 6 (Giao hàng thất bại & Hoàn kho)**: Thống nhất khi `delivery_failed`, hàng KHÔNG tự động cộng tồn kho ngay; chỉ hoàn kho đúng 1 lần khi thủ kho nhận hàng vật lý và xác nhận `returned_to_inventory` (có idempotency guard); tách biệt xử lý hoàn tiền và hoàn hàng?
+- [ ] **Quyết định 7 (Quyền Can thiệp Ngoại lệ của SuperAdmin)**: Thống nhất SuperAdmin không tham gia đóng gói/bán hàng thường xuyên nhưng giữ nguyên quyền tối cao can thiệp ngoại lệ (Force Cancel, Reopen, Reassign nhân viên) kèm lý do bắt buộc ($\ge 5$ ký tự) và ghi nhật ký kiểm toán bất biến?
+- [ ] **Quyết định 8 (AI Local Benchmark & Model Selection)**: Thống nhất mốc Vision $< 2.5\text{s}$ là mục tiêu benchmark tham chiếu; Phase R8 sẽ sử dụng mô hình thắng cuộc thực tế từ Phase R5 (không hardcode `qwen2.5:3b`); nếu phần cứng 4GB VRAM không đáp ứng sẽ báo cáo hạn chế phần cứng minh bạch và kích hoạt Tier 3 (Deterministic Search)?
+- [ ] **Quyết định 9 (Phân chia R1/R2 thành các bước nhỏ)**: Thống nhất triển khai R1 thành R1A/R1B/R1C (zero schema change) và R2 thành R2A/R2B/R2C (backup an toàn bằng `VACUUM INTO`, thử nghiệm trên bản sao trước, không xóa/reset dữ liệu, mỗi bước có STOP condition)?
+
+---
+```
+================================================================================
+>>> STOPPING EXECUTION: PHASE R0 FINAL ROADMAP REVISION COMPLETED.
+>>> TÀI LIỆU docs/REFACTOR_ROADMAP.md ĐÃ ĐƯỢC CẬP NHẬT HOÀN TOÀN CHUẨN XÁC.
+>>> DỪNG LẠI TẠI ĐÂY. TUYỆT ĐỐI KHÔNG TỰ ĐỘNG CHẠY PHASE R1.
+================================================================================
+```

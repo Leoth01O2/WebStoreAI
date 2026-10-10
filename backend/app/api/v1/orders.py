@@ -30,6 +30,7 @@ def get_orders(
             SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
                    o.user_id, u.full_name as user_name, o.total_amount, o.discount_amount,
                    o.final_amount, o.payment_method, o.payment_status, o.status, o.note,
+                   o.assigned_to, o.shipping_name, o.shipping_phone, o.shipping_address, o.is_legacy_unverified,
                    o.approved_by, o.approved_at, o.processed_by, o.processed_at,
                    o.rejected_by, o.rejected_at, o.rejection_reason,
                    o.created_at
@@ -170,6 +171,7 @@ def get_order_detail(order_id: int, current_user: dict = Depends(get_current_use
             """SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
                       o.user_id, u.full_name as user_name, o.total_amount, o.discount_amount,
                       o.final_amount, o.payment_method, o.payment_status, o.status, o.note,
+                      o.assigned_to, o.shipping_name, o.shipping_phone, o.shipping_address, o.is_legacy_unverified,
                       o.approved_by, o.approved_at, o.processed_by, o.processed_at,
                       o.rejected_by, o.rejected_at, o.rejection_reason,
                       o.created_at
@@ -212,25 +214,32 @@ def get_order_detail(order_id: int, current_user: dict = Depends(get_current_use
 def create_order(order_in: OrderCreate, current_user: dict = Depends(get_current_user)):
     """
     Tạo hóa đơn bán hàng POS mới (Atomic Transaction):
-    - Khách hàng (Customer): không được mạo danh customer_id của người khác (Anti-IDOR).
-    - Đơn do Customer đặt từ xa bắt buộc khởi tạo ở trạng thái PENDING.
-    - Đơn do Staff / Admin / SuperAdmin lập tại quầy POS mặc định COMPLETED.
-    - Tự động trừ tồn kho (giữ chỗ)
-    - Ghi log xuất nhập tồn
-    - Cập nhật tổng chi tiêu của khách nếu completed
-    - Rollback toàn bộ nếu có lỗi hoặc không đủ tồn kho
+    - Khách hàng (Customer):
+        + Bắt buộc phải có hồ sơ customers liên kết với current_user.
+        + Tự động gán customer_id chính chủ từ cơ sở dữ liệu.
+        + Nếu client cố tình gửi customer_id khác -> từ chối HTTP 403 Forbidden (Anti-IDOR).
+        + Không có hồ sơ hợp lệ -> từ chối HTTP 400 Bad Request, không được mượn ID người khác.
+        + Khởi tạo bắt buộc ở trạng thái PENDING.
+    - Staff / Admin / SuperAdmin lập tại quầy POS:
+        + Hỗ trợ tạo đơn khách lẻ hoặc chọn khách hàng tại quầy.
+        + Mặc định trạng thái COMPLETED.
+    - Tự động trừ tồn kho (giữ chỗ) trong transaction nguyên tử.
     """
     user_role = current_user.get("role")
     if user_role == "customer":
         with get_db() as conn:
             own_customer_id = get_customer_id_for_user(conn, current_user)
-            if order_in.customer_id and own_customer_id and order_in.customer_id != own_customer_id:
+            if not own_customer_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Tài khoản chưa có hồ sơ khách hàng liên kết hợp lệ để tạo đơn. Vui lòng liên hệ quản trị viên."
+                )
+            if order_in.customer_id is not None and order_in.customer_id != own_customer_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Bạn không thể tạo đơn hàng cho khách hàng khác"
+                    detail="Bạn không có quyền tạo đơn hàng cho khách hàng khác (IDOR Violation)"
                 )
-            if not order_in.customer_id and own_customer_id:
-                order_in.customer_id = own_customer_id
+            order_in.customer_id = own_customer_id
         order_status = "pending"
     else:
         order_status = order_in.status or "completed"

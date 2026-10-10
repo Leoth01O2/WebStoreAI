@@ -284,7 +284,120 @@ def init_db():
             conn.execute("PRAGMA foreign_keys = ON")
             print("[DB Migration] Upgraded orders table CHECK constraint successfully.")
 
+        # PHASE R2A: Khởi tạo bảng quản lý phiên bản migration (schema_version)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            description TEXT NOT NULL,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            checksum TEXT
+        );
+        """)
+        conn.commit()
+
+        # Đánh dấu phiên bản cơ sở (Baseline version 1) nếu chưa có
+        cursor.execute("SELECT version FROM schema_version WHERE version = 1")
+        if not cursor.fetchone():
+            cursor.execute(
+                "INSERT INTO schema_version (version, description, checksum) VALUES (1, 'R2A: Initial schema versioning baseline', 'r2a-baseline-v1')"
+            )
+            conn.commit()
+            print("[DB Migration] Initialized schema version 1 (R2A baseline).")
+
+        # PHASE R2B: Migration Version 2 - Phased Column Expansion cho orders
+        if not is_version_applied(conn, 2):
+            apply_migration_step(
+                conn,
+                version=2,
+                description="R2B: Phased column expansion for orders and legacy unverified marking",
+                migration_callable=run_migration_v2_r2b,
+                checksum="r2b-column-expansion-v2"
+            )
+            conn.commit()
+            print("[DB Migration] Applied schema version 2 (R2B column expansion).")
+
     print("[DB] Database schema initialized successfully.")
+
+def run_migration_v2_r2b(conn) -> None:
+    """
+    PHASE R2B: Bổ sung an toàn các cột mới cho bảng orders và đánh dấu đơn hàng lịch sử.
+    Quy tắc an toàn:
+    - Snapshot tập ID đơn hàng thực tế tồn tại tại thời điểm migration (không dùng COUNT hay id <= 317).
+    - Bổ sung các cột nếu chưa có:
+        + assigned_to INTEGER REFERENCES users(id)
+        + shipping_name TEXT
+        + shipping_phone TEXT
+        + shipping_address TEXT
+        + is_legacy_unverified INTEGER NOT NULL DEFAULT 0
+    - Đánh dấu is_legacy_unverified = 1 cho đúng tập ID lịch sử đã snapshot.
+    - Tuyệt đối không sửa payment_status.
+    - Tuyệt đối không xóa hay rebuild bảng orders.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(orders);")
+    current_cols = [r["name"] if isinstance(r, dict) or hasattr(r, "keys") else r[1] for r in cursor.fetchall()]
+
+    # 1. Snapshot chính xác tập ID các đơn hàng hiện hữu tại thời điểm migration
+    cursor.execute("SELECT id FROM orders;")
+    legacy_ids = [r[0] for r in cursor.fetchall()]
+
+    # 2. Bổ sung các cột nếu chưa có
+    columns_to_add = [
+        ("assigned_to", "INTEGER REFERENCES users(id)"),
+        ("shipping_name", "TEXT"),
+        ("shipping_phone", "TEXT"),
+        ("shipping_address", "TEXT"),
+        ("is_legacy_unverified", "INTEGER NOT NULL DEFAULT 0"),
+    ]
+    for col_name, col_def in columns_to_add:
+        if col_name not in current_cols:
+            conn.execute(f"ALTER TABLE orders ADD COLUMN {col_name} {col_def};")
+
+    # 3. Đánh dấu is_legacy_unverified = 1 cho chính xác tập đơn hàng lịch sử đã snapshot
+    if legacy_ids:
+        batch_size = 500
+        for i in range(0, len(legacy_ids), batch_size):
+            batch = legacy_ids[i:i + batch_size]
+            placeholders = ",".join("?" for _ in batch)
+            conn.execute(
+                f"UPDATE orders SET is_legacy_unverified = 1 WHERE id IN ({placeholders});",
+                batch
+            )
+
+def get_applied_versions(conn) -> list:
+    """Lấy danh sách các phiên bản migration đã áp dụng theo thứ tự tăng dần"""
+    cursor = conn.cursor()
+    cursor.execute("SELECT version FROM schema_version ORDER BY version ASC")
+    return [row["version"] if isinstance(row, dict) or hasattr(row, "keys") else row[0] for row in cursor.fetchall()]
+
+def is_version_applied(conn, version: int) -> bool:
+    """Kiểm tra xem một phiên bản migration cụ thể đã được áp dụng hay chưa"""
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM schema_version WHERE version = ?", (version,))
+    return cursor.fetchone() is not None
+
+def record_migration(conn, version: int, description: str, checksum: str = None) -> None:
+    """Ghi nhận một phiên bản migration đã hoàn thành vào schema_version"""
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO schema_version (version, description, checksum) VALUES (?, ?, ?)",
+        (version, description, checksum)
+    )
+
+def apply_migration_step(conn, version: int, description: str, migration_callable, checksum: str = None) -> bool:
+    """
+    Thực thi an toàn một bước migration:
+    - Kiểm tra Idempotency: Nếu version đã chạy thì bỏ qua (return False).
+    - Chạy migration_callable(conn).
+    - Nếu thành công: Ghi nhận vào schema_version và return True.
+    - Nếu thất bại: Ném exception để transaction ngoài rollback toàn bộ. Không ghi nhận version.
+    """
+    if is_version_applied(conn, version):
+        return False
+
+    migration_callable(conn)
+    record_migration(conn, version, description, checksum)
+    return True
 
 if __name__ == "__main__":
     init_db()

@@ -30,13 +30,24 @@ class ProductUpdate(BaseModel):
     image_url: Optional[str] = None
     description: Optional[str] = None
 
-class ProductResponse(ProductBase):
+class ProductAdminResponse(ProductBase):
+    """
+    Schema phản hồi đầy đủ dành riêng cho Admin và SuperAdmin.
+    Bao gồm thông tin giá vốn (cost_price) phục vụ kế toán, quản trị lợi nhuận và nhập hàng.
+    """
     id: int
     category_name: Optional[str] = None
+    in_stock: bool = True
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
 class ProductPublicResponse(BaseModel):
+    """
+    Schema phản hồi an toàn KHÔNG CHỨA GIÁ VỐN (cost_price).
+    Áp dụng bắt buộc cho: Customer, Staff và Guest.
+    Cung cấp đầy đủ mọi thông tin cần thiết cho POS và Storefront:
+    Mã SKU, tên, danh mục, giá bán lẻ, số lượng tồn kho, trạng thái kinh doanh, ảnh, mô tả.
+    """
     id: int
     sku: str
     name: str
@@ -44,11 +55,17 @@ class ProductPublicResponse(BaseModel):
     category_name: Optional[str] = None
     selling_price: float
     stock_quantity: int
+    min_stock_alert: Optional[int] = 5
     in_stock: bool = True
     unit: str = "cái"
     status: str = "active"
     image_url: Optional[str] = None
     description: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+# Backward-compatibility alias
+ProductResponse = ProductAdminResponse
 
 # --- PRODUCT VISUAL METADATA SCHEMAS (PHASE 12B) ---
 

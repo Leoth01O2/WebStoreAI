@@ -27,6 +27,9 @@ webstore.db*
 storeflow.db*
 chroma_data/
 chroma_db/
+backups/
+backend/backups/
+*.bak
 
 # Uploads
 backend/uploads/products/*

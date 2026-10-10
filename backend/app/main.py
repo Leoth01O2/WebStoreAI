@@ -20,6 +20,9 @@ os.makedirs(os.path.join(UPLOADS_DIR, "products"), exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Kiểm tra an toàn cấu hình khởi động (Boot Safety Guard)
+    from app.core.config import validate_boot_safety
+    validate_boot_safety(settings)
     # Khởi tạo schema cơ sở dữ liệu SQLite khi startup
     init_db()
     # Tự động nạp vector index vào ChromaDB nếu chưa có

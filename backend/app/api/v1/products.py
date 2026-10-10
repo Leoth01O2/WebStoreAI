@@ -1,11 +1,11 @@
 import os
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from app.core.database import get_db, get_db_transaction
-from app.core.rbac import get_current_user, require_roles
+from app.core.rbac import get_current_user, get_current_user_optional, require_roles
 from app.schemas.category import CategoryCreate, CategoryUpdate, CategoryResponse
-from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse, ProductPublicResponse
+from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse, ProductAdminResponse, ProductPublicResponse
 from app.services.rag_service import rag_service
 from app.services.visual_index_service import visual_index_service
 
@@ -116,7 +116,7 @@ def get_categories(current_user: dict = Depends(get_current_user)):
 @router.post("/categories", response_model=CategoryResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
 def create_category(category_in: CategoryCreate, current_user: dict = Depends(get_current_user)):
     """Tạo mới danh mục (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM categories WHERE code = ?", (category_in.code,))
         if cursor.fetchone():
@@ -127,7 +127,6 @@ def create_category(category_in: CategoryCreate, current_user: dict = Depends(ge
             (category_in.name, category_in.code, category_in.description)
         )
         new_id = cursor.lastrowid
-        conn.commit()
 
         cursor.execute("SELECT id, name, code, description, created_at FROM categories WHERE id = ?", (new_id,))
         return dict(cursor.fetchone())
@@ -135,7 +134,7 @@ def create_category(category_in: CategoryCreate, current_user: dict = Depends(ge
 @router.put("/categories/{category_id}", response_model=CategoryResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
 def update_category(category_id: int, category_in: CategoryUpdate, current_user: dict = Depends(get_current_user)):
     """Cập nhật danh mục (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM categories WHERE id = ?", (category_id,))
         cat = cursor.fetchone()
@@ -161,7 +160,6 @@ def update_category(category_id: int, category_in: CategoryUpdate, current_user:
         if updates:
             params.append(category_id)
             cursor.execute(f"UPDATE categories SET {', '.join(updates)} WHERE id = ?", params)
-            conn.commit()
 
         cursor.execute("SELECT id, name, code, description, created_at FROM categories WHERE id = ?", (category_id,))
         return dict(cursor.fetchone())
@@ -169,14 +167,21 @@ def update_category(category_id: int, category_in: CategoryUpdate, current_user:
 @router.delete("/categories/{category_id}", dependencies=[Depends(require_roles("admin", "superadmin"))])
 def delete_category(category_id: int, current_user: dict = Depends(get_current_user)):
     """Xóa danh mục (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM categories WHERE id = ?", (category_id,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
 
+        # Ràng buộc khóa ngoại: Kiểm tra có sản phẩm nào thuộc danh mục này không
+        cursor.execute("SELECT id FROM products WHERE category_id = ? LIMIT 1", (category_id,))
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=400,
+                detail="Không thể xóa danh mục đang có sản phẩm. Vui lòng chuyển hoặc xóa sản phẩm trước."
+            )
+
         cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
-        conn.commit()
         return {"message": "Đã xóa danh mục thành công"}
 
 # ==================== PRODUCTS ====================
@@ -213,7 +218,7 @@ async def upload_product_image(
 
     return {"image_url": f"/uploads/products/{unique_filename}"}
 
-@router.get("/products", response_model=List[ProductResponse])
+@router.get("/products", response_model=List[Union[ProductAdminResponse, ProductPublicResponse]])
 def get_products(
     search: Optional[str] = Query(None, description="Tìm theo tên hoặc mã SKU"),
     category_id: Optional[int] = Query(None, description="Lọc theo ID nhóm hàng"),
@@ -222,21 +227,36 @@ def get_products(
     max_price: Optional[float] = Query(None, description="Giá bán tối đa"),
     low_stock_only: bool = Query(False, description="Chỉ lấy sản phẩm sắp hết hàng"),
     in_stock_only: bool = Query(False, description="Chỉ lấy sản phẩm còn hàng trong kho"),
-    current_user: dict = Depends(get_current_user)
+    current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
     """
-    Danh sách sản phẩm có tìm kiếm, lọc đa tiêu chí (Tất cả vai trò: Admin, Staff, Manager)
+    Danh sách sản phẩm có tìm kiếm, lọc đa tiêu chí:
+    - Admin & SuperAdmin: Xem đầy đủ thông tin kể cả giá vốn (cost_price) phục vụ kế toán/nhập hàng.
+    - Staff, Customer & Guest: Xem thông tin bán lẻ an toàn (ProductPublicResponse), TUYỆT ĐỐI KHÔNG nhận cost_price.
     """
+    is_admin = bool(current_user and current_user.get("role") in ("admin", "superadmin"))
+
     with get_db() as conn:
         cursor = conn.cursor()
-        query = """
-            SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                   p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                   p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.id
-            WHERE 1=1
-        """
+        if is_admin:
+            query = """
+                SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                       p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
+                       p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE 1=1
+            """
+        else:
+            # Bảo vệ từ tầng SQL: Staff, Customer, Guest không bao giờ SELECT cost_price
+            query = """
+                SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                       p.selling_price, p.stock_quantity, p.min_stock_alert,
+                       p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE 1=1
+            """
         params = []
 
         if search:
@@ -269,32 +289,72 @@ def get_products(
         query += " ORDER BY p.id DESC"
         cursor.execute(query, params)
         rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["in_stock"] = d.get("stock_quantity", 0) > 0
+            if is_admin:
+                results.append(ProductAdminResponse.model_validate(d))
+            else:
+                results.append(ProductPublicResponse.model_validate(d))
+        return results
 
-@router.get("/products/{product_id}", response_model=ProductResponse)
-def get_product_detail(product_id: int, current_user: dict = Depends(get_current_user)):
-    """Xem chi tiết thông tin một sản phẩm"""
+@router.get("/products/{product_id}", response_model=Union[ProductAdminResponse, ProductPublicResponse])
+def get_product_detail(
+    product_id: int,
+    current_user: Optional[dict] = Depends(get_current_user_optional)
+):
+    """
+    Xem chi tiết thông tin một sản phẩm:
+    - Admin & SuperAdmin: Xem đầy đủ thông tin kể cả giá vốn (cost_price).
+    - Staff, Customer & Guest: Xem thông tin bán lẻ an toàn (ProductPublicResponse), TUYỆT ĐỐI KHÔNG nhận cost_price.
+    """
+    is_admin = bool(current_user and current_user.get("role") in ("admin", "superadmin"))
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                      p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                      p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
-               FROM products p
-               LEFT JOIN categories c ON p.category_id = c.id
-               WHERE p.id = ?""",
-            (product_id,)
-        )
+        if is_admin:
+            cursor.execute(
+                """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                          p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
+                          p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                   FROM products p
+                   LEFT JOIN categories c ON p.category_id = c.id
+                   WHERE p.id = ?""",
+                (product_id,)
+            )
+        else:
+            # Bảo vệ từ tầng SQL: Không SELECT cost_price
+            cursor.execute(
+                """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                          p.selling_price, p.stock_quantity, p.min_stock_alert,
+                          p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                   FROM products p
+                   LEFT JOIN categories c ON p.category_id = c.id
+                   WHERE p.id = ?""",
+                (product_id,)
+            )
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
-        return dict(row)
+        d = dict(row)
+        d["in_stock"] = d.get("stock_quantity", 0) > 0
+        if is_admin:
+            return ProductAdminResponse.model_validate(d)
+        return ProductPublicResponse.model_validate(d)
 
 @router.post("/products", response_model=ProductResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
 def create_product(product_in: ProductCreate, current_user: dict = Depends(get_current_user)):
     """Tạo sản phẩm mới (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
+
+        # Kiểm tra category_id hợp lệ (bảo vệ toàn vẹn khóa ngoại)
+        if product_in.category_id is not None:
+            cursor.execute("SELECT id FROM categories WHERE id = ?", (product_in.category_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail=f"Danh mục ID {product_in.category_id} không tồn tại")
+
         cursor.execute("SELECT id FROM products WHERE sku = ?", (product_in.sku,))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail=f"Mã SKU '{product_in.sku}' đã tồn tại")
@@ -312,15 +372,6 @@ def create_product(product_in: ProductCreate, current_user: dict = Depends(get_c
             )
         )
         new_id = cursor.lastrowid
-        conn.commit()
-
-        # Đồng bộ vector sang ChromaDB
-        try:
-            if new_id is not None:
-                rag_service.upsert_single_product(new_id)
-                visual_index_service.sync_single_product_visual(new_id)
-        except Exception:
-            pass
 
         cursor.execute(
             """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
@@ -331,12 +382,22 @@ def create_product(product_in: ProductCreate, current_user: dict = Depends(get_c
                WHERE p.id = ?""",
             (new_id,)
         )
-        return dict(cursor.fetchone())
+        result = dict(cursor.fetchone())
+
+    # Đồng bộ vector sang ChromaDB chỉ sau khi SQLite transaction commit thành công
+    try:
+        if new_id is not None:
+            rag_service.upsert_single_product(new_id)
+            visual_index_service.sync_single_product_visual(new_id)
+    except Exception:
+        pass
+
+    return result
 
 @router.put("/products/{product_id}", response_model=ProductResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
 def update_product(product_id: int, product_in: ProductUpdate, current_user: dict = Depends(get_current_user)):
     """Cập nhật thông tin sản phẩm (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
         if not cursor.fetchone():
@@ -349,6 +410,10 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
                 cursor.execute("SELECT id FROM products WHERE sku = ? AND id != ?", (value, product_id))
                 if cursor.fetchone():
                     raise HTTPException(status_code=400, detail=f"Mã SKU '{value}' đã được sử dụng")
+            if field == "category_id" and value is not None:
+                cursor.execute("SELECT id FROM categories WHERE id = ?", (value,))
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=400, detail=f"Danh mục ID {value} không tồn tại")
             updates.append(f"{field} = ?")
             params.append(value)
 
@@ -356,14 +421,6 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
             updates.append("updated_at = CURRENT_TIMESTAMP")
             params.append(product_id)
             cursor.execute(f"UPDATE products SET {', '.join(updates)} WHERE id = ?", params)
-            conn.commit()
-
-            # Đồng bộ vector sang ChromaDB
-            try:
-                rag_service.upsert_single_product(product_id)
-                visual_index_service.sync_single_product_visual(product_id)
-            except Exception:
-                pass
 
         cursor.execute(
             """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
@@ -374,7 +431,16 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
                WHERE p.id = ?""",
             (product_id,)
         )
-        return dict(cursor.fetchone())
+        result = dict(cursor.fetchone())
+
+    # Đồng bộ vector sang ChromaDB chỉ sau khi SQLite transaction commit thành công
+    try:
+        rag_service.upsert_single_product(product_id)
+        visual_index_service.sync_single_product_visual(product_id)
+    except Exception:
+        pass
+
+    return result
 
 @router.delete("/products/{product_id}", dependencies=[Depends(require_roles("admin", "superadmin"))])
 def delete_product(
@@ -387,7 +453,7 @@ def delete_product(
     - Mặc định (hard_delete=false): Nếu đã có hóa đơn liên quan thì chuyển status='inactive' (soft delete).
     - hard_delete=true: Xóa vĩnh viễn bất kể lịch sử (dùng cho admin dọn dẹp dữ liệu).
     """
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM products WHERE id = ?", (product_id,))
         if not cursor.fetchone():
@@ -399,35 +465,31 @@ def delete_product(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Chỉ SuperAdmin mới có quyền xóa cứng (hard delete) sản phẩm vĩnh viễn"
                 )
-            # Hard delete: xóa vĩnh viễn — KHÔNG reassign FK (dùng khi dọn duplicate)
-            # order_items.product_id có thể trở thành dangling; cân nhắc dùng script cleanup thay thế.
             cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
-            conn.commit()
-            try:
-                rag_service.delete_single_product(product_id)
-                visual_index_service.delete_single_product_visual(product_id)
-            except Exception:
-                pass
-            return {"message": "Đã xóa cứng sản phẩm vĩnh viễn (hard delete)"}
+            msg = {"message": "Đã xóa cứng sản phẩm vĩnh viễn (hard delete)"}
+            is_soft_deleted = False
+        else:
+            # Soft delete mặc định: kiểm tra hóa đơn
+            cursor.execute("SELECT id FROM order_items WHERE product_id = ? LIMIT 1", (product_id,))
+            if cursor.fetchone():
+                cursor.execute("UPDATE products SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (product_id,))
+                msg = {"message": "Sản phẩm đã có lịch sử bán hàng nên được chuyển sang trạng thái ngừng kinh doanh (inactive)"}
+                is_soft_deleted = True
+            else:
+                cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
+                msg = {"message": "Đã xóa sản phẩm vĩnh viễn"}
+                is_soft_deleted = False
 
-        # Soft delete mặc định: kiểm tra hóa đơn
-        cursor.execute("SELECT id FROM order_items WHERE product_id = ? LIMIT 1", (product_id,))
-        if cursor.fetchone():
-            cursor.execute("UPDATE products SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (product_id,))
-            conn.commit()
-            try:
-                rag_service.upsert_single_product(product_id)
-                visual_index_service.sync_single_product_visual(product_id)
-            except Exception:
-                pass
-            return {"message": "Sản phẩm đã có lịch sử bán hàng nên được chuyển sang trạng thái ngừng kinh doanh (inactive)"}
-
-        cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
-        conn.commit()
-        try:
+    # Đồng bộ vector sang ChromaDB sau khi transaction commit
+    try:
+        if is_soft_deleted:
+            rag_service.upsert_single_product(product_id)
+            visual_index_service.sync_single_product_visual(product_id)
+        else:
             rag_service.delete_single_product(product_id)
             visual_index_service.delete_single_product_visual(product_id)
-        except Exception:
-            pass
-        return {"message": "Đã xóa sản phẩm vĩnh viễn"}
+    except Exception:
+        pass
+
+    return msg
 
