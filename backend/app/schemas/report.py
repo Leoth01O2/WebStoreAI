@@ -13,6 +13,8 @@ class DashboardSummaryResponse(BaseModel):
     total_products: int
     low_stock_count: int
     total_customers: int
+    verified_payment_revenue: Optional[float] = 0.0
+    legacy_unverified_revenue: Optional[float] = 0.0
 
 class RevenueTrendItem(BaseModel):
     date: str

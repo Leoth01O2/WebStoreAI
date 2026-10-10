@@ -153,9 +153,12 @@ def test_05_legacy_orders_retain_unverified_flag():
     # Tạo một đơn hàng lịch sử giả lập và đánh dấu legacy = 1
     with get_db() as conn:
         cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(orders)")
+        cols = {r["name"] for r in cursor.fetchall()}
+        legacy_pay_status = "unverified_legacy" if "payment_status_raw" in cols else "completed"
         cursor.execute(
-            """INSERT INTO orders (order_code, total_amount, final_amount, payment_method, payment_status, status, is_legacy_unverified)
-               VALUES ('HD-LEGACY-TEST-01', 100000, 100000, 'cash', 'completed', 'completed', 1)"""
+            f"""INSERT INTO orders (order_code, total_amount, final_amount, payment_method, payment_status, status, is_legacy_unverified)
+               VALUES ('HD-LEGACY-TEST-01', 100000, 100000, 'cash', '{legacy_pay_status}', 'completed', 1)"""
         )
         conn.commit()
         leg_id = cursor.lastrowid

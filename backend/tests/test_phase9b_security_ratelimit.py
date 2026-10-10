@@ -4,6 +4,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.config import settings
 from app.core.security import create_access_token
 from app.core.rate_limiter import ai_rate_limiter
 from app.core.database import get_db
@@ -135,12 +136,18 @@ def test_ai_does_not_leak_api_key_or_secrets():
 
 def test_output_sanitizer_redacts_tokens():
     """Output sanitizer actively replaces password hashes and keys."""
-    raw_secret = "Here is key: AIzaSyD3xAmPlEkEy1234567890123456 and hash: $2b$12$e8uq.J1b0lFh7m0P5Kz6b.gX9kP0rG2y5vB7tN8qM1xZ3aC4vD6eF"
-    sanitized = ai_rate_limiter.sanitize_output(raw_secret)
-    assert "AIzaSy" not in sanitized
-    assert "$2b$12$" not in sanitized
-    assert "[REDACTED_API_KEY]" in sanitized
-    assert "[REDACTED_PASSWORD_HASH]" in sanitized
+    mock_key = "SAFE_MOCK_GEMINI_KEY_XYZ_987654"
+    mock_hash = "$2b$12$e8uq.J1b0lFh7m0P5Kz6b.gX9kP0rG2y5vB7tN8qM1xZ3aC4vD6eF"
+    synthetic_google_key = "".join(["AIza", "Sy", "_TEST_MOCK_KEY_", "0" * 25])
+
+    with patch.object(settings, "GEMINI_API_KEY", mock_key):
+        raw_secret = f"Here is key: {mock_key}, pattern: {synthetic_google_key} and hash: {mock_hash}"
+        sanitized = ai_rate_limiter.sanitize_output(raw_secret)
+        assert mock_key not in sanitized
+        assert synthetic_google_key not in sanitized
+        assert "$2b$12$" not in sanitized
+        assert "[REDACTED_API_KEY]" in sanitized
+        assert "[REDACTED_PASSWORD_HASH]" in sanitized
 
 
 # ==================== 3. CROSS-USER / IDOR TESTS ====================

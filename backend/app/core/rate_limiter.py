@@ -149,8 +149,9 @@ class AIRateLimiter:
         # Redact bcrypt password hashes ($2b$... or $2a$...)
         text = re.sub(r'\$2[abxy]\$\d+\$[./A-Za-z0-9]{53}', '[REDACTED_PASSWORD_HASH]', text)
 
-        # Redact common API key patterns (e.g. AIzaSy...)
+        # Redact common API key patterns (e.g. AIzaSy... or AQ.Ab...)
         text = re.sub(r'AIzaSy[A-Za-z0-9_-]{20,60}', '[REDACTED_API_KEY]', text)
+        text = re.sub(r'AQ\.Ab[A-Za-z0-9_-]{20,60}', '[REDACTED_API_KEY]', text)
 
         return text
 

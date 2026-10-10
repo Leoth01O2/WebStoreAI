@@ -1,4 +1,8 @@
+from __future__ import annotations
 import sys
+import os
+import sqlite3
+from typing import Any, Callable
 from app.core.database import get_db
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -316,6 +320,12 @@ def init_db():
             conn.commit()
             print("[DB Migration] Applied schema version 2 (R2B column expansion).")
 
+        # PHASE R2C: Migration Version 3 - Chạy khi có ENABLE_MIGRATION_V3=1 hoặc trong môi trường test
+        if os.environ.get("ENABLE_MIGRATION_V3") == "1" or os.environ.get("APP_ENV") == "testing":
+            if not is_version_applied(conn, 3):
+                apply_migration_v3_explicit(conn)
+                print("[DB Migration] Applied schema version 3 (R2C payment & fulfillment status).")
+
     print("[DB] Database schema initialized successfully.")
 
 def run_migration_v2_r2b(conn) -> None:
@@ -364,19 +374,166 @@ def run_migration_v2_r2b(conn) -> None:
                 batch
             )
 
-def get_applied_versions(conn) -> list:
+def run_migration_v3_r2c(conn: sqlite3.Connection, old_seq: int | None = None) -> None:
+    """
+    PHASE R2C: 12-step rebuild an toàn cho bảng orders với enum trạng thái thanh toán và giao vận mới.
+    Quy tắc an toàn:
+    - Bảo toàn 317 đơn lịch sử: 232 completed + 73 paid -> unverified_legacy (305 đơn); 12 pending -> unpaid.
+    - Giữ nguyên toàn bộ giá trị payment_status lịch sử sang payment_status_raw (232 completed, 73 paid, 12 pending).
+    - Toàn bộ 317 đơn lịch sử có fulfillment_status = 'legacy_unknown'.
+    - Không sửa đổi orders.status, tổng tiền, chiết khấu, ID hay liên kết dữ liệu.
+    - Bảo tồn AUTOINCREMENT / sqlite_sequence.
+    - Tái tạo toàn bộ Index và Unique Constraints.
+    """
+    cursor = conn.cursor()
+    target_seq: int | None = old_seq
+    if target_seq is None:
+        seq_row = cursor.execute("SELECT seq FROM sqlite_sequence WHERE name = 'orders'").fetchone()
+        if seq_row is not None:
+            raw_seq = seq_row["seq"] if isinstance(seq_row, dict) or hasattr(seq_row, "keys") else seq_row[0]
+            if raw_seq is not None:
+                target_seq = int(raw_seq)
+
+    conn.execute("""
+    CREATE TABLE orders_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_code TEXT UNIQUE NOT NULL,
+        customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        total_amount REAL NOT NULL DEFAULT 0,
+        discount_amount REAL NOT NULL DEFAULT 0,
+        final_amount REAL NOT NULL DEFAULT 0,
+        payment_method TEXT NOT NULL DEFAULT 'cash' CHECK(payment_method IN ('cash', 'transfer', 'card')),
+        payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK(payment_status IN ('unpaid', 'pending_verification', 'paid', 'refund_pending', 'refunded', 'unverified_legacy')),
+        payment_status_raw TEXT NOT NULL DEFAULT 'unpaid',
+        fulfillment_status TEXT NOT NULL DEFAULT 'unfulfilled' CHECK(fulfillment_status IN ('unfulfilled', 'packing', 'shipping', 'delivered', 'delivery_failed', 'returned_to_inventory', 'legacy_unknown')),
+        status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('pending', 'admin_approved', 'processing', 'completed', 'rejected', 'cancelled')),
+        note TEXT,
+        approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        approved_at TIMESTAMP,
+        processed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        processed_at TIMESTAMP,
+        rejected_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        rejected_at TIMESTAMP,
+        rejection_reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        assigned_to INTEGER REFERENCES users(id),
+        shipping_name TEXT,
+        shipping_phone TEXT,
+        shipping_address TEXT,
+        is_legacy_unverified INTEGER NOT NULL DEFAULT 0
+    );
+    """)
+
+    conn.execute("""
+    INSERT INTO orders_new (
+        id, order_code, customer_id, user_id, total_amount, discount_amount, final_amount,
+        payment_method, payment_status, payment_status_raw, fulfillment_status, status,
+        note, approved_by, approved_at, processed_by, processed_at, rejected_by, rejected_at,
+        rejection_reason, created_at, assigned_to, shipping_name, shipping_phone,
+        shipping_address, is_legacy_unverified
+    )
+    SELECT
+        id, order_code, customer_id, user_id, total_amount, discount_amount, final_amount,
+        payment_method,
+        CASE
+            WHEN is_legacy_unverified = 1 AND payment_status IN ('completed', 'paid') THEN 'unverified_legacy'
+            WHEN is_legacy_unverified = 1 AND payment_status IN ('pending', 'unpaid') THEN 'unpaid'
+            WHEN payment_status = 'completed' THEN 'paid'
+            WHEN payment_status IN ('pending', 'unpaid') THEN 'unpaid'
+            ELSE payment_status
+        END AS payment_status,
+        COALESCE(payment_status, 'unknown') AS payment_status_raw,
+        CASE
+            WHEN is_legacy_unverified = 1 THEN 'legacy_unknown'
+            WHEN status = 'completed' THEN 'delivered'
+            ELSE 'unfulfilled'
+        END AS fulfillment_status,
+        status,
+        note, approved_by, approved_at, processed_by, processed_at, rejected_by, rejected_at,
+        rejection_reason, created_at, assigned_to, shipping_name, shipping_phone,
+        shipping_address, is_legacy_unverified
+    FROM orders;
+    """)
+
+    conn.execute("DROP TABLE orders;")
+    conn.execute("ALTER TABLE orders_new RENAME TO orders;")
+
+    if target_seq is not None:
+        if cursor.execute("SELECT 1 FROM sqlite_sequence WHERE name = 'orders'").fetchone():
+            cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'orders'", (target_seq,))
+        else:
+            cursor.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('orders', ?)", (target_seq,))
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(order_code);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status);")
+
+def apply_migration_v3_explicit(conn: sqlite3.Connection) -> bool:
+    """
+    Chạy tường minh Migration Version 3 (chỉ khi được gọi rõ ràng).
+    Quy tắc an toàn:
+    - Idempotent: Nếu version 3 đã áp dụng thì bỏ qua (return False).
+    - PRAGMA foreign_keys = OFF được thực thi ngoài transaction.
+    - Chạy run_migration_v3_r2c trong BEGIN IMMEDIATE transaction.
+    - Nếu thành công: Ghi nhận version 3 vào schema_version và commit.
+    - Nếu thất bại: Rollback toàn bộ, ném exception.
+    - Bắt buộc bật lại PRAGMA foreign_keys = ON trong khối finally:.
+    """
+    if is_version_applied(conn, 3):
+        return False
+
+    cursor = conn.cursor()
+    fk_check = cursor.execute("PRAGMA foreign_key_check;").fetchall()
+    if fk_check:
+        raise RuntimeError(f"[Migration V3] Khóa ngoại trước migration vi phạm: {fk_check}")
+
+    seq_row = cursor.execute("SELECT seq FROM sqlite_sequence WHERE name = 'orders'").fetchone()
+    old_seq: int | None = None
+    if seq_row is not None:
+        raw_val = seq_row["seq"] if isinstance(seq_row, dict) or hasattr(seq_row, "keys") else seq_row[0]
+        if raw_val is not None:
+            old_seq = int(raw_val)
+
+    conn.execute("PRAGMA foreign_keys = OFF;")
+    try:
+        conn.execute("BEGIN IMMEDIATE;")
+        run_migration_v3_r2c(conn, old_seq=old_seq)
+        record_migration(
+            conn,
+            version=3,
+            description="R2C: Payment & fulfillment status migration with legacy preservation",
+            checksum="r2c-payment-fulfillment-v3"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON;")
+
+    post_fk = cursor.execute("PRAGMA foreign_key_check;").fetchall()
+    if post_fk:
+        raise RuntimeError(f"[Migration V3] Khóa ngoại sau migration vi phạm: {post_fk}")
+
+    return True
+
+def get_applied_versions(conn: sqlite3.Connection) -> list[int]:
     """Lấy danh sách các phiên bản migration đã áp dụng theo thứ tự tăng dần"""
     cursor = conn.cursor()
     cursor.execute("SELECT version FROM schema_version ORDER BY version ASC")
-    return [row["version"] if isinstance(row, dict) or hasattr(row, "keys") else row[0] for row in cursor.fetchall()]
+    return [int(row["version"] if isinstance(row, dict) or hasattr(row, "keys") else row[0]) for row in cursor.fetchall()]
 
-def is_version_applied(conn, version: int) -> bool:
+def is_version_applied(conn: sqlite3.Connection, version: int) -> bool:
     """Kiểm tra xem một phiên bản migration cụ thể đã được áp dụng hay chưa"""
     cursor = conn.cursor()
     cursor.execute("SELECT 1 FROM schema_version WHERE version = ?", (version,))
     return cursor.fetchone() is not None
 
-def record_migration(conn, version: int, description: str, checksum: str = None) -> None:
+def record_migration(conn: sqlite3.Connection, version: int, description: str, checksum: str | None = None) -> None:
     """Ghi nhận một phiên bản migration đã hoàn thành vào schema_version"""
     cursor = conn.cursor()
     cursor.execute(
@@ -384,7 +541,7 @@ def record_migration(conn, version: int, description: str, checksum: str = None)
         (version, description, checksum)
     )
 
-def apply_migration_step(conn, version: int, description: str, migration_callable, checksum: str = None) -> bool:
+def apply_migration_step(conn: sqlite3.Connection, version: int, description: str, migration_callable: Callable[[sqlite3.Connection], Any], checksum: str | None = None) -> bool:
     """
     Thực thi an toàn một bước migration:
     - Kiểm tra Idempotency: Nếu version đã chạy thì bỏ qua (return False).

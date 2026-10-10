@@ -270,7 +270,7 @@ export const PosPage = ({ onNavigate }) => {
         customer_id: selectedCustomer ? selectedCustomer.id : (isCustomer && myProfile ? myProfile.id : null),
         discount_amount: isCustomer ? 0 : Number(discountAmount || 0),
         payment_method: paymentMethod,
-        payment_status: 'completed',
+        payment_status: isCustomer ? 'unpaid' : 'paid',
         note: orderNote || null,
         items: cart.map((item) => ({
           product_id: item.product.id,

@@ -4,6 +4,13 @@
 !.env.example
 *.pem
 *.key
+*.cert
+*.crt
+*.pfx
+*.p12
+credentials.json
+client_secret*.json
+service_account*.json
 
 # Python
 __pycache__/

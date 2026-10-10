@@ -226,11 +226,15 @@ class AIService:
         sales_data_context = (
             f"TỔNG KẾT DOANH THU & HOẠT ĐỘNG BÁN HÀNG TỪ CƠ SỞ DỮ LIỆU SQL:\n"
             f"- Tổng doanh thu tích lũy toàn thời gian: {int(summary['total_revenue']):,} VNĐ\n"
+            f"- Doanh thu đã đối soát/xác minh thu nhận: {int(summary.get('verified_payment_revenue', 0)):,} VNĐ\n"
+            f"- Doanh số đơn hoàn thành chưa đối soát: {int(summary.get('legacy_unverified_revenue', 0)):,} VNĐ\n"
             f"- Doanh thu hôm nay: {int(summary['today_revenue']):,} VNĐ\n"
             f"- Doanh thu 7 ngày gần nhất: {int(summary.get('week_revenue', 0)):,} VNĐ\n"
             f"- Doanh thu tháng này: {int(summary.get('month_revenue', 0)):,} VNĐ\n"
-            f"- Tổng số đơn hàng hoàn tất: {summary['total_orders']}\n"
+            f"- Tổng số đơn hàng: {summary['total_orders']}\n"
             f"- Số sản phẩm cần nhập hàng gấp: {summary['low_stock_count']} mặt hàng\n\n"
+            f"LƯU Ý QUAN TRỌNG VỀ ĐỐI SOÁT:\n"
+            f"- Tuyệt đối không diễn giải doanh số đơn hoàn thành chưa đối soát ({int(summary.get('legacy_unverified_revenue', 0)):,} VNĐ) là tiền đã xác minh hoặc chưa thanh toán. Đây là doanh số các đơn hoàn tất lịch sử cần đối soát thanh toán riêng biệt.\n\n"
             f"TOP 5 SẢN PHẨM BÁN CHẠY NHẤT:\n{top_text}\n\n"
             f"DANH SÁCH SẢN PHẨM CẦN NHẬP HÀNG GẤP:\n{low_stock_text}"
         )
@@ -254,7 +258,9 @@ class AIService:
                 f"- Doanh thu hôm nay: **{int(summary['today_revenue']):,} VNĐ**\n"
                 f"- Doanh thu tuần này: **{int(summary.get('week_revenue', 0)):,} VNĐ**\n"
                 f"- Doanh thu tháng này: **{int(summary.get('month_revenue', 0)):,} VNĐ**\n"
-                f"- Tổng số đơn hàng đã hoàn tất: **{summary['total_orders']}** đơn hàng.\n\n"
+                f"- Doanh thu đã đối soát thanh toán: **{int(summary.get('verified_payment_revenue', 0)):,} VNĐ**\n"
+                f"- Doanh số đơn hoàn thành chưa đối soát: **{int(summary.get('legacy_unverified_revenue', 0)):,} VNĐ**\n"
+                f"- Tổng số đơn hàng: **{summary['total_orders']}** đơn hàng.\n\n"
                 f"**2. Mặt hàng bán chạy nhất:**\n{top_text}\n\n"
                 f"**3. Tình trạng Kho & Cảnh báo:**\n"
                 f"- Hiện có **{summary['low_stock_count']}** mặt hàng đang ở mức báo động cần nhập hàng gấp.\n"
@@ -503,7 +509,18 @@ class AIService:
                             lines = [f"Danh sách 5 đơn hàng gần nhất của bạn ({cust_row['name']}):"]
                             for r in rows:
                                 status_vn = "Hoàn tất" if r["status"] == "completed" else "Đã hủy" if r["status"] == "cancelled" else r["status"]
-                                pay_vn = "Đã thanh toán" if r["payment_status"] == "paid" else "Chưa thanh toán"
+                                if r.get("payment_status") == "paid":
+                                    pay_vn = "Đã đối soát thanh toán"
+                                elif r.get("payment_status") == "unverified_legacy":
+                                    pay_vn = "Dữ liệu lịch sử chưa đối soát"
+                                elif r.get("payment_status") == "refunded":
+                                    pay_vn = "Đã hoàn tiền"
+                                elif r.get("payment_status") == "refund_pending":
+                                    pay_vn = "Chờ hoàn tiền"
+                                elif r.get("payment_status") == "pending_verification":
+                                    pay_vn = "Chờ xác minh thanh toán"
+                                else:
+                                    pay_vn = "Chưa thanh toán"
                                 lines.append(
                                     f"- Đơn **{r['order_code']}** ({r['created_at'][:19]}): "
                                     f"Tổng tiền **{int(r['final_amount']):,} đ** | Trạng thái: **{status_vn}** ({pay_vn})\n"

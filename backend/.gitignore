@@ -22,3 +22,18 @@ chroma_db/
 # Uploads
 uploads/products/*
 !uploads/products/.gitkeep
+
+# Backups
+backups/
+*.bak
+
+# Credentials and Keys
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+credentials.json
+client_secret*.json
+service_account*.json

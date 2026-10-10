@@ -16,16 +16,24 @@ class InventoryService:
 
     @staticmethod
     def _get_order_detail_by_id(cursor, order_id: int) -> Optional[Dict[str, Any]]:
+        cursor.execute("PRAGMA table_info(orders)")
+        cols = {r["name"] if isinstance(r, dict) or hasattr(r, "keys") else r[1] for r in cursor.fetchall()}
+        has_v3 = "payment_status_raw" in cols
+
+        extra_cols = ", o.payment_status_raw, o.fulfillment_status" if has_v3 else ""
         cursor.execute(
-            """SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
+            f"""SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
                       o.user_id, u.full_name as user_name, o.total_amount, o.discount_amount,
                       o.final_amount, o.payment_method, o.payment_status, o.status, o.note,
+                      o.assigned_to, u_assign.full_name as assigned_name,
+                      o.shipping_name, o.shipping_phone, o.shipping_address, o.is_legacy_unverified,
                       o.approved_by, o.approved_at, o.processed_by, o.processed_at,
                       o.rejected_by, o.rejected_at, o.rejection_reason,
-                      o.created_at
+                      o.created_at{extra_cols}
                FROM orders o
                LEFT JOIN customers c ON o.customer_id = c.id
                LEFT JOIN users u ON o.user_id = u.id
+               LEFT JOIN users u_assign ON o.assigned_to = u_assign.id
                WHERE o.id = ?""",
             (order_id,)
         )
@@ -33,6 +41,11 @@ class InventoryService:
         if not row:
             return None
         order_dict = dict(row)
+        if not has_v3:
+            order_dict["payment_status_raw"] = order_dict.get("payment_status")
+            order_dict["fulfillment_status"] = "delivered" if order_dict.get("status") == "completed" else "unfulfilled"
+        order_dict.setdefault("is_legacy_unverified", 0)
+
         cursor.execute(
             """SELECT oi.id, oi.product_id, p.sku as product_sku, p.name as product_name,
                       p.image_url, oi.quantity, oi.unit_price, oi.subtotal
@@ -45,7 +58,17 @@ class InventoryService:
         return order_dict
 
     @staticmethod
-    def create_order(order_in: OrderCreate, user_id: int, status: Optional[str] = None) -> Dict[str, Any]:
+    def _require_order_detail_by_id(cursor, order_id: int) -> Dict[str, Any]:
+        order = InventoryService._get_order_detail_by_id(cursor, order_id)
+        if not order:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Không tìm thấy thông tin đơn hàng ID {order_id} sau khi xử lý"
+            )
+        return order
+
+    @staticmethod
+    def create_order(order_in: OrderCreate, user_id: int, status: Optional[str] = None, user_role: Optional[str] = None) -> Dict[str, Any]:
         """
         Nghiệp vụ Bán hàng POS Atomic:
         1. BEGIN IMMEDIATE khóa ghi SQLite.
@@ -114,27 +137,76 @@ class InventoryService:
                 })
 
             final_amount = max(0.0, total_amount - order_in.discount_amount)
-            payment_status = getattr(order_in, "payment_status", None) or "completed"
-            # Bảo vệ chống Mass Assignment: assigned_to luôn NULL khi tạo đơn mới (chỉ gán qua claim_order có kiểm tra quyền ở R3)
+
+            # Kiểm tra schema version 3 qua PRAGMA table_info
+            cursor.execute("PRAGMA table_info(orders)")
+            cols = {r["name"] if isinstance(r, dict) or hasattr(r, "keys") else r[1] for r in cursor.fetchall()}
+            has_v3 = "payment_status_raw" in cols
+
+            # Phân định luồng Customer vs POS Counter
+            is_customer = (user_role == "customer") or (order_status == "pending")
+
+            if is_customer:
+                order_status = "pending"
+                # Customer KHÔNG được tự gửi paid, refunded, unverified_legacy
+                if has_v3:
+                    payment_status = "unpaid"
+                    payment_status_raw = "unpaid"
+                    fulfillment_status = "unfulfilled"
+                else:
+                    payment_status = "pending"
+                    payment_status_raw = "pending"
+                    fulfillment_status = "unfulfilled"
+            else:
+                # POS Counter Sale
+                order_status = status or getattr(order_in, "status", None) or "completed"
+                if order_status == "completed":
+                    # Đơn POS hoàn tất tại quầy: tiền đã nhận tại quầy, hàng đã giao
+                    payment_status = "paid"
+                    payment_status_raw = "paid"
+                    fulfillment_status = "delivered"
+                else:
+                    payment_status = "unpaid" if has_v3 else "pending"
+                    payment_status_raw = payment_status
+                    fulfillment_status = "unfulfilled"
+
+            # Bảo vệ chống Mass Assignment: assigned_to luôn NULL khi tạo đơn mới
             # is_legacy_unverified luôn 0 cho mọi đơn mới tạo
             shipping_name = getattr(order_in, "shipping_name", None)
             shipping_phone = getattr(order_in, "shipping_phone", None)
             shipping_address = getattr(order_in, "shipping_address", None)
 
             # 2. Tạo bản ghi Hóa đơn (Order)
-            cursor.execute(
-                """INSERT INTO orders (
-                    order_code, customer_id, user_id, assigned_to, shipping_name,
-                    shipping_phone, shipping_address, is_legacy_unverified, total_amount,
-                    discount_amount, final_amount, payment_method, payment_status, status, note, created_at
-                ) VALUES (?, ?, ?, NULL, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    order_code, order_in.customer_id, user_id, shipping_name,
-                    shipping_phone, shipping_address, total_amount,
-                    order_in.discount_amount, final_amount, order_in.payment_method,
-                    payment_status, order_status, order_in.note, created_at
+            if has_v3:
+                cursor.execute(
+                    """INSERT INTO orders (
+                        order_code, customer_id, user_id, assigned_to, shipping_name,
+                        shipping_phone, shipping_address, is_legacy_unverified, total_amount,
+                        discount_amount, final_amount, payment_method, payment_status,
+                        payment_status_raw, fulfillment_status, status, note, created_at
+                    ) VALUES (?, ?, ?, NULL, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        order_code, order_in.customer_id, user_id, shipping_name,
+                        shipping_phone, shipping_address, total_amount,
+                        order_in.discount_amount, final_amount, order_in.payment_method,
+                        payment_status, payment_status_raw, fulfillment_status,
+                        order_status, order_in.note, created_at
+                    )
                 )
-            )
+            else:
+                cursor.execute(
+                    """INSERT INTO orders (
+                        order_code, customer_id, user_id, assigned_to, shipping_name,
+                        shipping_phone, shipping_address, is_legacy_unverified, total_amount,
+                        discount_amount, final_amount, payment_method, payment_status, status, note, created_at
+                    ) VALUES (?, ?, ?, NULL, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        order_code, order_in.customer_id, user_id, shipping_name,
+                        shipping_phone, shipping_address, total_amount,
+                        order_in.discount_amount, final_amount, order_in.payment_method,
+                        payment_status, order_status, order_in.note, created_at
+                    )
+                )
             order_id = cursor.lastrowid
 
             # 3. Tạo chi tiết đơn hàng, trừ tồn kho và ghi nhật ký xuất nhập tồn
@@ -209,6 +281,8 @@ class InventoryService:
                 "final_amount": final_amount,
                 "payment_method": order_in.payment_method,
                 "payment_status": payment_status,
+                "payment_status_raw": payment_status_raw,
+                "fulfillment_status": fulfillment_status,
                 "status": order_status,
                 "note": order_in.note,
                 "approved_by": None,
@@ -219,6 +293,7 @@ class InventoryService:
                 "rejected_at": None,
                 "rejection_reason": None,
                 "assigned_to": None,
+                "assigned_name": None,
                 "shipping_name": shipping_name,
                 "shipping_phone": shipping_phone,
                 "shipping_address": shipping_address,
@@ -258,7 +333,7 @@ class InventoryService:
                 (user_id, now_str, order_id)
             )
 
-            updated_order = InventoryService._get_order_detail_by_id(cursor, order_id)
+            updated_order = InventoryService._require_order_detail_by_id(cursor, order_id)
             return updated_order
 
     @staticmethod
@@ -328,7 +403,7 @@ class InventoryService:
                 (user_id, now_str, rejection_text, order_id)
             )
 
-            updated_order = InventoryService._get_order_detail_by_id(cursor, order_id)
+            updated_order = InventoryService._require_order_detail_by_id(cursor, order_id)
             return updated_order
 
     @staticmethod
@@ -366,7 +441,7 @@ class InventoryService:
                 (user_id, now_str, order_id)
             )
 
-            updated_order = InventoryService._get_order_detail_by_id(cursor, order_id)
+            updated_order = InventoryService._require_order_detail_by_id(cursor, order_id)
             return updated_order
 
     @staticmethod
@@ -415,7 +490,7 @@ class InventoryService:
                     (float(order["final_amount"]), order["customer_id"])
                 )
 
-            updated_order = InventoryService._get_order_detail_by_id(cursor, order_id)
+            updated_order = InventoryService._require_order_detail_by_id(cursor, order_id)
             return updated_order
 
     @staticmethod
@@ -596,7 +671,7 @@ class InventoryService:
                 (updated_note, order_id)
             )
 
-            updated_order = InventoryService._get_order_detail_by_id(cursor, order_id)
+            updated_order = InventoryService._require_order_detail_by_id(cursor, order_id)
             return updated_order
 
     @staticmethod
@@ -843,8 +918,679 @@ class InventoryService:
                 (order_id, action, current_status, resulting_status, user_id, clean_reason, now_str)
             )
 
-            updated_order = InventoryService._get_order_detail_by_id(cursor, order_id)
+            updated_order = InventoryService._require_order_detail_by_id(cursor, order_id)
             return updated_order
+
+    # =========================================================================
+    # PHASE R3: COMPLETE ORDER WORKFLOW METHODS
+    # =========================================================================
+
+    @staticmethod
+    def claim_order(order_id: int, user_id: int, user_role: str, note: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Nghiệp vụ Tiếp nhận đơn hàng Atomic Claim Lock (Phase R3):
+        - Chỉ áp dụng cho đơn đã được Admin phê duyệt ('admin_approved') và CHƯA có nhân viên nhận ('assigned_to IS NULL').
+        - SQLite BEGIN IMMEDIATE khóa ghi chống Race Condition.
+        - UPDATE có điều kiện nguyên tử:
+          UPDATE orders SET assigned_to = ?, processed_by = ?, processed_at = ?, status = 'processing'
+          WHERE id = ? AND status = 'admin_approved' AND assigned_to IS NULL
+        - Nếu 2 Staff cạnh tranh nhận cùng lúc: người đến sau gặp rowcount == 0 -> trả về HTTP 409 Conflict.
+        - Tuyệt đối không trừ tồn kho lần 2 (tồn kho đã giữ chỗ từ khi tạo đơn).
+        - Không làm biến đổi payment_status.
+        - Ghi nhật ký vào order_audit_logs ngay trong transaction.
+        """
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+
+            # 1. Thực hiện atomic conditional update
+            cursor.execute(
+                """UPDATE orders
+                   SET assigned_to = ?,
+                       processed_by = COALESCE(processed_by, ?),
+                       processed_at = COALESCE(processed_at, ?),
+                       status = 'processing'
+                   WHERE id = ? AND status = 'admin_approved' AND assigned_to IS NULL""",
+                (user_id, user_id, now_str, order_id)
+            )
+
+            if cursor.rowcount == 0:
+                # Điều tra nguyên nhân thất bại
+                cursor.execute("SELECT id, order_code, status, assigned_to FROM orders WHERE id = ?", (order_id,))
+                order = cursor.fetchone()
+                if not order:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy đơn hàng cần tiếp nhận")
+
+                if order["status"] in ("cancelled", "rejected", "completed"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Không thể tiếp nhận đơn hàng đã '{order['status']}'"
+                    )
+
+                if order["assigned_to"] is not None:
+                    if order["assigned_to"] == user_id and order["status"] == "processing":
+                        # Idempotency: Nhân viên hiện tại đã nhận đơn này trước đó và đơn đang xử lý
+                        return InventoryService._require_order_detail_by_id(cursor, order_id)
+                    if order["assigned_to"] != user_id:
+                        cursor.execute("SELECT full_name FROM users WHERE id = ?", (order["assigned_to"],))
+                        assigned_user = cursor.fetchone()
+                        assigned_name = assigned_user["full_name"] if assigned_user else f"ID {order['assigned_to']}"
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=f"Đơn hàng {order['order_code']} đã được nhân viên khác ({assigned_name}) tiếp nhận xử lý trước đó (Claim Conflict)"
+                        )
+
+                if order["status"] != "admin_approved":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Chỉ có thể tiếp nhận đơn hàng đã được Admin duyệt (trạng thái hiện tại: '{order['status']}')"
+                    )
+
+            # 2. Ghi Audit Log vào order_audit_logs
+            claim_reason = note.strip() if note and note.strip() else "Nhân viên tiếp nhận đơn hàng đã duyệt"
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'claim_order', 'admin_approved', 'processing', ?, ?, ?)""",
+                (order_id, user_id, claim_reason, now_str)
+            )
+
+            updated_order = InventoryService._require_order_detail_by_id(cursor, order_id)
+            return updated_order
+
+    @staticmethod
+    def reassign_order(order_id: int, user_id: int, user_role: str, new_staff_id: int, reason: str) -> Dict[str, Any]:
+        """
+        Điều chuyển nhân viên phụ trách đơn hàng (Admin/SuperAdmin only):
+        - Bắt buộc nhập lý do điều chuyển.
+        - Ghi vết kiểm toán vào order_audit_logs.
+        """
+        if not reason or not reason.strip():
+            raise HTTPException(status_code=400, detail="Lý do điều chuyển nhân viên phụ trách là bắt buộc")
+
+        clean_reason = reason.strip()
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, order_code, status, assigned_to FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng cần điều chuyển")
+
+            if order["status"] in ("cancelled", "rejected"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Không thể điều chuyển đơn hàng đã '{order['status']}'"
+                )
+
+            # Xác thực nhân viên mới
+            cursor.execute("SELECT id, full_name, role FROM users WHERE id = ?", (new_staff_id,))
+            new_staff = cursor.fetchone()
+            if not new_staff or new_staff["role"] not in ("staff", "admin", "superadmin", "manager"):
+                raise HTTPException(status_code=400, detail=f"Nhân viên mới (ID: {new_staff_id}) không tồn tại hoặc không có vai trò xử lý đơn")
+
+            old_assigned_to = order["assigned_to"]
+            cursor.execute(
+                """UPDATE orders
+                   SET assigned_to = ?,
+                       processed_by = ?
+                   WHERE id = ?""",
+                (new_staff_id, new_staff_id, order_id)
+            )
+
+            audit_reason = f"Điều chuyển từ NV ID {old_assigned_to or 'Chưa gán'} sang {new_staff['full_name']} (ID {new_staff_id}): {clean_reason}"
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'reassign_order', ?, ?, ?, ?, ?)""",
+                (order_id, order["status"], order["status"], user_id, audit_reason, now_str)
+            )
+
+            return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+    @staticmethod
+    def notify_transfer(
+        order_id: int,
+        user_id: int,
+        user_role: str,
+        transfer_ref: Optional[str] = None,
+        bank_name: Optional[str] = None,
+        note: Optional[str] = None,
+        own_customer_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Khách hàng / Nhân viên thông báo đã chuyển khoản thanh toán:
+        - Customer chỉ có thể thông báo cho đơn của chính mình (chống IDOR).
+        - Chuyển payment_status sang 'pending_verification'.
+        - Tuyệt đối không tự ý đánh dấu 'paid'.
+        - Ghi vết kiểm toán vào order_audit_logs.
+        """
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng cần thông báo thanh toán")
+
+            # Anti-IDOR: Nếu là customer, bắt buộc phải sở hữu đơn
+            if user_role == "customer":
+                is_own = (order["user_id"] == user_id) or (
+                    own_customer_id is not None and order["customer_id"] == own_customer_id
+                )
+                if not is_own:
+                    raise HTTPException(status_code=403, detail="Bạn không có quyền thao tác trên đơn hàng của người khác")
+
+            if order["status"] in ("cancelled", "rejected"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Không thể thông báo thanh toán cho đơn hàng đã '{order['status']}'"
+                )
+
+            current_payment = order["payment_status"]
+            if current_payment == "paid":
+                raise HTTPException(status_code=400, detail="Đơn hàng này đã được xác nhận thanh toán trước đó")
+            if current_payment in ("refund_pending", "refunded"):
+                raise HTTPException(status_code=400, detail="Đơn hàng đang trong quy trình hoàn tiền, không thể báo thanh toán")
+
+            ref_str = transfer_ref.strip() if transfer_ref and transfer_ref.strip() else "Chưa cung cấp mã"
+            bank_str = bank_name.strip() if bank_name and bank_name.strip() else "Chưa cung cấp ngân hàng"
+            notify_info = f"[THÔNG BÁO CHUYỂN KHOẢN: Mã GD={ref_str}, Ngân hàng={bank_str}]"
+            existing_note = order["note"] or ""
+            updated_note = f"{existing_note} {notify_info}".strip()
+
+            cursor.execute(
+                """UPDATE orders
+                   SET payment_status = 'pending_verification',
+                       payment_status_raw = 'pending_verification',
+                       note = ?
+                   WHERE id = ?""",
+                (updated_note, order_id)
+            )
+
+            audit_reason = f"Khách/Nhân viên thông báo chuyển tiền: Ref={ref_str}, Ngân hàng={bank_str}. Ghi chú: {note or 'N/A'}"
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'notify_transfer', ?, 'pending_verification', ?, ?, ?)""",
+                (order_id, current_payment, user_id, audit_reason, now_str)
+            )
+
+            return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+    @staticmethod
+    def verify_payment(
+        order_id: int,
+        user_id: int,
+        user_role: str,
+        verified_ref: Optional[str] = None,
+        note: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Admin/SuperAdmin xác minh tiền chuyển khoản thực nhận (Đối soát ngân hàng):
+        - Chỉ Admin / SuperAdmin mới có thẩm quyền đối soát và xác nhận 'paid'.
+        - Yêu cầu chứng từ đối soát đáng tin cậy (sao kê ngân hàng/biến động số dư).
+        - Ghi nhận payment_status = 'paid'.
+        - Ghi audit trail chi tiết vào order_audit_logs.
+        """
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng cần xác minh thanh toán")
+
+            if order["status"] in ("cancelled", "rejected"):
+                raise HTTPException(status_code=400, detail=f"Không thể xác minh thanh toán cho đơn hàng đã '{order['status']}'")
+
+            current_payment = order["payment_status"]
+            if current_payment == "paid":
+                # Idempotency
+                return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+            ref_str = verified_ref.strip() if verified_ref and verified_ref.strip() else "Đối soát thủ công Admin"
+            cursor.execute(
+                """UPDATE orders
+                   SET payment_status = 'paid',
+                       payment_status_raw = 'paid'
+                   WHERE id = ?""",
+                (order_id,)
+            )
+
+            audit_reason = f"Admin đối soát và xác nhận tiền thực thu thành công. Mã đối soát/sao kê: {ref_str}. Ghi chú: {note or 'N/A'}"
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'verify_payment', ?, 'paid', ?, ?, ?)""",
+                (order_id, current_payment, user_id, audit_reason, now_str)
+            )
+
+            return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+    @staticmethod
+    def confirm_cod_payment(
+        order_id: int,
+        user_id: int,
+        user_role: str,
+        note: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Xác nhận đã thu tiền mặt COD (Staff/Admin/SuperAdmin):
+        - Bắt buộc payment_method == 'cash'.
+        - Bắt buộc payment_status == 'unpaid'.
+        - Chuyển sang 'paid' kèm audit log.
+        """
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng cần xác nhận thu tiền COD")
+
+            if order["payment_method"] != "cash":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Đơn hàng có phương thức thanh toán '{order['payment_method']}', không phải tiền mặt COD"
+                )
+
+            current_payment = order["payment_status"]
+            if current_payment == "paid":
+                return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+            cursor.execute(
+                """UPDATE orders
+                   SET payment_status = 'paid',
+                       payment_status_raw = 'paid'
+                   WHERE id = ?""",
+                (order_id,)
+            )
+
+            audit_reason = f"Xác nhận đã thu tiền mặt COD thực tế từ khách hàng/shipper. Ghi chú: {note or 'N/A'}"
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'confirm_cod_payment', ?, 'paid', ?, ?, ?)""",
+                (order_id, current_payment, user_id, audit_reason, now_str)
+            )
+
+            return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+    @staticmethod
+    def update_fulfillment(
+        order_id: int,
+        user_id: int,
+        user_role: str,
+        fulfillment_status: str,
+        note: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Cập nhật trạng thái giao vận Fulfillment (Staff/Admin/SuperAdmin):
+        - Enum: unfulfilled, packing, shipping, delivered, delivery_failed, returned_to_inventory, legacy_unknown.
+        - Quy tắc chuyển đổi:
+          + unfulfilled -> packing
+          + packing -> shipping
+          + shipping -> delivered HOẶC delivery_failed
+        - ĐẶC BIỆT: 'delivery_failed' TUYỆT ĐỐI KHÔNG tự động hoàn kho (hàng còn đang trên đường hoàn về kho).
+        - Ghi nhận chi tiết vào order_audit_logs.
+        """
+        VALID_FULFILLMENTS = ("unfulfilled", "packing", "shipping", "delivered", "delivery_failed", "returned_to_inventory")
+        if fulfillment_status not in VALID_FULFILLMENTS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Trạng thái giao vận '{fulfillment_status}' không hợp lệ. Chỉ chấp nhận: {', '.join(VALID_FULFILLMENTS)}"
+            )
+
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng cần cập nhật vận chuyển")
+
+            if order["status"] in ("cancelled", "rejected"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Không thể cập nhật vận chuyển cho đơn hàng đã '{order['status']}'"
+                )
+
+            current_f = order["fulfillment_status"] or "unfulfilled"
+            if current_f == fulfillment_status:
+                return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+            # Kiểm tra ma trận chuyển trạng thái hợp lệ
+            ALLOWED_TRANSITIONS = {
+                "unfulfilled": ["packing", "shipping"],
+                "packing": ["shipping", "unfulfilled"],
+                "shipping": ["delivered", "delivery_failed"],
+                "delivery_failed": ["shipping", "returned_to_inventory"],
+                "delivered": [],
+                "returned_to_inventory": [],
+                "legacy_unknown": ["unfulfilled", "packing", "shipping", "delivered"]
+            }
+
+            allowed_targets = ALLOWED_TRANSITIONS.get(current_f, [])
+            if fulfillment_status not in allowed_targets and user_role not in ("admin", "superadmin"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Không thể chuyển trạng thái giao vận từ '{current_f}' sang '{fulfillment_status}'. Các trạng thái hợp lệ: {', '.join(allowed_targets) or 'Không còn'}"
+                )
+
+            cursor.execute(
+                """UPDATE orders
+                   SET fulfillment_status = ?
+                   WHERE id = ?""",
+                (fulfillment_status, order_id)
+            )
+
+            audit_reason = f"Cập nhật tiến độ giao vận từ '{current_f}' sang '{fulfillment_status}'. Ghi chú: {note or 'N/A'}"
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'update_fulfillment', ?, ?, ?, ?, ?)""",
+                (order_id, current_f, fulfillment_status, user_id, audit_reason, now_str)
+            )
+
+            return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+    @staticmethod
+    def confirm_return(
+        order_id: int,
+        user_id: int,
+        user_role: str,
+        reason: Optional[str] = None,
+        note: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Thủ kho xác nhận nhập lại hàng hoàn vật lý (Staff/Admin/SuperAdmin):
+        - Điều kiện tiên quyết: Đơn hàng giao thất bại ('delivery_failed') hoặc đã hủy.
+        - CHỐNG CỘNG TỒN KHO 2 LẦN (Idempotency Guard):
+          + Kiểm tra fulfillment_status: nếu đã là 'returned_to_inventory' -> từ chối 400.
+          + Kiểm tra inventory_logs: nếu đã có bản ghi 'return_cancel' cho đơn này -> từ chối 400.
+        - Tăng lại stock_quantity và ghi log 'return_cancel'.
+        - Chuyển fulfillment_status sang 'returned_to_inventory' và status sang 'cancelled' nếu chưa hủy.
+        - Hoàn tiền độc lập: KHÔNG tự động gán refunded (tiền do kế toán đối soát riêng).
+        """
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng cần nhập lại kho")
+
+            current_f = order["fulfillment_status"] or "unfulfilled"
+            order_code = order["order_code"]
+
+            # Idempotency Check 1: Không nhập lại kho nếu đã ở trạng thái returned_to_inventory
+            if current_f == "returned_to_inventory":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Hàng của đơn {order_code} đã được nhập lại kho trước đó (đã xác nhận 'returned_to_inventory')"
+                )
+
+            # Kiểm tra trạng thái vận chuyển hợp lệ để nhập kho: Bắt buộc đã xác nhận hàng quay lại (delivery_failed hoặc cancelled)
+            if current_f != "delivery_failed" and order["status"] not in ("cancelled", "rejected"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Chỉ có thể xác nhận nhập lại hàng hoàn khi đơn ở trạng thái 'delivery_failed' hoặc 'cancelled' (hiện tại: fulfillment='{current_f}', status='{order['status']}')"
+                )
+
+            # Idempotency Check 2: Kiểm tra nhật ký inventory_logs đã từng hoàn tồn chưa
+            cursor.execute(
+                "SELECT id FROM inventory_logs WHERE reference_code = ? AND change_type = 'return_cancel'",
+                (order_code,)
+            )
+            existing_return = cursor.fetchone()
+            if existing_return:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Đơn hàng {order_code} đã có giao dịch hoàn trả tồn kho trong hệ thống (chống cộng tồn 2 lần)"
+                )
+
+            # Atomic conditional update guard: Đổi trạng thái sang returned_to_inventory trước khi cộng kho
+            new_status = "cancelled" if order["status"] != "cancelled" else order["status"]
+            cursor.execute(
+                """UPDATE orders
+                   SET fulfillment_status = 'returned_to_inventory',
+                       status = ?
+                   WHERE id = ? AND fulfillment_status != 'returned_to_inventory'""",
+                (new_status, order_id)
+            )
+            if cursor.rowcount == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Đơn hàng {order_code} đã được nhập lại kho trước đó (Idempotency Guard)"
+                )
+
+            clean_reason = reason.strip() if reason and reason.strip() else "Giao hàng thất bại và thủ kho đã nhận lại bưu kiện vật lý"
+
+            # Hoàn trả tồn kho cho từng sản phẩm
+            cursor.execute("SELECT product_id, quantity FROM order_items WHERE order_id = ?", (order_id,))
+            items = cursor.fetchall()
+            for item in items:
+                p_id = item["product_id"]
+                qty = item["quantity"]
+
+                cursor.execute("SELECT stock_quantity FROM products WHERE id = ?", (p_id,))
+                prod = cursor.fetchone()
+                if prod:
+                    stock_before = prod["stock_quantity"]
+                    stock_after = stock_before + qty
+
+                    cursor.execute(
+                        "UPDATE products SET stock_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (stock_after, p_id)
+                    )
+
+                    cursor.execute(
+                        """INSERT INTO inventory_logs (
+                            product_id, change_type, reference_code,
+                            quantity_before, change_quantity, quantity_after, note, created_at
+                        ) VALUES (?, 'return_cancel', ?, ?, ?, ?, ?, ?)""",
+                        (
+                            p_id, order_code, stock_before, qty,
+                            stock_after, f"Nhập lại kho hàng hoàn đơn {order_code}: {clean_reason}", now_str
+                        )
+                    )
+
+            audit_reason = f"Thủ kho xác nhận đã nhận lại hàng hoàn vật lý: {clean_reason}. Ghi chú: {note or 'N/A'}"
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'confirm_return', ?, 'returned_to_inventory', ?, ?, ?)""",
+                (order_id, current_f, user_id, audit_reason, now_str)
+            )
+
+            return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+    @staticmethod
+    def request_refund(
+        order_id: int,
+        user_id: int,
+        user_role: str,
+        reason: str,
+        own_customer_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Yêu cầu hoàn tiền (Staff/Admin/SuperAdmin hoặc Customer sở hữu đơn):
+        - Điều kiện: Đơn hàng đã thu tiền thực tế ('payment_status == paid').
+        - Chuyển payment_status sang 'refund_pending'.
+        - Độc lập hoàn toàn với tồn kho: KHÔNG tự ý nhập kho hoặc thay đổi fulfillment.
+        - Ghi nhận vào order_audit_logs.
+        """
+        if not reason or not reason.strip():
+            raise HTTPException(status_code=400, detail="Lý do yêu cầu hoàn tiền là bắt buộc")
+
+        clean_reason = reason.strip()
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng cần yêu cầu hoàn tiền")
+
+            # Anti-IDOR nếu là customer
+            if user_role == "customer":
+                is_own = (order["user_id"] == user_id) or (
+                    own_customer_id is not None and order["customer_id"] == own_customer_id
+                )
+                if not is_own:
+                    raise HTTPException(status_code=403, detail="Bạn không có quyền yêu cầu hoàn tiền cho đơn hàng của người khác")
+
+            current_payment = order["payment_status"]
+            if current_payment == "refund_pending":
+                return InventoryService._require_order_detail_by_id(cursor, order_id)
+            if current_payment == "refunded":
+                raise HTTPException(status_code=400, detail="Đơn hàng này đã được hoàn tiền trước đó")
+            if current_payment != "paid":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Chỉ có thể yêu cầu hoàn tiền cho đơn hàng đã thanh toán thành công (hiện tại: '{current_payment}')"
+                )
+
+            cursor.execute(
+                """UPDATE orders
+                   SET payment_status = 'refund_pending',
+                       payment_status_raw = 'refund_pending'
+                   WHERE id = ?""",
+                (order_id,)
+            )
+
+            audit_reason = f"Yêu cầu hoàn tiền: {clean_reason}"
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'request_refund', 'paid', 'refund_pending', ?, ?, ?)""",
+                (order_id, user_id, audit_reason, now_str)
+            )
+
+            return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+    @staticmethod
+    def confirm_refund(
+        order_id: int,
+        user_id: int,
+        user_role: str,
+        refund_ref: Optional[str] = None,
+        reason: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Admin/SuperAdmin xác nhận đã hoàn tiền thực tế cho khách:
+        - Điều kiện: payment_status đang ở 'refund_pending' (hoặc 'paid').
+        - Chuyển payment_status sang 'refunded'.
+        - Giảm total_spent của khách hàng tương ứng (nếu trước đó đã cộng khi completed).
+        - Độc lập với tồn kho: KHÔNG tự ý hoàn kho.
+        - Ghi nhận chi tiết vào order_audit_logs.
+        """
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with get_db_transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng cần xác nhận hoàn tiền")
+
+            current_payment = order["payment_status"]
+            if current_payment == "refunded":
+                # Idempotency
+                return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+            if current_payment not in ("refund_pending", "paid"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Chỉ có thể hoàn tiền cho đơn đang ở trạng thái 'refund_pending' hoặc 'paid' (hiện tại: '{current_payment}')"
+                )
+
+            final_amount = float(order["final_amount"])
+            customer_id = order["customer_id"]
+
+            cursor.execute(
+                """UPDATE orders
+                   SET payment_status = 'refunded',
+                       payment_status_raw = 'refunded'
+                   WHERE id = ?""",
+                (order_id,)
+            )
+
+            # Cập nhật giảm total_spent nếu đơn hàng đã từng hoàn tất
+            if customer_id and order["status"] == "completed":
+                cursor.execute(
+                    "UPDATE customers SET total_spent = MAX(0, total_spent - ?) WHERE id = ?",
+                    (final_amount, customer_id)
+                )
+
+            ref_str = refund_ref.strip() if refund_ref and refund_ref.strip() else "Ủy nhiệm chi / Tiền mặt"
+            clean_reason = reason.strip() if reason and reason.strip() else "Admin xác nhận đã hoàn tiền thành công cho khách hàng"
+            audit_reason = f"Xác nhận hoàn tiền thực tế (Ref={ref_str}): {clean_reason}"
+
+            cursor.execute(
+                """INSERT INTO order_audit_logs (
+                    order_id, action, previous_status, resulting_status,
+                    performed_by, reason, created_at
+                ) VALUES (?, 'confirm_refund', ?, 'refunded', ?, ?, ?)""",
+                (order_id, current_payment, user_id, audit_reason, now_str)
+            )
+
+            return InventoryService._require_order_detail_by_id(cursor, order_id)
+
+    @staticmethod
+    def get_order_audit_logs(
+        order_id: int,
+        user_id: int,
+        user_role: str,
+        own_customer_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Truy vấn toàn bộ diễn biến lịch sử audit trail của đơn hàng:
+        - Customer: chỉ xem audit logs của đơn hàng do chính mình sở hữu (Anti-IDOR).
+        - Staff / Admin / SuperAdmin: xem toàn bộ diễn biến.
+        """
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, user_id, customer_id FROM orders WHERE id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng")
+
+            if user_role == "customer":
+                is_own = (order["user_id"] == user_id) or (
+                    own_customer_id is not None and order["customer_id"] == own_customer_id
+                )
+                if not is_own:
+                    raise HTTPException(status_code=403, detail="Bạn không có quyền xem nhật ký đơn hàng của người khác")
+
+            cursor.execute(
+                """SELECT oal.id, oal.order_id, oal.action, oal.previous_status, oal.resulting_status,
+                          oal.performed_by, u.full_name as performer_name, oal.reason, oal.created_at
+                   FROM order_audit_logs oal
+                   LEFT JOIN users u ON oal.performed_by = u.id
+                   WHERE oal.order_id = ?
+                   ORDER BY oal.id ASC""",
+                (order_id,)
+            )
+            logs = [dict(r) for r in cursor.fetchall()]
+            return logs
 
 
 

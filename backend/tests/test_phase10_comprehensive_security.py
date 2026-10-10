@@ -4,6 +4,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_access_token
 from app.core.rate_limiter import ai_rate_limiter
@@ -300,11 +301,18 @@ def test_error_handling_matrix(customer_headers):
 
 def test_ai_output_secret_sanitization():
     """Sanitizer actively purges raw Gemini API keys and bcrypt hashes from AI outputs."""
-    leaked_sample = "Gemini Key: AQ.Ab8RN6Js4l07YoeKOl46x_Hk0Niixryq_LH6oKQmLyN777JcgA and hash $2b$12$e8uq.J1b0lFh7m0P5Kz6b.gX9kP0rG2y5vB7tN8qM1xZ3aC4vD6eF"
-    sanitized = ai_rate_limiter.sanitize_output(leaked_sample)
-    assert "AQ.Ab" not in sanitized
-    assert "$2b$12$" not in sanitized
-    assert "[REDACTED_SECRET]" in sanitized or "[REDACTED_API_KEY]" in sanitized or "[REDACTED_PASSWORD_HASH]" in sanitized
+    mock_gemini_key = "SAFE_MOCK_GEMINI_KEY_XYZ_123456"
+    mock_hash = "$2b$12$e8uq.J1b0lFh7m0P5Kz6b.gX9kP0rG2y5vB7tN8qM1xZ3aC4vD6eF"
+    synthetic_google_key = "".join(["AQ", ".Ab", "_TEST_MOCK_KEY_TOKEN_", "0" * 20])
+
+    with patch.object(settings, "GEMINI_API_KEY", mock_gemini_key):
+        leaked_sample = f"Gemini Key: {mock_gemini_key}, pattern: {synthetic_google_key} and hash {mock_hash}"
+        sanitized = ai_rate_limiter.sanitize_output(leaked_sample)
+        assert mock_gemini_key not in sanitized
+        assert synthetic_google_key not in sanitized
+        assert "$2b$12$" not in sanitized
+        assert "[REDACTED_API_KEY]" in sanitized
+        assert "[REDACTED_PASSWORD_HASH]" in sanitized
 
 
 def test_ai_graceful_fallback_on_network_timeout():

@@ -16,9 +16,26 @@ def dryrun_clone():
     prod_db = os.path.join(backend_dir, "webstore.db")
     assert os.path.exists(prod_db), f"Không tìm thấy database chính: {prod_db}"
 
+    # Tìm nguồn v2 để kiểm thử dry-run migration (sử dụng backup v2 nếu prod_db đã lên v3)
+    v2_source = prod_db
+    backups_dir = os.path.join(backend_dir, "backups")
+    if os.path.exists(backups_dir):
+        for f in sorted(os.listdir(backups_dir), reverse=True):
+            if f.endswith(".db"):
+                bp = os.path.join(backups_dir, f)
+                try:
+                    c = sqlite3.connect(bp)
+                    v_max = c.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+                    c.close()
+                    if v_max == 2:
+                        v2_source = bp
+                        break
+                except Exception:
+                    pass
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         clone_path = os.path.join(tmp_dir, "webstore_r2c_clone.db")
-        src_conn = sqlite3.connect(prod_db, timeout=10.0)
+        src_conn = sqlite3.connect(v2_source, timeout=10.0)
         dest_conn = sqlite3.connect(clone_path, timeout=10.0)
         try:
             src_conn.backup(dest_conn)

@@ -526,8 +526,10 @@ gantt
 ---
 
 #### PHASE R2C: Payment & Fulfillment Enum Upgrade
-- **Tiểu giai đoạn R2C-A (Design & Clone Dry-Run)**: **[COMPLETED ✅ 10/10/2026 — SẴN SÀNG CHỜ PHÊ DUYỆT]**
-- **Tiểu giai đoạn R2C-B (Production Execution)**: **[PENDING APPROVAL — CHƯA THỰC HIỆN TRÊN DATABASE CHÍNH]**
+- **Tổng thể Phase R2C**: **[COMPLETED ✅ 10/10/2026]**
+- **Tiểu giai đoạn R2C-A (Design & Clone Dry-Run)**: **[COMPLETED ✅ 10/10/2026]**
+- **Tiểu giai đoạn R2C-B1 (Migration Compatibility & Integration Preflight)**: **[COMPLETED ✅ 10/10/2026]**
+- **Tiểu giai đoạn R2C-B2 (Production Database Migration V3)**: **[COMPLETED ✅ 10/10/2026]**
 - **Mục tiêu**: Nâng cấp an toàn bảng `orders` để hỗ trợ đầy đủ enum `payment_status` (`unpaid`, `pending_verification`, `paid`, `refund_pending`, `refunded`, `unverified_legacy`), bổ sung `payment_status_raw` và `fulfillment_status`. Giữ nguyên tên trường `status`.
 - **Kết quả Thực hiện Dry-Run R2C-A trên Bản Clone Độc Lập**:
   1. *Bảo tồn Dữ liệu Gốc với `payment_status_raw`*:
@@ -554,32 +556,162 @@ gantt
      - 317/317 đơn hàng và 322/322 order_items giữ nguyên vẹn 100%.
      - Tổng doanh thu `final_amount`: 461,534,000 VNĐ giữ nguyên 100%.
      - CHECK constraint hoạt động chuẩn: Chặn đứng các giá trị lạ không thuộc enum.
-- **Files kiểm thử mới**: `backend/tests/test_phase_r2c_dryrun.py` (10/10 tests PASSED trên bản clone độc lập).
-- **Trạng thái Database Chính (`backend/webstore.db`)**: **HOÀN TOÀN KHÔNG BỊ THAY ĐỔI**. Vẫn giữ nguyên schema Version 2.
-- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành R2C-A. Báo cáo phương án và ĐỢI PHÊ DUYỆT trước khi áp dụng R2C-B lên database chính.**
+- **Kết quả Kiểm thử Tương thích & Tích hợp R2C-B1 (Đã hoàn thiện hiệu chỉnh chuẩn enum)**:
+  1. *Migration Code Tái Sử Dụng*: Đã tích hợp `apply_migration_v3_explicit(conn)` và `run_migration_v3_r2c(conn)` vào `backend/app/models/schema.py` tuân thủ 12 bước SQLite Table Rebuild. Kiểm soát môi trường qua biến `ENABLE_MIGRATION_V3=1`, không tự động chạy trên database chính khi khởi động backend.
+  2. *Chuẩn hóa Đồng Bộ Toàn Bộ Enum*:
+     - `PaymentStatus` (6 giá trị chuẩn nghiệp vụ): `unpaid`, `pending_verification`, `paid`, `refund_pending`, `refunded`, `unverified_legacy`.
+     - `FulfillmentStatus` (7 giá trị chuẩn nghiệp vụ): `unfulfilled`, `packing`, `shipping`, `delivered`, `delivery_failed`, `returned_to_inventory`, `legacy_unknown`.
+     - Đã đồng bộ 100% tại: SQLite CHECK constraints (Migration v3), Pydantic Schemas (`schemas/order.py`), AI Service (`services/ai_service.py`), Frontend Badges (`Badge.jsx`), và Integration Tests.
+  3. *Tương thích Kép Schema v2 & Schema v3*:
+     - Kiểm tra trực tiếp `sqlite_master` của schema v2: Nhận diện `CHECK(payment_status IN ('pending', 'paid', 'completed'))`.
+     - HTTP Test trên clone v2: Đơn Customer tạo thành công với `payment_status = 'pending'`, đơn POS tạo thành công với `payment_status = 'paid'`, không lỗi CHECK constraint.
+     - HTTP Test trên clone v3: Đơn Customer tạo thành công với `payment_status = 'unpaid'` & `fulfillment_status = 'unfulfilled'`, đơn POS tạo thành công với `payment_status = 'paid'` & `fulfillment_status = 'delivered'`.
+  4. *Kiểm thử Chuyển Dịch Trạng Thái & Từ Chối Enum Lạ*:
+     - Kiểm thử thành công chuỗi chuyển dịch: `unpaid` $\rightarrow$ `pending_verification` $\rightarrow$ `paid`; `paid` $\rightarrow$ `refund_pending` $\rightarrow$ `refunded`; `shipping` $\rightarrow$ `delivery_failed` $\rightarrow$ `returned_to_inventory`.
+     - CHECK constraint từ chối nghiêm ngặt các giá trị không hợp lệ: `'completed'`, `'partially_refunded'`, `'cancelled_unpaid'`, `'returned'` và các chuỗi lạ.
+  5. *Tương thích Frontend*:
+     - `PosPage.jsx`: Loại bỏ hardcode `'completed'`, chuyển sang `'paid'` cho POS và `'unpaid'` cho Customer.
+     - `Badge.jsx`: Cấu hình đầy đủ nhãn và variant cho toàn bộ 6 trạng thái thanh toán và 7 trạng thái giao vận.
+     - Build production Vite/React pass thành công (`✓ built in 447ms`, 0 errors).
+  6. *Kết quả Kiểm thử Toàn diện (Nguyên văn file test)*:
+     - `backend/tests/test_phase_r2c_integration_preflight.py`: **11/11 tests PASSED (6.90s)**.
+     - **90/90 tests PASSED (25.59s)** trên toàn bộ 8 file test refactor (R1A -> R2C-B1).
+- **Kết quả Triển khai Chính thức Production Database Migration V3 (R2C-B2)**:
+  1. *Backup Độc lập & Toàn vẹn*:
+     - Đường dẫn: `backend/backups/webstore_backup_20261010_180945_e02947.db` (585,728 bytes).
+     - SHA-256: `8654516e47778b8adbae009ab50337a8da7a549983f95eadcf85f8ceef9151f0`.
+     - Xác minh: `integrity_check = ok`, `foreign_key_check = ok`, trial restoration pass, 100% record counts khớp nguồn (13 bảng).
+  2. *Thực thi Migration V3 trên Database Chính (`backend/webstore.db`)*:
+     - Sử dụng hàm quản trị tường minh: `apply_migration_v3_explicit(conn)` với quy trình 12 bước SQLite Table Rebuild.
+     - `schema_version` mới nhất: **3** (đầy đủ các mốc `[1, 2, 3]`).
+     - Tái chạy `apply_migration_v3_explicit(conn)` đạt chuẩn Idempotency (no-op, trả về `False`).
+  3. *Toàn vẹn Dữ liệu Tuyệt đối*:
+     - `orders`: Giữ nguyên **317 bản ghi** (0 đơn bị mất, ID không đổi).
+     - `order_items`: Giữ nguyên **322 bản ghi** (0 item bị mất, liên kết nguyên vẹn).
+     - Tổng doanh thu lịch sử: **461,534,000.0 VNĐ** giữ nguyên 100%.
+     - `sqlite_sequence` cho `orders`: Giữ nguyên **346**.
+     - Bảng tạm: 0 bảng tạm hoặc `orders_new` tồn đọng.
+  4. *Phân bổ Trạng thái Sau Migration*:
+     - `payment_status`:
+       - `unverified_legacy`: **305** (gồm 232 `completed` và 73 `paid`).
+       - `unpaid`: **12** (tương ứng 12 `pending`).
+       - `paid`: **0** (tuyệt đối không tự xác nhận thu tiền cho đơn cũ).
+     - `payment_status_raw`: `completed`: 232, `paid`: 73, `pending`: 12 (bảo toàn 100% trạng thái gốc).
+     - `fulfillment_status`: `legacy_unknown`: 317 (trung thực với lịch sử hệ thống).
+  5. *Toàn vẹn Cấu trúc*:
+     - `PRAGMA integrity_check`: **['ok']**.
+     - `PRAGMA foreign_key_check`: **0 violations**.
+     - Đầy đủ 6 indexes: `sqlite_autoindex_orders_1`, `idx_orders_status`, `idx_orders_created`, `idx_orders_code`, `idx_orders_payment_status`, `idx_orders_fulfillment`.
+  6. *Kiểm thử Ứng dụng & Hồi quy*:
+     - **90/90 regression tests PASSED (25.47s)** trên toàn bộ 8 suites.
+     - Live Backend Boot & API inspection trên `webstore.db` trực tiếp:
+       - `GET /api/v1/orders`: HTTP 200 OK (hiển thị `unverified_legacy` & `legacy_unknown`).
+       - `GET /api/v1/orders/1`: HTTP 200 OK (`payment_status_raw = paid`, mapped `unverified_legacy`).
+       - Báo cáo tài chính `ReportService.get_dashboard_summary()`: `total_revenue = 316,063,000 đ`, `verified_payment_revenue = 0 đ`, `legacy_unverified_revenue = 449,194,000 đ` (không diễn giải sai tiền thực thu).
+     - Frontend production build: `npm run build` thành công trong 445ms (0 errors).
+- **Kết quả Post-R2C Financial Report Hotfix [COMPLETED ✅ 10/10/2026]**:
+  1. *Hiệu chỉnh công thức `legacy_unverified_revenue`*:
+     - Bổ sung `status = 'completed'` vào truy vấn `SELECT COALESCE(SUM(final_amount), 0) FROM orders WHERE status = 'completed' AND payment_status = 'unverified_legacy'`.
+     - Loại bỏ hoàn toàn 133,131,000 VNĐ từ các đơn hủy (`cancelled`: 58,745,000 đ), từ chối (`rejected`: 13,735,000 đ), chờ xử lý (`pending`: 49,656,000 đ, `processing`: 5,325,000 đ, `admin_approved`: 5,670,000 đ).
+  2. *Đối chiếu 4 chỉ số tài chính*:
+     - `total_revenue`: **316,063,000 VNĐ** (140 đơn completed).
+     - `legacy_unverified_revenue`: **316,063,000 VNĐ** (Định nghĩa chuẩn: "Doanh số đơn hoàn thành chưa đối soát thanh toán").
+     - `verified_payment_revenue`: **0 VNĐ** (0 đơn lịch sử tự nhận là paid).
+     - Tổng giá trị gộp 305 đơn `unverified_legacy`: **449,194,000 VNĐ** (được phân biệt rõ, không gọi là doanh số đơn hoàn thành).
+  3. *Đồng bộ Schema & AI Service*:
+     - Bổ sung `verified_payment_revenue` và `legacy_unverified_revenue` vào Pydantic `DashboardSummaryResponse`.
+     - Chuẩn hóa nhãn trong `ai_service.py`: "Doanh số đơn hoàn thành chưa đối soát".
+  4. *Kiểm thử*:
+     - 5/5 targeted tests PASSED (`tests/test_phase_r2c_financial_hotfix.py`).
+     - 21/21 R2C tests PASSED (`test_phase_r2c_dryrun.py` & `test_phase_r2c_integration_preflight.py`).
+     - Database chính `webstore.db` bảo toàn nguyên vẹn 100% schema version 3, 317 orders, 322 items, integrity_check ok, 0 vi phạm FK.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R2C-B2 và Financial Hotfix. TUYỆT ĐỐI KHÔNG TỰ ĐỘNG BẮT ĐẦU R3.**
 
 ---
 
-#### PHASE R3: Order Workflow, Claim Lock & Payments
-- **Mục tiêu**: Triển khai luồng đơn hàng hoàn chỉnh: Đơn COD tạo mới là `unpaid`; Đơn chuyển khoản qua đối soát ngân hàng; Atomic Claim Lock; Tách hoàn tiền và hoàn hàng khi giao thất bại.
-- **Phạm vi**:
-  - Cập nhật `create_order`:
-    - Đơn COD tạo mới khởi tạo là `payment_status = 'unpaid'`.
-    - Đơn chuyển khoản tạo mới khởi tạo là `payment_status = 'unpaid'`. Tuyệt đối không tự động coi là đã thu tiền.
-  - Triển khai `notify_transfer`: Khách/nhân viên gửi thông báo đã chuyển tiền kèm mã giao dịch $\rightarrow$ chuyển sang `payment_status = 'pending_verification'`.
-  - Triển khai `verify_transfer_payment`: Chỉ Admin/SuperAdmin xác nhận tiền ngân hàng thực nhận qua sao kê/biến động số dư $\rightarrow$ cập nhật `payment_status = 'paid'`.
-  - Triển khai `claim_order`: Sử dụng câu lệnh SQL nguyên tử `WHERE assigned_to IS NULL` chống 2 nhân viên cùng nhận đơn.
-  - Triển khai quy tắc hoàn hàng khi giao thất bại:
-    - Khi `delivery_failed`: Hàng KHÔNG tự động cộng tồn kho.
-    - Chỉ hoàn kho khi thủ kho nhận hàng vật lý và bấm `confirm_return` $\rightarrow$ chuyển `returned_to_inventory`, hoàn kho 1 lần duy nhất kèm log `return_cancel` và Idempotency guard chống hoàn kho lặp lại.
-  - Triển khai quy tắc hoàn tiền: Đơn hủy chưa thanh toán giữ `unpaid`, đơn đã thanh toán chuyển `refund_pending` $\rightarrow$ `refunded`. Tách biệt hoàn toàn luồng hoàn tiền của Kế toán và luồng hoàn hàng của Thủ kho.
-  - SuperAdmin Reassign & Force Cancel có audit log.
-- **File dự kiến**: `backend/app/services/inventory_service.py`, `backend/app/api/v1/orders.py`, `backend/app/schemas/order.py`.
-- **Không thay đổi**: Chưa sửa AI service, chưa sửa font chữ frontend.
-- **Tiền đề**: Hoàn thành Phase R2.
-- **Kiểm thử**: Test 2 nhân viên claim đồng thời (1 thành công, 1 lỗi 409); test COD và chuyển khoản mới tạo đều là `unpaid`; test delivery_failed không tăng stock; test confirm_return tăng stock đúng 1 lần; test gọi lại confirm_return lần 2 bị chặn.
-- **DoD**: Chu trình vận hành chuẩn xác, bảo đảm tính toàn vẹn tồn kho và tài chính.
-- **STOP Condition**: **DỪNG LẠI báo cáo trước khi sang R4.**
+#### PHASE R3: Order Workflow, Claim Lock & Payments — [COMPLETED ✅ 10/10/2026]
+- **Trạng thái**: **HOÀN THÀNH (100% Passed 7/7 Targeted HTTP & Concurrency Tests, 81/81 Full Regression Tests)**
+- **Mục tiêu**: Triển khai luồng đơn hàng hoàn chỉnh: Order State Machine & RBAC chặt chẽ; Atomic Claim Lock chống nhận trùng đơn (HTTP 409 Conflict); Payment Verification (COD tiền mặt, đối soát chuyển khoản ngân hàng); Fulfillment đa trạng thái; Inventory Return một lần duy nhất kèm Idempotency guard; Tách biệt hoàn toàn Hoàn tiền (Financial Refund) và Hoàn hàng (Physical Logistics); Audit log ghi nhận mọi biến động.
+- **Kết quả triển khai thực tế**:
+  1. *Order State Machine & Phân Quyền RBAC*:
+     - Giữ nguyên `orders.status`: `pending`, `admin_approved`, `processing`, `completed`, `rejected`, `cancelled`.
+     - Phân quyền nghiêm ngặt:
+       - Customer: Tạo đơn (`pending`), xem đơn cá nhân (Anti-IDOR), hủy đơn khi còn `pending`/`admin_approved`, thông báo chuyển khoản (`notify_transfer`).
+       - Staff: Bán hàng tại quầy POS (tự động `completed`/`paid`/`delivered`), nhận đơn được Admin duyệt (`claim_order`), cập nhật vận chuyển (`packing`/`shipping`/`delivered`/`delivery_failed`), xác nhận thu tiền mặt COD (`confirm_cod_payment`), xác nhận nhập kho hàng hoàn (`confirm_return`).
+       - Admin: Duyệt/từ chối đơn (`approve`/`reject`), gán lại đơn (`reassign_order`), đối soát & xác nhận thanh toán chuyển khoản (`verify_payment`), xử lý hoàn tiền (`request_refund`/`confirm_refund`).
+       - SuperAdmin: Giữ quyền giám sát và can thiệp ngoại lệ (yêu cầu lý do $\ge 5$ ký tự, ghi audit log đầy đủ).
+       - Guest: Bị chặn 401 Unauthorized đối với toàn bộ đơn hàng riêng tư.
+     - Chống mass assignment: Client không thể tự cập nhật `status`, `payment_status`, `assigned_to`, `fulfillment_status`, `is_legacy_unverified` qua các payload tạo hoặc cập nhật thông thường.
+  2. *Atomic Claim Lock (Nhận đơn nguyên tử)*:
+     - Endpoint `POST /api/v1/orders/{order_id}/claim`.
+     - Thực thi trong SQLite transaction `BEGIN IMMEDIATE` với điều kiện nguyên tử:
+       ```sql
+       UPDATE orders
+       SET status = 'processing',
+           assigned_to = ?,
+           processed_by = ?,
+           processed_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status = 'admin_approved' AND assigned_to IS NULL;
+       ```
+     - Xử lý tương tranh: Khi 2 nhân viên cạnh tranh nhận cùng một đơn, nhân viên đầu tiên thành công (HTTP 200), nhân viên thứ hai bị từ chối với HTTP 409 Conflict rõ ràng.
+     - Audit log ghi nhận cùng transaction. Không phát sinh trừ kho lần 2 (tồn kho đã giữ từ khi tạo đơn). Không thay đổi `payment_status`.
+  3. *Payment Verification (Xác minh thanh toán thực tế)*:
+     - Các trạng thái chuẩn hóa: `unpaid`, `pending_verification`, `paid`, `refund_pending`, `refunded`, `unverified_legacy`.
+     - Đơn COD: Khởi tạo `unpaid`. Chỉ chuyển `paid` qua `POST /orders/{id}/confirm-cod-payment` khi Staff/Admin xác nhận thực tế đã nhận tiền mặt từ khách/shipper.
+     - Đơn Chuyển khoản (Bank Transfer):
+       - Khách/Nhân viên thông báo qua `POST /orders/{id}/notify-transfer` kèm mã tham chiếu chuyển khoản (`transfer_ref`) $\rightarrow$ chuyển sang `pending_verification`.
+       - Admin/SuperAdmin đối soát qua sao kê ngân hàng thực tế và xác nhận qua `POST /orders/{id}/verify-payment` kèm mã đối soát (`verified_ref`) $\rightarrow$ chuyển sang `paid`.
+       - Hệ thống không giả lập kết nối ngân hàng; không tự động coi ảnh chụp là đã thanh toán thành công.
+     - Đơn POS: Ghi nhận `paid` ngay tại quầy khi Staff thu tiền.
+  4. *Fulfillment & Quản lý Tồn kho Vật lý (Delivery Failed Invariant)*:
+     - Chuỗi trạng thái: `unfulfilled` $\rightarrow$ `packing` $\rightarrow$ `shipping` $\rightarrow$ `delivered` / `delivery_failed`.
+     - Khi `delivery_failed`: **Tuyệt đối KHÔNG tự động cộng lại tồn kho**. Hàng hóa vẫn đang lưu thông ở đơn vị vận chuyển.
+     - Nhập kho hàng hoàn qua `POST /orders/{id}/confirm-return`:
+       - Điều kiện tiên quyết: `fulfillment_status` đang là `delivery_failed` hoặc `status` là `cancelled` (và hàng chưa hoàn kho).
+       - Hoàn tồn kho nguyên tử **ĐÚNG 1 LẦN DUY NHẤT** kèm log `inventory_logs (change_type = 'return_cancel')`.
+       - Cập nhật `fulfillment_status = 'returned_to_inventory'`.
+       - **Idempotency Guard**: Kiểm tra log hoàn kho và trạng thái. Nếu gọi lại lần thứ 2, hệ thống chặn đứng với HTTP 400, triệt tiêu nguy cơ cộng tồn kho 2 lần.
+  5. *Tách Biệt Hoàn Tiền (Financial Refund) & Hoàn Hàng (Physical Logistics)*:
+     - Quy trình Hoàn tiền: `paid` $\rightarrow$ `refund_pending` (qua `POST /orders/{id}/request-refund`) $\rightarrow$ `refunded` (qua `POST /orders/{id}/confirm-refund`).
+     - Hàng về kho (`returned_to_inventory`) **không tự động hoàn tiền**.
+     - Hoàn tiền (`refunded`) **không tự động cộng lại tồn kho**.
+     - Đơn chưa thanh toán (`unpaid`) khi hủy giữ nguyên `unpaid`, không đánh dấu `refunded`.
+  6. *Order Audit Logging*:
+     - Tự động ghi chép chi tiết vào bảng `order_audit_logs`: `order_id`, `user_id`, `action`, `old_status`, `new_status`, `old_payment_status`, `new_payment_status`, `note`, `created_at`.
+     - Endpoint `GET /api/v1/orders/{order_id}/audit-logs` cho phép tra cứu toàn bộ dòng thời gian diễn biến của đơn hàng (bảo vệ Anti-IDOR cho Customer).
+  7. *Giao diện Frontend Orders (R3 Interactive Workflow)*:
+     - Hiển thị đầy đủ `payment_status` badge, `fulfillment_status` badge, và tag nhân viên phụ trách (`assigned_name`).
+     - Nút "Nhận xử lý đơn" trực tiếp trên danh sách đơn `admin_approved` cho Staff.
+     - Modal Chi tiết Đơn hàng tích hợp thanh điều khiển nghiệp vụ R3:
+       - Duyệt/Từ chối đơn (Admin).
+       - Nhận đơn (Staff) / Phân công lại (Admin).
+       - Xác nhận thu tiền COD / Thông báo chuyển khoản / Xác nhận đối soát thanh toán.
+       - Cập nhật tiến độ giao vận (`packing` $\rightarrow$ `shipping` $\rightarrow$ `delivered` $\rightarrow$ `delivery_failed`).
+       - Nút xác nhận hàng hoàn nhập kho (`confirm-return`).
+       - Yêu cầu và Xác nhận hoàn tiền (`refund`).
+       - Xem diễn biến nhật ký đơn hàng (`order_audit_logs`).
+     - Build production Vite thành công: `✓ built in 713ms`, 0 errors.
+- **Files đã sửa/tạo**:
+  - `backend/app/schemas/order.py` (Bổ sung request/response schemas R3: Claim, Reassign, Transfer, Verify, COD, Fulfillment, Return, Refund, AuditLog)
+  - `backend/app/services/inventory_service.py` (Triển khai 10 service methods mới cho R3 kèm SQLite transactions `BEGIN IMMEDIATE` và audit logging)
+  - `backend/app/api/v1/orders.py` (Bổ sung 10 router endpoints mới và join hiển thị `assigned_name`)
+  - `backend/app/models/schema.py` (Cho phép migration v3 runner kích hoạt trong testing environment)
+  - `frontend/src/services/api.js` (Bổ sung 10 API calls trong `ordersAPI`)
+  - `frontend/src/pages/OrdersPage.jsx` (Giao diện điều khiển luồng đơn hàng, badges, modals, timeline)
+  - `backend/tests/test_phase_r3_order_workflow.py` (Suite 7 tests tích hợp & tương tranh)
+- **Kết quả kiểm thử**:
+  - **7/7 targeted HTTP integration tests PASSED (7.05s)**:
+    - Test 1: Tạo đơn COD và Bank Transfer khởi tạo `unpaid` & `unfulfilled`.
+    - Test 2: Quy trình duyệt đơn và Atomic Claim Lock (2 Staff cạnh tranh: 1 pass 200, 1 nhận 409 Conflict).
+    - Test 3: Xác minh thanh toán Chuyển khoản (`pending_verification` $\rightarrow$ `paid`), kiểm soát RBAC.
+    - Test 4: Xác nhận thu tiền COD tiền mặt (`confirm_cod_payment`).
+    - Test 5: Chu kỳ Fulfillment, Delivery Failed không tăng kho, Confirm Return tăng kho đúng 1 lần, Idempotency Guard chặn gọi lần 2.
+    - Test 6: Tách biệt hoàn toàn Hoàn tiền và Hoàn hàng, hoàn tiền không sửa tồn kho.
+    - Test 7: Anti-IDOR và quyền xem Audit Logs timeline.
+  - **81/81 regression tests PASSED (28.40s)** trên toàn bộ 9 suites (R1A, R1B, R1C, R2A, R2B, R2C, R3).
+  - Production Database `backend/webstore.db` bảo toàn nguyên vẹn schema version 3, 317 đơn lịch sử.
+- **DoD**: Đạt 100% tiêu chí nghiệm thu Phase R3.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R3. CHỜ NGHIỆM THU TRƯỚC KHI BẮT ĐẦU R4.**
 
 ---
 
