@@ -22,9 +22,9 @@ import { Modal } from '../components/ui/Modal';
 import ProductImage from '../components/common/ProductImage';
 
 export const ProductsPage = () => {
-  const { isAdmin, isSuperAdmin, isManager } = useAuth();
+  const { isAdmin, isSuperAdmin } = useAuth();
   const { addToast } = useToast();
-  const canManage = isAdmin || isSuperAdmin || isManager;
+  const canManage = isAdmin || isSuperAdmin;
 
   const [activeTab, setActiveTab] = useState('products'); // 'products' | 'categories'
 

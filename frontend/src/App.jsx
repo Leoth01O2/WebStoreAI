@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Navbar } from './components/layout/Navbar';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { LoginPage } from './pages/LoginPage';
 import { PosPage } from './pages/PosPage';
 import { ProductsPage } from './pages/ProductsPage';
@@ -13,7 +14,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { AiAssistantPage } from './pages/AiAssistantPage';
 
 function AppContent() {
-  const { isAuthenticated, loading, user, isAdmin, isSuperAdmin, isManager } = useAuth();
+  const { isAuthenticated, loading, user, isAdmin, isSuperAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState('pos');
 
   // RBAC safety check: if user role changes or lacks permission for current tab
@@ -29,7 +30,7 @@ function AppContent() {
       if (user?.role === 'admin' && activeTab === 'dashboard') {
         setActiveTab('pos');
       }
-      if (user?.role === 'staff' && (activeTab === 'purchases' || activeTab === 'dashboard' || activeTab === 'customers' || activeTab === 'products')) {
+      if (user?.role === 'staff' && (activeTab === 'purchases' || activeTab === 'dashboard' || activeTab === 'products')) {
         setActiveTab('pos');
       }
       if (user?.role === 'customer' && (activeTab === 'products' || activeTab === 'purchases' || activeTab === 'dashboard' || activeTab === 'customers')) {
@@ -78,7 +79,7 @@ function AppContent() {
       case 'pos':
         return <PosPage onNavigate={setActiveTab} />;
       case 'products':
-        if (user?.role === 'customer') return <PosPage onNavigate={setActiveTab} />;
+        if (user?.role === 'customer' || user?.role === 'staff') return <PosPage onNavigate={setActiveTab} />;
         return <ProductsPage />;
       case 'orders':
         return <OrdersPage />;
@@ -86,10 +87,10 @@ function AppContent() {
         if (user?.role === 'customer') return <PosPage onNavigate={setActiveTab} />;
         return <CustomersPage />;
       case 'purchases':
-        if (!isAdmin && !isSuperAdmin && !isManager) return <PosPage onNavigate={setActiveTab} />;
+        if (!isAdmin && !isSuperAdmin) return <PosPage onNavigate={setActiveTab} />;
         return <PurchasesPage />;
       case 'dashboard':
-        if (!isSuperAdmin && !isManager) return <PosPage onNavigate={setActiveTab} />;
+        if (!isSuperAdmin) return <PosPage onNavigate={setActiveTab} />;
         return <DashboardPage onNavigate={setActiveTab} />;
       case 'ai':
         return <AiAssistantPage onNavigate={setActiveTab} />;
@@ -98,13 +99,13 @@ function AppContent() {
     }
   };
 
-
-
   return (
     <div className="app-container">
       <Navbar activeTab={activeTab} onSelectTab={setActiveTab} />
       <main className="main-content">
-        {renderActivePage()}
+        <ErrorBoundary>
+          {renderActivePage()}
+        </ErrorBoundary>
       </main>
     </div>
   );
@@ -112,12 +113,14 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <ToastProvider>
-        <AuthProvider>
-          <AppContent />
-        </AuthProvider>
-      </ToastProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <AppContent />
+          </AuthProvider>
+        </ToastProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

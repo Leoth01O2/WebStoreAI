@@ -87,6 +87,11 @@ export const authAPI = {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
+  register: (registerData) =>
+    request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(registerData),
+    }),
   getMe: () => request('/auth/me'),
   createUser: (userData) =>
     request('/auth/users', {

@@ -154,16 +154,16 @@ export const DashboardPage = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* KPI 3: Tổng đơn hoàn tất */}
+        {/* KPI 3: Doanh thu thực nhận */}
         <div className="kpi-card kpi-blue">
           <div className="kpi-icon-box">
             <ShoppingCart size={24} />
           </div>
           <div className="kpi-info">
-            <span className="kpi-label">Tổng Doanh Thu</span>
-            <span className="kpi-value">{formatVND(summary?.total_revenue)}</span>
+            <span className="kpi-label">Thực Thu Đã Xác Minh</span>
+            <span className="kpi-value">{formatVND(summary?.verified_payment_revenue)}</span>
             <span className="kpi-sub">
-              Tổng đơn: {summary?.total_orders || 0} ({summary?.completed_orders || 0} hoàn thành, {summary?.cancelled_orders || 0} hủy)
+              Tổng đơn: {summary?.total_orders || 0} ({summary?.completed_orders || 0} hoàn thành)
             </span>
           </div>
         </div>
@@ -181,6 +181,49 @@ export const DashboardPage = ({ onNavigate }) => {
             <span className="kpi-sub">
               Mặt hàng chạm ngưỡng cảnh báo
             </span>
+          </div>
+        </div>
+      </div>
+
+      {/* FINANCIAL DATA AUDIT & DISTINCTION BANNER */}
+      <div
+        className="retro-card"
+        style={{
+          borderLeft: '4px solid var(--amber-primary)',
+          background: 'var(--bg-card)',
+        }}
+      >
+        <div style={{ padding: '0.85rem 1.25rem', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '0.88rem', color: 'var(--amber-primary)', fontFamily: 'var(--font-mono)' }}>
+              <span>⚖️ ĐỐI SOÁT TÀI CHÍNH & DOANH THU THỰC TẾ</span>
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+              Bóc tách rõ ràng giữa tiền mặt/ngân hàng thực nhận và doanh số 317 đơn lịch sử chưa qua đối soát sao kê.
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+            <div style={{ padding: '0.45rem 0.85rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--green-light)', fontWeight: 600 }}>THỰC NHẬN ĐÃ ĐỐI SOÁT (PAID)</div>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--green-terminal)', fontFamily: 'var(--font-mono)' }}>
+                {formatVND(summary?.verified_payment_revenue)}
+              </div>
+            </div>
+
+            <div style={{ padding: '0.45rem 0.85rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>LỊCH SỬ CHƯA ĐỐI SOÁT (LEGACY)</div>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                {formatVND(summary?.legacy_unverified_revenue)}
+              </div>
+            </div>
+
+            <div style={{ padding: '0.45rem 0.85rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--amber-light)', fontWeight: 600 }}>TỔNG GHI NHẬN SỔ SÁCH</div>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--amber-primary)', fontFamily: 'var(--font-mono)' }}>
+                {formatVND(summary?.total_revenue)}
+              </div>
+            </div>
           </div>
         </div>
       </div>

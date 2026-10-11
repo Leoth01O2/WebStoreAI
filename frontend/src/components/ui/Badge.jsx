@@ -24,7 +24,6 @@ export const StockBadge = ({ stock, minAlert = 5, status = 'active' }) => {
 export const RoleBadge = ({ role }) => {
   switch (role) {
     case 'superadmin':
-    case 'manager':
       return <Badge variant="blue">Chủ Cửa Hàng (SuperAdmin)</Badge>;
     case 'admin':
       return <Badge variant="amber">Quản Trị Viên (Admin)</Badge>;

@@ -8,18 +8,16 @@ import {
   CreditCard,
   Banknote,
   QrCode,
-  UserCheck,
   UserPlus,
   RotateCcw,
-  Check,
   CheckCircle2,
   AlertCircle,
   ShieldCheck,
   Smartphone,
   X,
   Radio,
-  Eye,
   Info,
+  LogIn,
 } from 'lucide-react';
 import { productsAPI, customersAPI, ordersAPI } from '../services/api';
 import { StockBadge } from '../components/ui/Badge';
@@ -67,6 +65,7 @@ export const PosPage = ({ onNavigate }) => {
   // Completed Order for Receipt Modal
   const [completedOrder, setCompletedOrder] = useState(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
   // Quick Add Customer Modal
   const [showCustomerModal, setShowCustomerModal] = useState(false);
@@ -242,10 +241,7 @@ export const PosPage = ({ onNavigate }) => {
     }
 
     if (isGuest) {
-      addToast('Vui lòng đăng nhập tài khoản Khách hàng để hoàn tất đặt hàng!', 'warning');
-      if (onNavigate) {
-        onNavigate('login');
-      }
+      setShowGuestModal(true);
       return;
     }
 
@@ -354,9 +350,7 @@ export const PosPage = ({ onNavigate }) => {
 
   const formatVND = (val) => Number(val || 0).toLocaleString('vi-VN') + ' đ';
 
-  const transferMemo = useMemo(() => {
-    return `SF-POS${Date.now().toString().slice(-4)}`;
-  }, [finalAmount]);
+  const [transferMemo] = useState(() => `SF-POS${Math.floor(1000 + Math.random() * 9000)}`);
 
   return (
     <div className="pos-container">
@@ -1067,6 +1061,43 @@ export const PosPage = ({ onNavigate }) => {
           </div>
         </Modal>
       )}
+
+      {/* Guest Login Required Modal */}
+      <Modal
+        isOpen={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        title="YÊU CẦU ĐĂNG NHẬP / ĐĂNG KÝ"
+        maxWidth="460px"
+      >
+        <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+          <div style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>🔐</div>
+          <h4 style={{ color: 'var(--amber-primary)', marginBottom: '0.5rem' }}>
+            DÀNH CHO KHÁCH HÀNG THÀNH VIÊN
+          </h4>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+            Bạn đang xem sản phẩm với vai trò Khách vãng lai. Vui lòng đăng nhập hoặc tạo tài khoản thành viên để hoàn tất đơn hàng, lưu lại lịch sử mua sắm và theo dõi trạng thái giao hàng.
+          </p>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => setShowGuestModal(false)}
+            >
+              Tiếp tục xem sản phẩm
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setShowGuestModal(false);
+                if (onNavigate) onNavigate('login');
+              }}
+            >
+              <LogIn size={15} /> Đăng Nhập / Đăng Ký
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Printable Receipt Modal */}
       <ReceiptModal

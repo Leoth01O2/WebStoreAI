@@ -67,7 +67,7 @@
   --overlay-dim: rgba(10, 14, 19, 0.75);
 
   /* Typography Fonts */
-  --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Be Vietnam Pro', 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace;
 
   /* Mechanical Shadows & Radii */
@@ -1220,6 +1220,7 @@ body::before {
   line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 2.3em;
@@ -1925,6 +1926,25 @@ body::before {
 
   .nav-alert-btn span {
     display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .btn {
+    min-height: 40px;
+  }
+  .btn-sm {
+    min-height: 36px;
+  }
+  .form-control {
+    min-height: 42px;
+  }
+  .mobile-nav-item {
+    min-height: 46px;
+  }
+  .mobile-menu-toggle {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 

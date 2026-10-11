@@ -30,7 +30,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
   const { user } = useAuth();
   const { addToast } = useToast();
 
-  const isSuperAdmin = user?.role === 'superadmin' || user?.role === 'manager';
+  const isSuperAdmin = user?.role === 'superadmin';
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
 
   // Active sub-tab: 'recommend' (Tư vấn sản phẩm) | 'image-search' (Tìm kiếm bằng hình ảnh) | 'report' (Phân tích doanh thu AI)
@@ -39,23 +39,19 @@ export const AiAssistantPage = ({ onNavigate }) => {
   // --- AI PROVIDER STATE (PHASE R5) ---
   const [providersInfo, setProvidersInfo] = useState(null);
   const [selectedProvider, setSelectedProvider] = useState('auto'); // 'auto' | 'ollama' | 'gemini' | 'grounded'
-  const [loadingProviders, setLoadingProviders] = useState(false);
-
-  useEffect(() => {
-    fetchProviders();
-  }, []);
 
   const fetchProviders = async () => {
     try {
-      setLoadingProviders(true);
       const res = await aiAPI.getProviders();
       setProvidersInfo(res);
     } catch (err) {
       console.warn('Không thể tải danh sách AI providers:', err);
-    } finally {
-      setLoadingProviders(false);
     }
   };
+
+  useEffect(() => {
+    fetchProviders();
+  }, []);
 
   // --- TAB 1: PRODUCT RECOMMENDATION STATE ---
   const [recQuery, setRecQuery] = useState('');

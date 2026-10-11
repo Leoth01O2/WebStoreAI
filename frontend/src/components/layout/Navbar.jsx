@@ -13,18 +13,20 @@ import {
   Sparkles,
   Menu,
   X,
+  Cpu,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { RoleBadge } from '../ui/Badge';
-import { inventoryAPI, ordersAPI } from '../../services/api';
+import { inventoryAPI, ordersAPI, aiAPI } from '../../services/api';
 import { ThemeToggle } from './ThemeToggle';
 
 export const Navbar = ({ activeTab, onSelectTab }) => {
-  const { user, logout, isAdmin, isManager } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const [time, setTime] = useState(new Date().toLocaleTimeString('vi-VN'));
   const [lowStockCount, setLowStockCount] = useState(0);
   const [workflowCounts, setWorkflowCounts] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [aiEngineStatus, setAiEngineStatus] = useState(null);
 
   // Digital clock update
   useEffect(() => {
@@ -93,6 +95,28 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
     return () => clearInterval(interval);
   }, [user]);
 
+  // Check AI Engine Status for display
+  useEffect(() => {
+    let isMounted = true;
+    const checkAI = async () => {
+      try {
+        const info = await aiAPI.getProviders();
+        if (!isMounted) return;
+        if (info?.providers?.ollama?.available) {
+          setAiEngineStatus({ label: 'Ollama Local (GPU)', type: 'local', title: 'Ollama Qwen 2.5 1.5B (RTX 3050)' });
+        } else if (info?.providers?.gemini?.available) {
+          setAiEngineStatus({ label: 'Gemini Cloud', type: 'cloud', title: 'Google Gemini Cloud AI' });
+        } else {
+          setAiEngineStatus({ label: 'Safe Fallback', type: 'safe', title: 'Chế độ tra cứu trực tiếp SQLite' });
+        }
+      } catch {
+        if (isMounted) setAiEngineStatus({ label: 'Safe Fallback', type: 'safe', title: 'Chế độ tra cứu an toàn' });
+      }
+    };
+    checkAI();
+    return () => { isMounted = false; };
+  }, []);
+
   const getWorkflowBadge = () => {
     if (!user || !workflowCounts) return null;
     const role = user.role;
@@ -135,16 +159,16 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
   const navItems = [
     {
       id: 'pos',
-      label: !user ? 'Cửa Hàng (Storefront)' : (user?.role === 'customer' ? 'Mua Hàng (POS)' : 'POS Bán Hàng'),
+      label: !user ? 'Cửa Hàng' : (user?.role === 'customer' ? 'Mua Hàng' : 'POS Bán Hàng'),
       icon: ShoppingCart,
-      roles: ['superadmin', 'admin', 'manager', 'staff', 'customer', 'guest'],
+      roles: ['superadmin', 'admin', 'staff', 'customer', 'guest'],
     },
-    { id: 'products', label: 'Sản Phẩm & Kho', icon: Package, roles: ['superadmin', 'admin', 'manager'] },
-    { id: 'orders', label: user?.role === 'customer' ? 'Đơn Hàng Của Tôi' : 'Hóa Đơn', icon: FileText, roles: ['superadmin', 'admin', 'manager', 'staff', 'customer'] },
-    { id: 'customers', label: 'Khách Hàng', icon: Users, roles: ['superadmin', 'admin', 'manager'] },
-    { id: 'purchases', label: 'Nhập Hàng', icon: Truck, roles: ['superadmin', 'admin', 'manager'] },
-    { id: 'dashboard', label: 'Doanh Thu', icon: BarChart3, roles: ['superadmin', 'manager'] },
-    { id: 'ai', label: 'AI Assistant', icon: Sparkles, roles: ['superadmin', 'admin', 'manager', 'staff', 'customer', 'guest'] },
+    { id: 'products', label: 'Sản Phẩm & Kho', icon: Package, roles: ['superadmin', 'admin'] },
+    { id: 'orders', label: user?.role === 'customer' ? 'Đơn Hàng Của Tôi' : 'Hóa Đơn', icon: FileText, roles: ['superadmin', 'admin', 'staff', 'customer'] },
+    { id: 'customers', label: 'Khách Hàng', icon: Users, roles: ['superadmin', 'admin', 'staff'] },
+    { id: 'purchases', label: 'Nhập Hàng', icon: Truck, roles: ['superadmin', 'admin'] },
+    { id: 'dashboard', label: 'Doanh Thu', icon: BarChart3, roles: ['superadmin'] },
+    { id: 'ai', label: 'AI Assistant', icon: Sparkles, roles: ['superadmin', 'admin', 'staff', 'customer', 'guest'] },
   ];
 
 
@@ -227,6 +251,28 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
               <AlertTriangle size={14} />
               <span>CẢNH BÁO ({lowStockCount})</span>
             </button>
+          )}
+
+          {aiEngineStatus && (
+            <div
+              onClick={() => handleSelectTab('ai')}
+              className={`badge ${aiEngineStatus.type === 'local' ? 'badge-green' : aiEngineStatus.type === 'cloud' ? 'badge-blue' : 'badge-amber'}`}
+              style={{
+                cursor: 'pointer',
+                fontSize: '0.68rem',
+                padding: '0.2rem 0.5rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontFamily: 'var(--font-mono)',
+                borderRadius: '999px',
+                border: '1px solid var(--border-default)',
+              }}
+              title={aiEngineStatus.title}
+            >
+              <Cpu size={12} />
+              <span>{aiEngineStatus.label}</span>
+            </div>
           )}
 
           <ThemeToggle />
@@ -327,6 +373,31 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
               </span>
               <ThemeToggle showLabel />
             </div>
+
+            {aiEngineStatus && (
+              <div
+                onClick={() => handleSelectTab('ai')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.65rem 0.85rem',
+                  marginBottom: '0.75rem',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-xs)',
+                  cursor: 'pointer',
+                }}
+                title={aiEngineStatus.title}
+              >
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Cpu size={14} color="var(--green-terminal)" /> AI ENGINE
+                </span>
+                <span className={`badge ${aiEngineStatus.type === 'local' ? 'badge-green' : aiEngineStatus.type === 'cloud' ? 'badge-blue' : 'badge-amber'}`} style={{ fontSize: '0.72rem' }}>
+                  {aiEngineStatus.label}
+                </span>
+              </div>
+            )}
 
             {user && lowStockCount > 0 && (
               <button

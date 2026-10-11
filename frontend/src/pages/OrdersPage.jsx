@@ -16,7 +16,6 @@ import {
   DollarSign,
   CreditCard,
   UserCheck,
-  AlertTriangle,
 } from 'lucide-react';
 import { ordersAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -195,10 +194,10 @@ const OrderLifecycleStepper = ({ status, rejectionReason }) => {
 };
 
 export const OrdersPage = () => {
-  const { user, isAdmin, isSuperAdmin, isManager } = useAuth();
+  const { user, isAdmin, isSuperAdmin } = useAuth();
   const { addToast } = useToast();
   const isCustomer = user?.role === 'customer';
-  const canCancel = isAdmin || isSuperAdmin || isManager;
+  const canCancel = isAdmin || isSuperAdmin;
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);

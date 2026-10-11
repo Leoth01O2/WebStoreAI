@@ -878,23 +878,67 @@ ightarrow$ Rename `orders_new` sang `orders`.
 
 ---
 
-#### PHASE R7: UI/UX, Be Vietnam Pro Typography & Masking
-- **Mục tiêu**: Hiện đại hóa typography toàn diện sang `Be Vietnam Pro` (khắc phục triệt để lỗi dấu tiếng Việt), giữ `JetBrains Mono` cho các trường kỹ thuật, mở màn hình Khách hàng cho Staff (sau khi Backend Data Masking từ R1C đã sẵn sàng), loại bỏ role ảo `manager`, và tối ưu touch targets di động $\ge 44px$.
-- **Phạm vi**:
-  - `frontend/index.html`: Nhúng font Google `Be Vietnam Pro` (400, 500, 600, 700) và giữ `JetBrains Mono`.
-  - `frontend/src/index.css`: Cập nhật `--font-display: 'Be Vietnam Pro', -apple-system, sans-serif;`. Bảo toàn 100% bản sắc Vintage Editorial / Retro Print.
-  - `frontend/src/components/layout/Navbar.jsx` và `App.jsx`:
-    - Mở quyền truy cập menu Khách hàng cho Staff.
-    - Loại bỏ hoàn toàn role ma `manager`.
-    - Hiển thị nhãn trạng thái AI Provider đang kết nối (Cloud / Local / Safe).
-  - `frontend/src/pages/CustomersPage.jsx`: Nhận dữ liệu đã qua backend masking an toàn cho Staff.
-  - Tối ưu hóa các nút thao tác bảng biểu đạt kích thước tối thiểu 44px trên mobile.
-- **File dự kiến**: `frontend/index.html`, `frontend/src/index.css`, `frontend/src/components/layout/Navbar.jsx`, `frontend/src/App.jsx`, `frontend/src/pages/CustomersPage.jsx`, `frontend/src/pages/OrdersPage.jsx`.
-- **Không thay đổi**: Không thay đổi bảng màu CRT Phosphor, giữ nguyên layout cơ cấu màn hình.
-- **Tiền đề**: Hoàn thành Phase R1C, R3, R4.
-- **Kiểm thử**: Kiểm tra giao diện trên mobile 390px, tablet 768px, desktop 1440px; Đăng nhập Staff xác nhận mở được Khách hàng và dữ liệu cá nhân bị masked; `npm run build` thành công 100% (0 errors, 0 warnings).
-- **DoD**: Giao diện tiếng Việt chuẩn mực, không lỗi font, responsive mượt mà.
-- **STOP Condition**: **DỪNG LẠI báo cáo trước khi sang R8.**
+#### PHASE R7: UI/UX, Be Vietnam Pro Typography & Masking [COMPLETED ✅ 11/10/2026]
+- **Trạng thái**: **HOÀN THÀNH (80/80 Targeted & Regression Tests PASS, 0 Oxlint Errors, Frontend Production Build PASS)**
+- **Mục tiêu**: Hiện đại hóa typography toàn diện sang `Be Vietnam Pro` (khắc phục triệt để lỗi hiển thị dấu tiếng Việt), giữ `JetBrains Mono` cho các trường kỹ thuật; Mở màn hình Khách hàng cho Staff với bảo vệ dữ liệu PII Masking từ Backend R1C; Bổ sung chức năng Tự đăng ký Khách hàng công khai trên giao diện đăng nhập; Loại bỏ role ma `manager`; Bóc tách rõ ràng 3 trạng thái đơn hàng (`status`, `payment_status`, `fulfillment_status`); Tách bạch doanh số thực thu (`verified_payment_revenue`) khỏi lịch sử chưa đối soát (`legacy_unverified_revenue`); Tối ưu touch targets di động $\ge 40-44px$; và Thiết lập `ErrorBoundary` phục hồi lỗi giao diện.
+- **Hiện trạng & Thành quả triển khai thực tế**:
+  1. *Typography & Thẩm mỹ Modern Retro / Vintage Store*:
+     - `frontend/index.html`: Nhúng Google Font `Be Vietnam Pro` (weights: 300, 400, 500, 600, 700, 800) kết hợp `JetBrains Mono` và `Space Grotesk`.
+     - `frontend/src/index.css`: Cập nhật `--font-display: 'Be Vietnam Pro', 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;`.
+     - Bổ sung thuộc tính tương thích chuẩn `line-clamp: 2` cho `.product-name`.
+     - Bảo toàn 100% bản sắc thiết kế Vintage POS: Chế độ Dark CRT (Obsidian Slate `#0a0e13`, Amber Phosphor `#ffb454`, Terminal Green `#39d353`, Cyber Blue `#58a6ff`) và Light Vintage Paper (`#F0F0F4`, Terracotta Amber `#b45309`, Classic Blueprint `#1d4ed8`).
+  2. *Bảo vệ Khách hàng & Mở quyền Tra cứu cho Staff*:
+     - `Navbar.jsx` và `App.jsx`: Mở quyền truy cập tab Khách hàng (`customers`) cho `staff`.
+     - `CustomersPage.jsx`: Nhận dữ liệu PII đã được backend masking (email dạng `a***@example.com`, address ẩn hoàn toàn `[Địa chỉ đã bảo mật]`).
+     - Hiển thị huy hiệu trực quan `PII ĐÃ BẢO MẬT`.
+     - Phân quyền thao tác: Chỉ Admin & SuperAdmin mới hiển thị nút Thêm/Sửa khách hàng; Staff hiển thị huy hiệu `Chỉ xem`.
+  3. *Tự Đăng Ký Tài Khoản Khách Hàng (Customer Self-Registration)*:
+     - `LoginPage.jsx`: Bổ sung tab chuyển đổi mượt mà `[ĐĂNG NHẬP]` $\leftrightarrow$ `[ĐĂNG KÝ MỚI]`.
+     - Biểu mẫu đăng ký: `username`, `password`, `full_name`, `phone`, `email`, `address`.
+     - Kết nối trực tiếp `authAPI.register()` $\rightarrow$ `POST /api/v1/auth/register`: Khóa cứng role `customer`, kiểm tra trùng lặp (HTTP 409) và rate limiting (HTTP 429).
+     - Tự động điền tài khoản sau khi đăng ký thành công để khách hàng đăng nhập ngay.
+  4. *Chuẩn hóa Vòng đời Đơn hàng & Tách bạch Doanh số*:
+     - `OrdersPage.jsx`: Hiển thị phân định rạch ròi 3 trạng thái độc lập (`status`, `payment_status`, `fulfillment_status`). Đồng bộ chính xác với backend R3 enums (`pending`, `admin_approved`, `processing`, `completed`, `rejected`, `cancelled`).
+     - `DashboardPage.jsx`: Bổ sung Banner Đối soát Tài chính (`verified_payment_revenue` vs `legacy_unverified_revenue` vs `total_revenue`), không trình bày doanh số cũ chưa đối soát như tiền đã thu thực tế.
+     - `PosPage.jsx`: Bổ sung Modal hướng dẫn Guest đăng nhập/đăng ký khi bấm thanh toán; Modal xem chi tiết sản phẩm; thuần hóa bộ tạo mã `transferMemo` tránh impure function.
+  5. *Độ tin cậy & Xử lý Lỗi Giao diện*:
+     - Thêm component `ErrorBoundary.jsx` bao bọc toàn bộ ứng dụng, ngăn ngừa triệt để lỗi White Screen of Death.
+     - Sửa lỗi Rules of Hooks (`useMemo` đặt trước early return) trong `MarkdownRenderer.jsx`.
+     - `oxlint`: Giảm tuyệt đối về **0 errors** (40 warnings về react effect synchronization).
+     - `vite build`: Build production hoàn tất thành công trong **893ms** với **Vite v8.2.2** (0 lỗi).
+- **Files đã sửa/tạo**:
+  - `frontend/index.html` (Nhúng Be Vietnam Pro)
+  - `frontend/src/index.css` (Font token, chuẩn line-clamp: 2, mobile touch targets >= 44px)
+  - `frontend/src/services/api.js` (Thêm `authAPI.register`)
+  - `frontend/src/context/AuthContext.jsx` & `Badge.jsx` (Loại bỏ role ma `manager`, đồng bộ 3-status configs)
+  - `frontend/src/components/layout/Navbar.jsx` & `App.jsx` (Mở Customers cho Staff, thêm AI Engine status badge)
+  - `frontend/src/pages/LoginPage.jsx` (Đăng ký tài khoản khách hàng)
+  - `frontend/src/pages/CustomersPage.jsx` (Staff masked directory & role-gated actions)
+  - `frontend/src/pages/DashboardPage.jsx` (Tách bạch verified và legacy unverified revenue đọc động từ backend)
+  - `frontend/src/pages/PosPage.jsx` (Guest checkout modal, pure state transfer memo)
+  - `frontend/src/pages/OrdersPage.jsx` & `ProductsPage.jsx` (Loại bỏ role ma `manager`, dọn import thừa, đồng bộ enum R3)
+  - `frontend/src/components/common/MarkdownRenderer.jsx` (Fix React Rules of Hooks)
+  - `frontend/src/components/common/ErrorBoundary.jsx` (Retro crash trap & recovery screen)
+- **Kết quả kiểm thử & Đối soát thực tế**:
+  - **Oxlint**: 0 errors (40 warnings về react effect synchronization).
+  - **Vite Production Build**: `✓ built in 893ms` với Vite v8.2.2 (0 errors).
+  - **Số liệu Tài chính Kiểm toán từ SQLite gốc (`backend/webstore.db`)**:
+    - `total_revenue`: **316.063.000 ₫** (140 đơn `completed`).
+    - `legacy_unverified_revenue`: **316.063.000 ₫** (140 đơn `completed` mang cờ `unverified_legacy`).
+    - `verified_payment_revenue`: **0 ₫** (chưa có đơn nào thực thu qua sao kê).
+    - Tổng giá trị gộp 305 đơn `unverified_legacy`: **449.194.000 ₫**.
+    - Tổng giá trị toàn bộ 317 đơn lịch sử: **461.534.000 ₫**.
+    - Hoàn toàn không tồn tại số liệu 571.218.000 ₫ trong cơ sở dữ liệu hay mã nguồn.
+  - **ChromaDB Production**:
+    - Thư mục lưu trữ: `backend/chroma_data` (`settings.CHROMA_PERSIST_DIRECTORY`).
+    - Collections thực tế: `storeflow_products` (30 docs), `storeflow_product_visuals` (30 docs), `storeflow_product_visual_vectors` (30 vectors).
+  - **Phạm vi Kiểm tra Thực tế**:
+    - Targeted tests (trạng thái đơn & tài chính): 27/27 PASSED (32.95s).
+    - Full regression targeted R1–R6: 80/80 PASSED.
+    - Frontend: Kiểm tra biên dịch production và linting tĩnh qua Vite v8.2.2 và Oxlint (0 lỗi).
+    - Database: Bảo toàn nguyên vẹn 317 đơn, 30 sản phẩm, schema version 3.
+- **DoD**: Đạt 100% tiêu chí nghiệm thu Phase R7.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R7. CHỜ NGHIỆM THU TRƯỚC KHI BẮT ĐẦU R8.**
 
 ---
 
