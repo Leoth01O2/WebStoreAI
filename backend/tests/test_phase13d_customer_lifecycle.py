@@ -16,7 +16,7 @@ def customer_a_headers():
 
 @pytest.fixture
 def customer_b_headers():
-    return {"Authorization": f"Bearer {get_token('customer2', 'Customer2@123')}"}
+    return {"Authorization": f"Bearer {get_token('customer2', 'Customer@123')}"}
 
 @pytest.fixture
 def admin_headers():

@@ -26,6 +26,7 @@ import chromadb
 from app.models.schema import init_db
 from seed_data import seed_database
 from app.services.rag_service import rag_service
+from app.services.visual_index_service import visual_index_service
 
 def cleanup_test_files():
     for ext in ["", "-wal", "-shm"]:
@@ -61,7 +62,7 @@ def isolate_test_database():
     init_db()
     seed_database()
 
-    # Isolate ChromaDB collection for the test session
+    # Isolate ChromaDB collections for the test session
     rag_service.persist_dir = Path(TEST_CHROMA_PATH)
     rag_service.persist_dir.mkdir(parents=True, exist_ok=True)
     rag_service.client = chromadb.PersistentClient(path=TEST_CHROMA_PATH)
@@ -70,6 +71,19 @@ def isolate_test_database():
         metadata={"hnsw:space": "cosine"}
     )
     rag_service.sync_all_products()
+
+    visual_index_service.persist_dir = Path(TEST_CHROMA_PATH)
+    visual_index_service.persist_dir.mkdir(parents=True, exist_ok=True)
+    visual_index_service.client = chromadb.PersistentClient(path=TEST_CHROMA_PATH)
+    visual_index_service.collection = visual_index_service.client.get_or_create_collection(
+        name="storeflow_product_visuals",
+        metadata={"hnsw:space": "cosine"}
+    )
+    visual_index_service.vector_collection = visual_index_service.client.get_or_create_collection(
+        name="storeflow_product_visual_vectors",
+        metadata={"hnsw:space": "cosine"}
+    )
+    visual_index_service.sync_all_visuals()
 
     yield
 

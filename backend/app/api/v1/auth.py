@@ -186,6 +186,11 @@ def register_customer(request: Request, reg_data: CustomerRegisterRequest):
             (clean_username, pw_hash, clean_full_name)
         )
         new_user_id = cursor.lastrowid
+        if new_user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Không thể lấy ID người dùng sau khi tạo tài khoản."
+            )
 
         # Tạo mã khách hàng không trùng lặp
         customer_code = f"CUS-U{new_user_id:04d}"
@@ -200,6 +205,11 @@ def register_customer(request: Request, reg_data: CustomerRegisterRequest):
             (new_user_id, customer_code, clean_full_name, clean_phone, clean_email, clean_address)
         )
         new_customer_id = cursor.lastrowid
+        if new_customer_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Không thể lấy ID khách hàng sau khi tạo hồ sơ."
+            )
 
         cursor.execute("SELECT created_at FROM users WHERE id = ?", (new_user_id,))
         created_at_row = cursor.fetchone()
@@ -271,7 +281,7 @@ def create_user_by_admin(user_in: UserCreate, current_user: dict = Depends(get_c
             detail="Admin không có quyền tạo tài khoản Admin hoặc SuperAdmin"
         )
 
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM users WHERE username = ?", (user_in.username,))
         if cursor.fetchone():
@@ -286,10 +296,14 @@ def create_user_by_admin(user_in: UserCreate, current_user: dict = Depends(get_c
             (user_in.username, hashed, user_in.full_name, role_val)
         )
         new_id = cursor.lastrowid
-        conn.commit()
+        if new_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Không thể lấy ID người dùng sau khi tạo tài khoản."
+            )
 
     return UserResponse(
-        id=int(new_id or 0),
+        id=new_id,
         username=user_in.username,
         full_name=user_in.full_name,
         role=role_val,

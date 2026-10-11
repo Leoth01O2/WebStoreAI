@@ -230,7 +230,7 @@ def get_products(
     max_price: Optional[float] = Query(None, description="Giá bán tối đa"),
     low_stock_only: bool = Query(False, description="Chỉ lấy sản phẩm sắp hết hàng"),
     in_stock_only: bool = Query(False, description="Chỉ lấy sản phẩm còn hàng trong kho"),
-    current_user: Optional[dict] = Depends(get_current_user_optional)
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Danh sách sản phẩm có tìm kiếm, lọc đa tiêu chí:
@@ -305,7 +305,7 @@ def get_products(
 @router.get("/products/{product_id}", response_model=Union[ProductAdminResponse, ProductPublicResponse])
 def get_product_detail(
     product_id: int,
-    current_user: Optional[dict] = Depends(get_current_user_optional)
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Xem chi tiết thông tin một sản phẩm:
@@ -441,10 +441,15 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
     try:
         updated_keys = set(product_in.model_dump(exclude_unset=True).keys())
         semantic_keys = {"name", "sku", "category_id", "description", "status"}
-        # If semantic fields changed, full vector document re-index is necessary
-        # If only prices or stock changed, SQLite Truth Guard guarantees real-time accuracy
+        visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status"}
+
         rag_service.upsert_single_product(product_id)
-        visual_index_service.sync_single_product_visual(product_id)
+
+        # Requirement R6: Khi chỉ sửa giá/tồn kho, không tính lại visual embedding không cần thiết
+        if updated_keys & visual_sensitive_keys:
+            visual_index_service.sync_single_product_visual(product_id)
+        else:
+            logger.info(f"Skipping visual re-embedding for product {product_id} as only price/stock changed.")
     except Exception as e:
         logger.error(f"ChromaDB vector sync failed after updating product ID {product_id}: {e}. Flagging for auto-healing.")
         rag_service.mark_sync_needed()

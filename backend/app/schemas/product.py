@@ -55,7 +55,6 @@ class ProductPublicResponse(BaseModel):
     category_name: Optional[str] = None
     selling_price: float
     stock_quantity: int
-    min_stock_alert: Optional[int] = 5
     in_stock: bool = True
     unit: str = "cái"
     status: str = "active"

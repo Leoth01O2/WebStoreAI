@@ -145,5 +145,6 @@ class ImageSearchResponse(BaseModel):
     non_product_reason: Optional[str] = Field(None, description="Lý do xác định ảnh không phải sản phẩm")
     is_quota_exceeded: bool = Field(False, description="True khi gặp lỗi 429 Quota Exceeded từ AI Provider")
     error_message: Optional[str] = Field(None, description="Thông báo lỗi chi tiết khi AI gặp sự cố")
+    provider_used: Optional[str] = Field("local", description="AI Provider thực tế được sử dụng: 'local' hoặc 'gemini'")
 
 

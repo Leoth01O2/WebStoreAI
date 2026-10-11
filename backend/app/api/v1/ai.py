@@ -17,6 +17,7 @@ from app.schemas.ai import (
 from app.services.ai_service import ai_service
 from app.services.rag_service import rag_service
 from app.services.image_search_service import image_search_service
+from app.services.visual_index_service import visual_index_service
 from app.services.ai_providers.manager import ai_provider_manager
 
 router = APIRouter(prefix="/ai", tags=["AI & Hybrid RAG Assistant"])
@@ -190,6 +191,27 @@ def sync_vector_index(
 
 
 @router.post(
+    "/sync-visuals",
+    summary="Đồng bộ chỉ mục hình ảnh sản phẩm vào ChromaDB (Admin/SuperAdmin)"
+)
+def sync_visual_index(
+    reconcile_only: bool = Query(True, description="Chỉ đối soát và bổ sung sản phẩm thiếu metadata"),
+    current_user: dict = Depends(require_roles("admin", "superadmin"))
+):
+    """
+    Đồng bộ dữ liệu hình ảnh sản phẩm từ SQLite vào ChromaDB visual collections (Phase R6).
+    """
+    reconciled = visual_index_service.reconcile_missing_visual_metadata()
+    count = visual_index_service.sync_all_visuals()
+    return {
+        "status": "success",
+        "message": f"Đã đối soát và đồng bộ chỉ mục hình ảnh: bổ sung {reconciled} metadata mới, tổng {count} sản phẩm đã được lập chỉ mục.",
+        "total_indexed": count,
+        "reconciled_metadata_count": reconciled
+    }
+
+
+@router.post(
     "/image-search",
     response_model=ImageSearchResponse,
     summary="Tìm kiếm sản phẩm bằng hình ảnh (Công khai cho Guest, Customer, Staff, Admin, SuperAdmin)"
@@ -197,15 +219,16 @@ def sync_vector_index(
 async def image_search(
     file: UploadFile = File(..., description="File ảnh sản phẩm cần tìm kiếm (JPG, PNG, WebP <= 5MB)"),
     limit: int = Query(5, ge=1, le=20, description="Số lượng sản phẩm tối đa trả về"),
+    provider: str = Query("local", description="Chế độ xử lý: 'local' (mặc định, Offline CLIP) hoặc 'gemini'"),
     current_user: Optional[dict] = Depends(enforce_ai_rate_limit)
 ):
     """
     Tìm kiếm sản phẩm thực tế trong kho bằng hình ảnh tải lên.
-    Luồng xử lý (Phase 12D):
-    1. Validation: Kiểm tra mime-type, dung lượng (<= 5MB) và tính toàn vẹn file ảnh.
-    2. Feature Extraction: Trích xuất đặc trưng hình ảnh (chủng loại, màu sắc, kiểu dáng, mô tả).
-    3. Candidate Retrieval: Truy vấn Top-K từ Visual Index có sẵn (Zero bulk Vision API call).
-    4. SQLite Truth Guard: Xác minh giá bán thực tế, số lượng tồn kho và trạng thái trực tiếp từ SQLite.
+    Luồng xử lý (Phase R6):
+    1. Validation: Kiểm tra mime-type, dung lượng (<= 5MB), PIL binary integrity và giới hạn pixel.
+    2. Local Feature Extraction: Trích xuất 512-dim visual embedding và thuộc tính trực quan bằng Local CLIP 100% offline.
+    3. Candidate Retrieval: Truy vấn vector cosine similarity từ ChromaDB storeflow_product_visual_vectors.
+    4. SQLite Truth Guard: Xác minh giá bán thực tế, tồn kho và trạng thái trực tiếp từ SQLite (loại trừ inactive, 0% leak cost_price).
     5. Relationship Classification: Phân loại 4 mức độ (Match, Similar, Related, None) có lý do đối chiếu.
     """
     contents = await file.read()
@@ -216,6 +239,7 @@ async def image_search(
         filename=file.filename or "uploaded_image.jpg",
         content_type=file.content_type,
         limit=limit,
-        user_id=user_id
+        user_id=user_id,
+        provider=provider
     )
 

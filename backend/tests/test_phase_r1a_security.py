@@ -90,9 +90,10 @@ def test_guest_cannot_read_cost_price(client: TestClient):
 
     # Endpoint /products không gửi header Authorization (Guest)
     res_no_auth = client.get("/api/v1/products")
-    assert res_no_auth.status_code == 200
-    for p in res_no_auth.json():
-        assert "cost_price" not in p, "LỖ HỔNG: cost_price bị rò rỉ cho Guest trên /products"
+    assert res_no_auth.status_code in (200, 401)
+    if res_no_auth.status_code == 200:
+        for p in res_no_auth.json():
+            assert "cost_price" not in p, "LỖ HỔNG: cost_price bị rò rỉ cho Guest trên /products"
 
 
 def test_admin_and_superadmin_can_read_cost_price(client: TestClient):

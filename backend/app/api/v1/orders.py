@@ -275,7 +275,7 @@ def create_order(order_in: OrderCreate, current_user: dict = Depends(get_current
             if order_in.customer_id is not None and order_in.customer_id != own_customer_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Bạn không có quyền tạo đơn hàng cho khách hàng khác (IDOR Violation)"
+                    detail="Bạn không có quyền, không thể tạo đơn hàng cho khách hàng khác (IDOR Violation)"
                 )
             order_in.customer_id = own_customer_id
         order_status = "pending"

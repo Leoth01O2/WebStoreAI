@@ -360,11 +360,11 @@ export const aiAPI = {
     request('/ai/sync-index', {
       method: 'POST',
     }),
-  imageSearch: async (file, limit = 5) => {
+  imageSearch: async (file, limit = 5, provider = 'local') => {
     const token = getAuthToken();
     const formData = new FormData();
     formData.append('file', file);
-    const response = await fetch(`${API_BASE}/ai/image-search?limit=${limit}`, {
+    const response = await fetch(`${API_BASE}/ai/image-search?limit=${limit}&provider=${provider}`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

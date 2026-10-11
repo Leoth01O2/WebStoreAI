@@ -63,13 +63,14 @@ export const AiAssistantPage = ({ onNavigate }) => {
   const [recLoading, setRecLoading] = useState(false);
   const [recResult, setRecResult] = useState(null);
 
-  // --- TAB 2: IMAGE SEARCH STATE (PHASE 12E) ---
+  // --- TAB 2: IMAGE SEARCH STATE (PHASE R6) ---
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [imgSearchLoading, setImgSearchLoading] = useState(false);
   const [imgSearchResult, setImgSearchResult] = useState(null);
   const [selectedProductDetail, setSelectedProductDetail] = useState(null);
+  const [visionProvider, setVisionProvider] = useState('local');
   const fileInputRef = useRef(null);
 
   const handleFileChange = (file) => {
@@ -118,7 +119,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleImageSearchSubmit = async (fileToSubmit = selectedFile) => {
+  const handleImageSearchSubmit = async (fileToSubmit = selectedFile, chosenProvider = visionProvider) => {
     const file = fileToSubmit || selectedFile;
     if (!file) {
       addToast('Vui lòng chọn hoặc kéo thả một file ảnh để tìm kiếm', 'warning');
@@ -126,7 +127,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
     }
     try {
       setImgSearchLoading(true);
-      const data = await aiAPI.imageSearch(file, 6);
+      const data = await aiAPI.imageSearch(file, 6, chosenProvider);
 
       // Quota Exceeded Guard: nếu hết token/quota Gemini API
       if (data.is_quota_exceeded) {
@@ -934,9 +935,31 @@ export const AiAssistantPage = ({ onNavigate }) => {
                 <Camera size={18} />
                 Tìm kiếm Sản phẩm Bằng Hình ảnh (AI Visual Match Engine)
               </h2>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Tải lên ảnh mẫu hoặc ảnh chụp sản phẩm → Trích xuất đặc trưng thị giác → Tra cứu tương đồng ngữ nghĩa ChromaDB → Đối chiếu tồn kho & giá bán thực tế từ SQLite WAL.
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.4rem' }}>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Tải lên ảnh mẫu hoặc ảnh chụp sản phẩm → Trích xuất đặc trưng thị giác → Tra cứu tương đồng ChromaDB → Đối chiếu tồn kho & giá bán thực tế từ SQLite.
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(0,0,0,0.25)', padding: '4px 10px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Chế độ AI:</span>
+                  <select
+                    value={visionProvider}
+                    onChange={(e) => setVisionProvider(e.target.value)}
+                    style={{
+                      background: 'var(--panel-bg)',
+                      color: visionProvider === 'local' ? 'var(--accent-cyan)' : 'var(--accent-amber)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '3px',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      padding: '2px 8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="local">🖥️ Local Vision (CLIP Offline, 0% Cloud)</option>
+                    <option value="gemini">☁️ Gemini Cloud Vision (Google AI)</option>
+                  </select>
+                </div>
+              </div>
             </div>
 
             <div className="ai-image-search-split">
@@ -1237,8 +1260,12 @@ export const AiAssistantPage = ({ onNavigate }) => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'var(--font-mono)' }}>
                           <Terminal size={16} /> ĐẶC TRƯNG THỊ GIÁC TRÍCH XUẤT (AI VISUAL FEATURES)
                         </div>
-                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                          Thời gian xử lý: <span style={{ color: 'var(--accent-cyan)' }}>{imgSearchResult.execution_time_ms}ms</span> | Ứng viên đối chiếu: <span style={{ color: 'var(--accent-amber)' }}>{imgSearchResult.total_candidates}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: '3px', background: imgSearchResult.provider_used === 'local' ? 'rgba(0, 229, 255, 0.15)' : 'rgba(255, 180, 84, 0.15)', border: `1px solid ${imgSearchResult.provider_used === 'local' ? 'var(--accent-cyan)' : 'var(--accent-amber)'}`, color: imgSearchResult.provider_used === 'local' ? 'var(--accent-cyan)' : 'var(--accent-amber)', fontWeight: 600 }}>
+                            {imgSearchResult.provider_used === 'local' ? '🖥️ Local Vision (CLIP Offline)' : '☁️ Gemini Cloud Vision'}
+                          </span>
+                          <span>Xử lý: <strong style={{ color: 'var(--accent-cyan)' }}>{imgSearchResult.execution_time_ms}ms</strong></span>
+                          <span>Ứng viên: <strong style={{ color: 'var(--accent-amber)' }}>{imgSearchResult.total_candidates_found ?? imgSearchResult.total_candidates ?? 0}</strong></span>
                         </div>
                       </div>
 
