@@ -53,3 +53,6 @@ frontend/dist-ssr/
 Thumbs.db
 .vscode/
 .idea/
+
+/backend/scratch/
+/scratch/
