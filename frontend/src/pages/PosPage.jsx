@@ -163,6 +163,12 @@ export const PosPage = ({ onNavigate }) => {
       return;
     }
 
+    const existingItem = cart.find((item) => item.product.id === product.id);
+    if (existingItem && existingItem.quantity >= product.stock_quantity) {
+      addToast(`Không thể thêm. Tồn kho chỉ còn ${product.stock_quantity} sản phẩm!`, 'warning');
+      return;
+    }
+
     // Trigger visual click feedback
     setRecentlyAddedId(product.id);
     setTimeout(() => setRecentlyAddedId(null), 300);
@@ -171,7 +177,6 @@ export const PosPage = ({ onNavigate }) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
         if (existing.quantity >= product.stock_quantity) {
-          addToast(`Không thể thêm. Tồn kho chỉ còn ${product.stock_quantity} sản phẩm!`, 'warning');
           return prev;
         }
         return prev.map((item) =>
@@ -184,6 +189,14 @@ export const PosPage = ({ onNavigate }) => {
 
   // Update quantity in cart
   const updateQuantity = (productId, delta) => {
+    const existingItem = cart.find((item) => item.product.id === productId);
+    if (!existingItem) return;
+
+    if (delta > 0 && existingItem.quantity + delta > existingItem.product.stock_quantity) {
+      addToast(`Tồn kho chỉ còn ${existingItem.product.stock_quantity} sản phẩm!`, 'warning');
+      return;
+    }
+
     setCart((prev) => {
       return prev
         .map((item) => {
@@ -191,7 +204,6 @@ export const PosPage = ({ onNavigate }) => {
             const newQty = item.quantity + delta;
             if (newQty <= 0) return null;
             if (newQty > item.product.stock_quantity) {
-              addToast(`Tồn kho chỉ còn ${item.product.stock_quantity} sản phẩm!`, 'warning');
               return item;
             }
             return { ...item, quantity: newQty };
@@ -569,29 +581,30 @@ export const PosPage = ({ onNavigate }) => {
           ) : (
             cart.map((item) => (
               <div key={item.product.id} className="cart-item-row">
-                {/* Cart Item Thumbnail */}
-                <div style={{ width: '42px', height: '42px', borderRadius: '4px', overflow: 'hidden', flexShrink: 0 }}>
-                  <ProductImage
-                    src={item.product.image_url}
-                    alt={item.product.name}
-                    style={{ width: '100%', height: '100%' }}
-                  />
-                </div>
-
-                {/* Cart Item Info */}
-                <div style={{ flex: 1, minWidth: 0, paddingRight: '4px' }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={item.product.name}>
-                    {item.product.name}
+                {/* Cart Item Thumbnail & Info */}
+                <div className="cart-item-info">
+                  <div className="cart-item-thumb">
+                    <ProductImage
+                      src={item.product.image_url}
+                      alt={item.product.name}
+                      style={{ width: '100%', height: '100%' }}
+                    />
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    {item.product.sku} | {formatVND(item.product.selling_price)}
+                  <div className="cart-item-details">
+                    <div className="cart-item-name" title={item.product.name}>
+                      {item.product.name}
+                    </div>
+                    <div className="cart-item-meta">
+                      {item.product.sku} | {formatVND(item.product.selling_price)}
+                    </div>
                   </div>
                 </div>
 
                 {/* Quantity Controls */}
                 <div className="cart-qty-control">
                   <button
-                    className="cart-qty-btn"
+                    type="button"
+                    className="cart-qty-btn cart-qty-minus"
                     onClick={() => updateQuantity(item.product.id, -1)}
                     aria-label="Giảm 1"
                   >
@@ -599,7 +612,8 @@ export const PosPage = ({ onNavigate }) => {
                   </button>
                   <span className="cart-qty-val">{item.quantity}</span>
                   <button
-                    className="cart-qty-btn"
+                    type="button"
+                    className="cart-qty-btn cart-qty-plus"
                     onClick={() => updateQuantity(item.product.id, 1)}
                     aria-label="Tăng 1"
                   >
@@ -608,16 +622,17 @@ export const PosPage = ({ onNavigate }) => {
                 </div>
 
                 {/* Subtotal */}
-                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.85rem', color: 'var(--green-terminal)', textAlign: 'right', minWidth: '70px' }}>
+                <div className="cart-item-subtotal">
                   {formatVND(item.product.selling_price * item.quantity)}
                 </div>
 
                 {/* Remove Button */}
                 <button
+                  type="button"
                   onClick={() => removeFromCart(item.product.id)}
-                  className="btn btn-outline btn-icon btn-sm"
-                  style={{ width: '28px', height: '28px', border: 'none', color: 'var(--red-light)' }}
+                  className="cart-item-remove-btn"
                   title="Xóa khỏi giỏ"
+                  aria-label="Xóa khỏi giỏ"
                 >
                   <Trash2 size={13} />
                 </button>
