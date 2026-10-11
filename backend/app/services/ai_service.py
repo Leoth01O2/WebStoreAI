@@ -38,6 +38,10 @@ class AIService:
 
     def _call_gemini(self, prompt: str, system_instruction: Optional[str] = None) -> str:
         """Helper to invoke Gemini with system instruction, standard config, and output sanitization."""
+        # Offline / Safe Mock Check
+        if not settings.GEMINI_API_KEY or settings.GEMINI_API_KEY.startswith("SAFE_MOCK") or settings.GEMINI_API_KEY == "":
+            raise RuntimeError("GEMINI_API_KEY is not configured or in mock test mode; activating grounded fallback.")
+
         sys_inst = system_instruction or prompt_loader.get_system_prompt()
         config = types.GenerateContentConfig(
             system_instruction=sys_inst,
@@ -121,8 +125,20 @@ class AIService:
             ai_text = self._call_gemini(prompt)
         except Exception:
             is_fallback = True
-            # Graceful rule-based fallback
-            if verified_products_raw:
+            # Graceful grounded fallback
+            if rag_context.get("status") == "out_of_domain":
+                ai_text = (
+                    f"Cửa hàng StoreFlow AI hiện không kinh doanh các mặt hàng hoặc dịch vụ liên quan đến: *\"{user_query}\"*. "
+                    f"Chúng tôi chuyên cung cấp các thiết bị công nghệ chính hãng: Chuột & Bàn phím cơ, Tai nghe & Âm thanh, Phụ kiện sạc/cáp, và Gaming gear."
+                )
+            elif rag_context.get("out_of_stock_detected"):
+                oos = rag_context["out_of_stock_detected"]
+                ai_text = (
+                    f"⚠️ **Thông báo tồn kho thực tế**:\n\n"
+                    f"Sản phẩm **{oos['name']}** (Mã SKU: `{oos['sku']}`) hiện **ĐÃ HẾT HÀNG** trong kho (tồn kho: 0).\n\n"
+                    f"Cửa hàng tạm thời không còn hàng sản phẩm này để bán. Quý khách vui lòng tham khảo các dòng sản phẩm khác hoặc liên hệ bộ phận hỗ trợ khi hàng về thêm."
+                )
+            elif verified_products_raw:
                 lines = [
                     f"**StoreFlow AI — Gợi ý sản phẩm phù hợp** *(Chế độ tra cứu trực tiếp từ kho hàng)*:\n",
                     f"Dựa trên yêu cầu: *\"{user_query}\"* (Ngân sách: {budget_str}), các sản phẩm khả dụng trong kho gồm:\n"
@@ -130,7 +146,8 @@ class AIService:
                 for p in verified_products_raw:
                     lines.append(
                         f"- **{p['name']}** (Mã: `{p['sku']}`)\n"
-                        f"  - Giá bán: **{int(p['selling_price']):,} đ** | Còn tồn: **{p['stock_quantity']} {p['unit']}**\n"
+                        f"  - Nhóm hàng: {p.get('category_name') or 'Công nghệ'}\n"
+                        f"  - Giá bán: **{int(p['selling_price']):,} đ** | Còn tồn: **{p['stock_quantity']} {p['unit']}** *(Còn hàng)*\n"
                         f"  - Đặc tính: {p['description'] or 'Chính hãng'}\n"
                     )
                 lines.append("\n*Lưu ý: Quý khách có thể chọn sản phẩm để tạo đơn hàng hoặc thêm vào giỏ hàng.*")
@@ -587,21 +604,33 @@ class AIService:
             answer = self._call_gemini(prompt)
         except Exception:
             is_fallback = True
-            prods = rag_ctx.get("products", [])
-            if prods:
-                p_lines = [
-                    f"- **{p['name']}** (Mã: `{p['sku']}`): Giá **{int(p['selling_price']):,} đ** | Còn tồn: **{p['stock_quantity']} {p['unit']}**\n  {p['description'] or ''}"
-                    for p in prods
-                ]
+            if rag_ctx.get("status") == "out_of_domain":
                 answer = (
-                    f"**StoreFlow AI — Thông tin sản phẩm liên quan**:\n\n" +
-                    "\n".join(p_lines)
+                    f"StoreFlow AI là trợ lý thông minh hỗ trợ tìm kiếm sản phẩm và tra cứu vận hành tại cửa hàng. "
+                    f"Hiện tại cửa hàng không kinh doanh các mặt hàng hoặc dịch vụ liên quan đến: *\"{question}\"*."
+                )
+            elif rag_ctx.get("out_of_stock_detected"):
+                oos = rag_ctx["out_of_stock_detected"]
+                answer = (
+                    f"Sản phẩm **{oos['name']}** (Mã SKU: `{oos['sku']}`) hiện **ĐÃ HẾT HÀNG** trong kho (tồn kho: 0). "
+                    f"Cửa hàng tạm thời không còn hàng sản phẩm này."
                 )
             else:
-                answer = (
-                    f"Xin lỗi, hiện tại tôi chưa tìm thấy thông tin sản phẩm phù hợp với câu hỏi: *\"{question}\"*. "
-                    f"Quý khách vui lòng thử tìm kiếm với tên sản phẩm hoặc danh mục cụ thể hơn."
-                )
+                prods = rag_ctx.get("products", [])
+                if prods:
+                    p_lines = [
+                        f"- **{p['name']}** (Mã: `{p['sku']}`): Giá **{int(p['selling_price']):,} đ** | Còn tồn: **{p['stock_quantity']} {p['unit']}**\n  {p['description'] or ''}"
+                        for p in prods
+                    ]
+                    answer = (
+                        f"**StoreFlow AI — Thông tin sản phẩm liên quan**:\n\n" +
+                        "\n".join(p_lines)
+                    )
+                else:
+                    answer = (
+                        f"Xin lỗi, hiện tại tôi chưa tìm thấy thông tin sản phẩm phù hợp với câu hỏi: *\"{question}\"*. "
+                        f"Quý khách vui lòng thử tìm kiếm với tên sản phẩm hoặc danh mục cụ thể hơn."
+                    )
 
         latency = int((time.time() - start_time) * 1000)
         self._record_audit_log(

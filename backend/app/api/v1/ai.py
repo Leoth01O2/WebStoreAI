@@ -130,16 +130,40 @@ def get_ai_audit_logs(
     return ai_service.get_audit_logs(limit=limit)
 
 
+@router.get(
+    "/sync-status",
+    summary="Kiểm tra trạng thái đồng bộ giữa SQLite và Vector DB ChromaDB (Admin/SuperAdmin only)"
+)
+def get_sync_status(
+    current_user: dict = Depends(require_roles("admin", "superadmin"))
+):
+    """
+    Kiểm tra tình trạng đồng bộ dữ liệu giữa bảng products (SQLite) và collection ChromaDB.
+    Phát hiện các sản phẩm chưa có vector hoặc vector mồ côi.
+    """
+    return rag_service.check_sync_status()
+
+
 @router.post(
     "/sync-index",
     summary="Đồng bộ lại toàn bộ sản phẩm vào Vector DB ChromaDB (Admin/SuperAdmin only)"
 )
 def sync_vector_index(
+    reconcile_only: bool = Query(False, description="Chỉ đối soát và đồng bộ các bản ghi sai lệch/thiếu"),
     current_user: dict = Depends(require_roles("admin", "superadmin"))
 ):
     """
-    Buộc quét lại toàn bộ danh mục sản phẩm từ SQLite và nạp lại vào ChromaDB.
+    Đồng bộ dữ liệu sản phẩm từ SQLite vào ChromaDB.
+    Nếu reconcile_only=True: tự động phát hiện, bổ sung vector thiếu và dọn dẹp vector mồ côi.
+    Nếu reconcile_only=False: quét và ghi đè lại toàn bộ catalog.
     """
+    if reconcile_only:
+        res = rag_service.reconcile_sync()
+        return {
+            "status": "success",
+            "message": f"Đã đối soát và đồng bộ tự phục hồi: bổ sung {res['upserted_count']}, xóa {res['deleted_count']}",
+            "details": res
+        }
     count = rag_service.sync_all_products()
     return {
         "status": "success",
