@@ -228,18 +228,19 @@ def test_r4_09_chromadb_sync_and_reconciliation(admin_headers):
 def test_r4_10_api_handles_gemini_errors_and_missing_key_safely():
     """10. Graceful fallback when Gemini API key is missing or encounters timeout/rate limit."""
     ai_rate_limiter.reset()
-    # In test environment, GEMINI_API_KEY is not configured or in mock mode
-    res = client.post("/api/v1/ai/recommend", json={"query": "Bàn phím cơ gõ êm", "limit": 3})
+    # In test environment, when fallback provider is requested or active
+    res = client.post("/api/v1/ai/recommend", json={"query": "Bàn phím cơ gõ êm", "limit": 3, "provider": "grounded"})
     assert res.status_code == 200
     data = res.json()
     # Must activate safe grounded fallback smoothly without crashing FastAPI
     assert data["is_fallback"] is True
+    assert data["provider"] == "grounded"
     assert len(data["recommended_products"]) > 0
     assert "StoreFlow AI" in data["ai_response"]
 
     ai_rate_limiter.reset()
     # When query is out of domain, clean explanation without crashing
-    res_ood = client.post("/api/v1/ai/recommend", json={"query": "Bán cho tôi bát phở bò tái lăn", "limit": 3})
+    res_ood = client.post("/api/v1/ai/recommend", json={"query": "Bán cho tôi bát phở bò tái lăn", "limit": 3, "provider": "grounded"})
     assert res_ood.status_code == 200
     data_ood = res_ood.json()
     assert data_ood["is_fallback"] is True

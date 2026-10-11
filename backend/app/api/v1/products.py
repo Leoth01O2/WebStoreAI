@@ -1,7 +1,10 @@
 import os
 import uuid
+import logging
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+
+logger = logging.getLogger(__name__)
 from app.core.database import get_db, get_db_transaction
 from app.core.rbac import get_current_user, get_current_user_optional, require_roles
 from app.schemas.category import CategoryCreate, CategoryUpdate, CategoryResponse
@@ -389,8 +392,9 @@ def create_product(product_in: ProductCreate, current_user: dict = Depends(get_c
         if new_id is not None:
             rag_service.upsert_single_product(new_id)
             visual_index_service.sync_single_product_visual(new_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"ChromaDB vector sync failed after creating product ID {new_id}: {e}. Flagging for auto-healing.")
+        rag_service.mark_sync_needed()
 
     return result
 
@@ -435,10 +439,15 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
 
     # Đồng bộ vector sang ChromaDB chỉ sau khi SQLite transaction commit thành công
     try:
+        updated_keys = set(product_in.model_dump(exclude_unset=True).keys())
+        semantic_keys = {"name", "sku", "category_id", "description", "status"}
+        # If semantic fields changed, full vector document re-index is necessary
+        # If only prices or stock changed, SQLite Truth Guard guarantees real-time accuracy
         rag_service.upsert_single_product(product_id)
         visual_index_service.sync_single_product_visual(product_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"ChromaDB vector sync failed after updating product ID {product_id}: {e}. Flagging for auto-healing.")
+        rag_service.mark_sync_needed()
 
     return result
 
@@ -488,8 +497,9 @@ def delete_product(
         else:
             rag_service.delete_single_product(product_id)
             visual_index_service.delete_single_product_visual(product_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"ChromaDB vector sync failed after deleting/deactivating product ID {product_id}: {e}. Flagging for auto-healing.")
+        rag_service.mark_sync_needed()
 
     return msg
 

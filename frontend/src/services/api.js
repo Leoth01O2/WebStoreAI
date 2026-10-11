@@ -339,20 +339,21 @@ export const reportsAPI = {
 };
 
 export const aiAPI = {
-  recommend: (query, budget = null, limit = 5) =>
+  getProviders: () => request('/ai/providers'),
+  recommend: (query, budget = null, limit = 5, provider = null) =>
     request('/ai/recommend', {
       method: 'POST',
-      body: JSON.stringify({ query, budget: budget ? Number(budget) : null, limit: Number(limit) || 5 }),
+      body: JSON.stringify({ query, budget: budget ? Number(budget) : null, limit: Number(limit) || 5, ...(provider ? { provider } : {}) }),
     }),
-  generateSalesReport: (period = 'month') =>
+  generateSalesReport: (period = 'month', provider = null) =>
     request('/ai/sales-report', {
       method: 'POST',
-      body: JSON.stringify({ period }),
+      body: JSON.stringify({ period, ...(provider ? { provider } : {}) }),
     }),
-  salesQA: (query) =>
+  salesQA: (query, provider = null) =>
     request('/ai/sales-qa', {
       method: 'POST',
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, ...(provider ? { provider } : {}) }),
     }),
   getLogs: (limit = 50) => request(`/ai/logs?limit=${limit}`),
   syncVectorIndex: () =>

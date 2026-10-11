@@ -11,14 +11,28 @@ from app.schemas.ai import (
     SalesQARequest,
     SalesQAResponse,
     AIAuditLogResponse,
-    ImageSearchResponse
+    ImageSearchResponse,
+    AIProvidersStatusResponse
 )
 from app.services.ai_service import ai_service
 from app.services.rag_service import rag_service
 from app.services.image_search_service import image_search_service
+from app.services.ai_providers.manager import ai_provider_manager
 
 router = APIRouter(prefix="/ai", tags=["AI & Hybrid RAG Assistant"])
 
+
+@router.get(
+    "/providers",
+    response_model=AIProvidersStatusResponse,
+    summary="Kiểm tra trạng thái các AI Providers (Ollama, Gemini, Grounded)"
+)
+def get_ai_providers_status():
+    """
+    Xem trạng thái sẵn sàng, mô hình đang chạy và cấu hình của các AI Provider.
+    Công khai cho toàn bộ người dùng để giao diện hiển thị badge nguồn AI tương ứng.
+    """
+    return ai_provider_manager.get_status_overview()
 
 
 @router.post(
@@ -50,7 +64,8 @@ def recommend_products(
         budget=request.budget,
         limit=request.limit or 5,
         user_id=user_id,
-        user_role=user_role
+        user_role=user_role,
+        provider=request.provider
     )
 
 
@@ -72,7 +87,8 @@ def generate_sales_report(
     return ai_service.generate_sales_report(
         period=request.period or "month",
         user_id=current_user.get("id"),
-        user_role=current_user.get("role", "superadmin")
+        user_role=current_user.get("role", "superadmin"),
+        provider=request.provider
     )
 
 
@@ -110,7 +126,8 @@ def answer_sales_qa(
         question=request.query,
         user_id=user_id,
         user_role=user_role,
-        user_full_name=user_full_name
+        user_full_name=user_full_name,
+        provider=request.provider
     )
 
 

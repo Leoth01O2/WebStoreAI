@@ -10,6 +10,7 @@ from app.core.prompt_loader import prompt_loader
 from app.core.rate_limiter import ai_rate_limiter
 from app.services.rag_service import rag_service
 from app.services.report_service import ReportService
+from app.services.ai_providers.manager import ai_provider_manager
 from app.schemas.ai import (
     ProductRecommendResponse,
     RecommendedProductItem,
@@ -90,17 +91,19 @@ class AIService:
         budget: Optional[float] = None,
         limit: int = 5,
         user_id: Optional[int] = None,
-        user_role: str = "guest"
+        user_role: str = "guest",
+        provider: Optional[str] = None
     ) -> ProductRecommendResponse:
         """
-        AI Product Recommendation with Hybrid RAG & Strict SQLite Stock Guard.
+        AI Product Recommendation with Retrieval & Strict SQLite Stock Guard.
         Accessible to all roles (Guest, Customer, Staff, Admin, SuperAdmin).
         Guarantees that no out-of-stock items are ever recommended, and no internal cost/profit data is leaked.
+        Supports Pluggable AI Providers (Gemini, Ollama, Grounded Fallback).
         """
         start_time = time.time()
         budget_val = budget if budget is not None and budget > 0 else None
 
-        # 1. RAG Candidate Retrieval & SQLite Stock Verification Guard
+        # 1. Candidate Retrieval & SQLite Stock Verification Guard
         rag_context = rag_service.get_grounded_recommendation_context(
             query=user_query,
             top_k=limit,
@@ -119,21 +122,16 @@ class AIService:
             budget_info=budget_str
         )
 
-        # 3. Call Gemini with Fallback
-        is_fallback = False
-        try:
-            ai_text = self._call_gemini(prompt)
-        except Exception:
-            is_fallback = True
-            # Graceful grounded fallback
+        # 3. Grounded Fallback closure
+        def _fallback_recommend() -> str:
             if rag_context.get("status") == "out_of_domain":
-                ai_text = (
+                return (
                     f"Cửa hàng StoreFlow AI hiện không kinh doanh các mặt hàng hoặc dịch vụ liên quan đến: *\"{user_query}\"*. "
                     f"Chúng tôi chuyên cung cấp các thiết bị công nghệ chính hãng: Chuột & Bàn phím cơ, Tai nghe & Âm thanh, Phụ kiện sạc/cáp, và Gaming gear."
                 )
             elif rag_context.get("out_of_stock_detected"):
                 oos = rag_context["out_of_stock_detected"]
-                ai_text = (
+                return (
                     f"⚠️ **Thông báo tồn kho thực tế**:\n\n"
                     f"Sản phẩm **{oos['name']}** (Mã SKU: `{oos['sku']}`) hiện **ĐÃ HẾT HÀNG** trong kho (tồn kho: 0).\n\n"
                     f"Cửa hàng tạm thời không còn hàng sản phẩm này để bán. Quý khách vui lòng tham khảo các dòng sản phẩm khác hoặc liên hệ bộ phận hỗ trợ khi hàng về thêm."
@@ -151,16 +149,29 @@ class AIService:
                         f"  - Đặc tính: {p['description'] or 'Chính hãng'}\n"
                     )
                 lines.append("\n*Lưu ý: Quý khách có thể chọn sản phẩm để tạo đơn hàng hoặc thêm vào giỏ hàng.*")
-                ai_text = "\n".join(lines)
+                return "\n".join(lines)
             else:
-                ai_text = (
+                return (
                     f"Rất tiếc, hiện tại kho hàng chưa có sản phẩm nào phù hợp với yêu cầu: *\"{user_query}\"* "
                     f"hoặc các sản phẩm tương ứng tạm thời đã hết hàng. Vui lòng thử tìm kiếm với từ khóa khác hoặc điều chỉnh mức ngân sách."
                 )
 
+        # 4. Execute with Pluggable Provider Manager
+        if not verified_products_raw:
+            ai_text = _fallback_recommend()
+            provider_used = "grounded"
+            is_fallback = True
+        else:
+            ai_text, provider_used, is_fallback, telemetry = ai_provider_manager.execute_with_fallback(
+                prompt=prompt,
+                system_instruction=prompt_loader.get_system_prompt(),
+                fallback_fn=_fallback_recommend,
+                preferred_provider=provider
+            )
+
         latency = int((time.time() - start_time) * 1000)
 
-        # 4. Map structured products
+        # 5. Map structured products
         recommended_items = [
             RecommendedProductItem(
                 id=p["id"],
@@ -178,10 +189,10 @@ class AIService:
             for p in verified_products_raw
         ]
 
-        # 5. Record audit log
+        # 6. Record audit log
         self._record_audit_log(
             feature="recommendation",
-            query_text=f"[{user_role.upper()}] Q: {user_query} | Budget: {budget_str}",
+            query_text=f"[{user_role.upper()}][{provider_used.upper()}] Q: {user_query} | Budget: {budget_str}",
             response_summary=ai_text[:300],
             latency_ms=latency,
             user_id=user_id
@@ -192,18 +203,21 @@ class AIService:
             recommended_products=recommended_items,
             query=user_query,
             total_candidates_found=len(recommended_items),
-            is_fallback=is_fallback
+            is_fallback=is_fallback,
+            provider=provider_used
         )
 
     def generate_sales_report(
         self,
         period: str = "month",
         user_id: Optional[int] = None,
-        user_role: str = "superadmin"
+        user_role: str = "superadmin",
+        provider: Optional[str] = None
     ) -> SalesReportResponse:
         """
         Generates an executive AI sales & inventory report grounded entirely in SQLite analytics.
         Strictly restricted to SuperAdmin (Store Owner).
+        Supports Pluggable AI Providers (Gemini, Ollama, Grounded Fallback).
         """
         if user_role != "superadmin":
             raise PermissionError("Chỉ Chủ cửa hàng (SuperAdmin) mới có quyền tạo Báo cáo Doanh thu AI.")
@@ -263,13 +277,9 @@ class AIService:
             additional_notes="Dữ liệu trích xuất từ database bán hàng thực tế StoreFlow AI."
         )
 
-        # 2. Call Gemini with Fallback
-        is_fallback = False
-        try:
-            ai_analysis = self._call_gemini(prompt)
-        except Exception:
-            is_fallback = True
-            ai_analysis = (
+        # Grounded Fallback closure
+        def _fallback_report() -> str:
+            return (
                 f"### Báo cáo Doanh thu & Tình hình Kinh doanh ({period_label})\n\n"
                 f"**1. Tổng quan Doanh thu:**\n"
                 f"- Doanh thu hôm nay: **{int(summary['today_revenue']):,} VNĐ**\n"
@@ -287,11 +297,18 @@ class AIService:
                 f"- Tiếp tục duy trì nguồn hàng dồi dào cho các sản phẩm nằm trong top 5 bán chạy."
             )
 
+        ai_analysis, provider_used, is_fallback, _ = ai_provider_manager.execute_with_fallback(
+            prompt=prompt,
+            system_instruction=prompt_loader.get_system_prompt(),
+            fallback_fn=_fallback_report,
+            preferred_provider=provider
+        )
+
         latency = int((time.time() - start_time) * 1000)
 
         self._record_audit_log(
             feature="sales_report",
-            query_text=f"Kỳ báo cáo: {period_label}",
+            query_text=f"[{provider_used.upper()}] Kỳ báo cáo: {period_label}",
             response_summary=ai_analysis[:300],
             latency_ms=latency,
             user_id=user_id
@@ -304,7 +321,8 @@ class AIService:
             total_orders=int(summary["total_orders"]),
             low_stock_count=int(summary["low_stock_count"]),
             top_selling_products=top_products,
-            is_fallback=is_fallback
+            is_fallback=is_fallback,
+            provider=provider_used
         )
 
     def answer_sales_qa(
@@ -312,7 +330,8 @@ class AIService:
         question: str,
         user_id: Optional[int] = None,
         user_role: str = "guest",
-        user_full_name: Optional[str] = None
+        user_full_name: Optional[str] = None,
+        provider: Optional[str] = None
     ) -> SalesQAResponse:
         """
         Role-Aware AI Assistant & Q&A Orchestrator.
@@ -354,7 +373,8 @@ class AIService:
                 answer=safe_refusal,
                 query=question,
                 context_type="security_guard",
-                is_fallback=True
+                is_fallback=True,
+                provider="grounded"
             )
 
         # ==================== 2. INTENT DETECTION & PERMISSION GATEKEEPING ====================
@@ -417,7 +437,8 @@ class AIService:
                     answer=refusal_msg,
                     query=question,
                     context_type="rbac_guard",
-                    is_fallback=True
+                    is_fallback=True,
+                    provider="grounded"
                 )
 
             # ROLE IS SUPERADMIN -> Retrieve factual SQLite revenue analytics
@@ -465,12 +486,8 @@ class AIService:
                 user_query=question
             )
 
-            is_fallback = False
-            try:
-                answer = self._call_gemini(prompt)
-            except Exception:
-                is_fallback = True
-                answer = (
+            def _fallback_revenue() -> str:
+                return (
                     f"**Báo cáo tài chính & vận hành StoreFlow AI (SuperAdmin):**\n\n"
                     f"- Doanh thu tháng này hiện đạt **{int(summary.get('month_revenue', 0)):,} đ** qua **{summary['total_orders']}** đơn hàng hoàn tất.\n"
                     f"- Doanh thu hôm nay: **{int(summary['today_revenue']):,} đ** | Tuần này: **{int(summary.get('week_revenue', 0)):,} đ**.\n"
@@ -479,13 +496,20 @@ class AIService:
                     f"*(Dữ liệu trích xuất chính xác 100% từ SQLite)*"
                 )
 
+            answer, provider_used, is_fallback, _ = ai_provider_manager.execute_with_fallback(
+                prompt=prompt,
+                fallback_fn=_fallback_revenue,
+                preferred_provider=provider
+            )
+
             latency = int((time.time() - start_time) * 1000)
-            self._record_audit_log("sales_qa_revenue", question, answer[:300], latency, user_id)
+            self._record_audit_log("sales_qa_revenue", f"[{provider_used.upper()}] {question}", answer[:300], latency, user_id)
             return SalesQAResponse(
                 answer=answer,
                 query=question,
                 context_type="superadmin_sql_facts",
-                is_fallback=is_fallback
+                is_fallback=is_fallback,
+                provider=provider_used
             )
 
         # --- GATE B: CUSTOMER ORDERS Q&A ---
@@ -558,14 +582,21 @@ class AIService:
                     f"Hãy trả lời rõ ràng, lịch sự, tóm tắt các đơn hàng của khách hàng."
                 )
 
-                try:
-                    answer = self._call_gemini(prompt)
-                except Exception:
-                    answer = orders_text
+                answer, provider_used, is_fallback, _ = ai_provider_manager.execute_with_fallback(
+                    prompt=prompt,
+                    fallback_fn=lambda: orders_text,
+                    preferred_provider=provider
+                )
 
                 latency = int((time.time() - start_time) * 1000)
-                self._record_audit_log("customer_orders_qa", question, answer[:300], latency, user_id)
-                return SalesQAResponse(answer=answer, query=question, context_type="customer_sql_orders", is_fallback=False)
+                self._record_audit_log("customer_orders_qa", f"[{provider_used.upper()}] {question}", answer[:300], latency, user_id)
+                return SalesQAResponse(
+                    answer=answer,
+                    query=question,
+                    context_type="customer_sql_orders",
+                    is_fallback=is_fallback,
+                    provider=provider_used
+                )
 
         # --- GATE C: CUSTOMER LIST / PRIVATE DATA ATTEMPT ---
         if is_customer_list_query and role not in ("superadmin", "admin"):
@@ -574,7 +605,13 @@ class AIService:
                 "Danh sách khách hàng và thông tin cá nhân (số điện thoại, địa chỉ) là dữ liệu bảo mật "
                 "theo chính sách quyền riêng tư. Bạn không có quyền truy cập dữ liệu này."
             )
-            return SalesQAResponse(answer=refusal_msg, query=question, context_type="privacy_guard", is_fallback=True)
+            return SalesQAResponse(
+                answer=refusal_msg,
+                query=question,
+                context_type="privacy_guard",
+                is_fallback=True,
+                provider="grounded"
+            )
 
         # --- GATE D: PRODUCT CONSULTATION / PRODUCT LOOKUP (Available for ALL roles) ---
         # Fetch relevant products via ChromaDB candidate retrieval + SQLite verification guard
@@ -599,19 +636,15 @@ class AIService:
             f"3. Trình bày rõ ràng, thân thiện."
         )
 
-        is_fallback = False
-        try:
-            answer = self._call_gemini(prompt)
-        except Exception:
-            is_fallback = True
+        def _fallback_prod_qa() -> str:
             if rag_ctx.get("status") == "out_of_domain":
-                answer = (
+                return (
                     f"StoreFlow AI là trợ lý thông minh hỗ trợ tìm kiếm sản phẩm và tra cứu vận hành tại cửa hàng. "
                     f"Hiện tại cửa hàng không kinh doanh các mặt hàng hoặc dịch vụ liên quan đến: *\"{question}\"*."
                 )
             elif rag_ctx.get("out_of_stock_detected"):
                 oos = rag_ctx["out_of_stock_detected"]
-                answer = (
+                return (
                     f"Sản phẩm **{oos['name']}** (Mã SKU: `{oos['sku']}`) hiện **ĐÃ HẾT HÀNG** trong kho (tồn kho: 0). "
                     f"Cửa hàng tạm thời không còn hàng sản phẩm này."
                 )
@@ -622,20 +655,27 @@ class AIService:
                         f"- **{p['name']}** (Mã: `{p['sku']}`): Giá **{int(p['selling_price']):,} đ** | Còn tồn: **{p['stock_quantity']} {p['unit']}**\n  {p['description'] or ''}"
                         for p in prods
                     ]
-                    answer = (
+                    return (
                         f"**StoreFlow AI — Thông tin sản phẩm liên quan**:\n\n" +
                         "\n".join(p_lines)
                     )
                 else:
-                    answer = (
+                    return (
                         f"Xin lỗi, hiện tại tôi chưa tìm thấy thông tin sản phẩm phù hợp với câu hỏi: *\"{question}\"*. "
                         f"Quý khách vui lòng thử tìm kiếm với tên sản phẩm hoặc danh mục cụ thể hơn."
                     )
 
+        answer, provider_used, is_fallback, _ = ai_provider_manager.execute_with_fallback(
+            prompt=prompt,
+            system_instruction=prompt_loader.get_system_prompt(),
+            fallback_fn=_fallback_prod_qa,
+            preferred_provider=provider
+        )
+
         latency = int((time.time() - start_time) * 1000)
         self._record_audit_log(
             feature="sales_qa_product",
-            query_text=f"[{role.upper()}] {question}",
+            query_text=f"[{role.upper()}][{provider_used.upper()}] {question}",
             response_summary=answer[:300],
             latency_ms=latency,
             user_id=user_id
@@ -645,7 +685,8 @@ class AIService:
             answer=answer,
             query=question,
             context_type="hybrid_product_rag",
-            is_fallback=is_fallback
+            is_fallback=is_fallback,
+            provider=provider_used
         )
 
     def get_audit_logs(self, limit: int = 50) -> List[AIAuditLogResponse]:

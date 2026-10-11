@@ -25,10 +25,14 @@ async def lifespan(app: FastAPI):
     validate_boot_safety(settings)
     # Khởi tạo schema cơ sở dữ liệu SQLite khi startup
     init_db()
-    # Tự động nạp vector index vào ChromaDB nếu chưa có
+    # Tự động đối soát và tự phục hồi vector index vào ChromaDB khi startup (Self-Healing Sync Guard)
     try:
         if rag_service.collection.count() == 0:
             rag_service.sync_all_products()
+        else:
+            sync_status = rag_service.check_sync_status()
+            if not sync_status.get("is_synced", True):
+                rag_service.reconcile_sync()
     except Exception:
         pass
     yield

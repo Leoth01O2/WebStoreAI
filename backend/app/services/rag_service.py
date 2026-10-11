@@ -67,7 +67,8 @@ INJECTION_PATTERNS = [
 
 class RAGService:
     """
-    Enhanced Hybrid RAG & Vector Retrieval Service.
+    StoreFlow AI Retrieval & Grounding Service.
+    Architecture: Dense Vector Retrieval (ChromaDB) + Lexical/Category Re-ranking + Strict SQLite Truth Guard.
     Features:
       1. Out-of-Domain Guard: blocks irrelevant queries with 0 hallucinated products.
       2. Dense Vector Retrieval (ChromaDB) with empirical cosine cutoff (0.55).
@@ -75,7 +76,7 @@ class RAGService:
       4. Strict SQLite Post-Retrieval Verification Guard (status='active', stock_quantity > 0).
       5. Explicit Out-of-Stock Detection: alerts users when specific requested products are exhausted.
       6. Prompt Injection Neutralizer: cleans catalog text before sending to LLM.
-      7. Synchronization & Reconciliation: detects and self-heals desync between SQLite and ChromaDB.
+      7. Synchronization & Reconciliation: detects and self-heals missing, orphan, and outdated vectors.
     """
 
     def __init__(self, persist_dir: Optional[str] = None):
@@ -94,6 +95,29 @@ class RAGService:
             name="storeflow_products",
             metadata={"hnsw:space": "cosine"}
         )
+        self._sync_needed = False
+
+    def mark_sync_needed(self) -> None:
+        """Flags that an index desynchronization occurred and requires self-healing."""
+        self._sync_needed = True
+
+    def auto_heal_if_needed(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Automatically performs self-healing reconciliation between SQLite and ChromaDB
+        if flagged as out of sync or if force=True.
+        """
+        if not getattr(self, "_sync_needed", False) and not force:
+            return {"healed": False, "reason": "in_sync"}
+        try:
+            status = self.check_sync_status()
+            if not status.get("is_synced", True):
+                heal_res = self.reconcile_sync()
+                self._sync_needed = False
+                return {"healed": True, "details": heal_res}
+            self._sync_needed = False
+            return {"healed": False, "reason": "already_synced"}
+        except Exception as e:
+            return {"healed": False, "error": str(e)}
 
     def _sanitize_text(self, text: str) -> str:
         """Neutralizes prompt injection attempts within catalog descriptions."""
@@ -204,43 +228,79 @@ class RAGService:
     def check_sync_status(self) -> Dict[str, Any]:
         """
         Audits synchronization health between SQLite products and ChromaDB vectors.
-        Identifies missing products and orphan vector IDs.
+        Identifies:
+          - missing_in_chroma: Products in SQLite without a ChromaDB vector.
+          - orphan_in_chroma: ChromaDB vectors whose products were deleted from SQLite.
+          - outdated_in_chroma: Vectors whose document content or status is stale compared to SQLite.
         """
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT id FROM products")
-            sqlite_ids = {str(r["id"]) for r in c.fetchall()}
+            c.execute("""
+                SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+            """)
+            sqlite_rows = {str(r["id"]): dict(r) for r in c.fetchall()}
 
-        chroma_res = self.collection.get(include=[])
+        sqlite_ids = set(sqlite_rows.keys())
+
+        # Include documents and metadatas to check content freshness
+        chroma_res = self.collection.get(include=["documents", "metadatas"])
         chroma_ids = set(chroma_res.get("ids", []))
 
-        missing_in_chroma = list(sqlite_ids - chroma_ids)
-        orphan_in_chroma = list(chroma_ids - sqlite_ids)
-        is_synced = len(missing_in_chroma) == 0 and len(orphan_in_chroma) == 0
+        missing_in_chroma = sorted([int(i) for i in (sqlite_ids - chroma_ids)])
+        orphan_in_chroma = sorted([int(i) for i in (chroma_ids - sqlite_ids)])
+
+        # Verify content freshness for products existing in both
+        outdated_in_chroma = []
+        chroma_docs_map = {}
+        chroma_meta_map = {}
+        if "documents" in chroma_res and chroma_res["documents"]:
+            for idx, cid in enumerate(chroma_res.get("ids", [])):
+                chroma_docs_map[cid] = chroma_res["documents"][idx] if idx < len(chroma_res["documents"]) else ""
+                chroma_meta_map[cid] = chroma_res["metadatas"][idx] if (chroma_res.get("metadatas") and idx < len(chroma_res["metadatas"])) else {}
+
+        for cid, row in sqlite_rows.items():
+            if cid in chroma_docs_map:
+                expected_doc = self._build_product_document(row)
+                existing_doc = chroma_docs_map[cid]
+                existing_meta = chroma_meta_map.get(cid, {})
+                if existing_doc != expected_doc or existing_meta.get("status") != str(row.get("status") or "active"):
+                    outdated_in_chroma.append(int(cid))
+
+        outdated_in_chroma.sort()
+        is_synced = len(missing_in_chroma) == 0 and len(orphan_in_chroma) == 0 and len(outdated_in_chroma) == 0
 
         return {
             "is_synced": is_synced,
             "sqlite_count": len(sqlite_ids),
             "chroma_count": len(chroma_ids),
             "missing_in_chroma": missing_in_chroma,
-            "orphan_in_chroma": orphan_in_chroma
+            "orphan_in_chroma": orphan_in_chroma,
+            "outdated_in_chroma": outdated_in_chroma
         }
 
     def reconcile_sync(self) -> Dict[str, Any]:
         """
-        Self-healing routine: resolves desync anomalies between SQLite and ChromaDB.
-        Upserts missing products and purges orphan vector records.
+        Self-healing routine: resolves all desync anomalies between SQLite and ChromaDB.
+        Upserts missing products, refreshes outdated vector documents, and purges orphan records.
         """
         status = self.check_sync_status()
         upserted_count = 0
+        updated_count = 0
         deleted_count = 0
 
         for mid in status["missing_in_chroma"]:
-            if self.upsert_single_product(int(mid)):
+            if self.upsert_single_product(mid):
                 upserted_count += 1
 
-        for oid in status["orphan_in_chroma"]:
-            self.delete_single_product(int(oid))
+        for oid in status.get("outdated_in_chroma", []):
+            if self.upsert_single_product(oid):
+                updated_count += 1
+
+        for orph_id in status["orphan_in_chroma"]:
+            self.delete_single_product(orph_id)
             deleted_count += 1
 
         # Double check after healing
@@ -248,6 +308,7 @@ class RAGService:
         return {
             "repaired": True,
             "upserted_count": upserted_count,
+            "updated_count": updated_count,
             "deleted_count": deleted_count,
             "final_sync_status": final_status
         }
@@ -304,8 +365,11 @@ class RAGService:
     def search_candidates(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
         Executes semantic search over ChromaDB index and returns Top-K candidate products.
-        Auto-syncs if collection is empty.
+        Automatically heals index if desynchronization was flagged, or if collection is empty.
         """
+        if getattr(self, "_sync_needed", False):
+            self.auto_heal_if_needed()
+
         total_indexed = self.collection.count()
         if total_indexed == 0:
             self.sync_all_products()

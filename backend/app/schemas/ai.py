@@ -9,6 +9,7 @@ class ProductRecommendRequest(BaseModel):
     query: str = Field(..., min_length=2, max_length=4000, description="Customer request or preference query")
     budget: Optional[float] = Field(None, ge=0, description="Optional maximum budget in VND")
     limit: int = Field(5, ge=1, le=20, description="Maximum number of candidates to retrieve")
+    provider: Optional[str] = Field(None, description="Optional AI provider: 'ollama', 'gemini', or 'grounded'")
 
 
 class RecommendedProductItem(BaseModel):
@@ -32,6 +33,7 @@ class ProductRecommendResponse(BaseModel):
     query: str
     total_candidates_found: int
     is_fallback: bool = False
+    provider: Optional[str] = Field("grounded", description="Active AI provider: 'ollama', 'gemini', or 'grounded'")
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +42,7 @@ class ProductRecommendResponse(BaseModel):
 class SalesReportRequest(BaseModel):
     period: str = Field(default="this_month", description="Report period: today, 7_days, 30_days, this_month, all_time")
     additional_notes: Optional[str] = Field(default=None, max_length=1000, description="Optional notes or focus areas")
+    provider: Optional[str] = Field(None, description="Optional AI provider: 'ollama', 'gemini', or 'grounded'")
 
 
 class SalesReportResponse(BaseModel):
@@ -50,6 +53,7 @@ class SalesReportResponse(BaseModel):
     low_stock_count: int
     top_selling_products: List[Dict[str, Any]]
     is_fallback: bool = False
+    provider: Optional[str] = Field("grounded", description="Active AI provider: 'ollama', 'gemini', or 'grounded'")
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +61,7 @@ class SalesReportResponse(BaseModel):
 # ---------------------------------------------------------------------------
 class SalesQARequest(BaseModel):
     query: str = Field(..., min_length=2, max_length=4000, description="Natural language question")
+    provider: Optional[str] = Field(None, description="Optional AI provider: 'ollama', 'gemini', or 'grounded'")
 
 
 
@@ -65,6 +70,24 @@ class SalesQAResponse(BaseModel):
     query: str
     context_type: str = Field("hybrid", description="Source of context: sql, rag, or hybrid")
     is_fallback: bool = False
+    provider: Optional[str] = Field("grounded", description="Active AI provider: 'ollama', 'gemini', or 'grounded'")
+
+
+# ---------------------------------------------------------------------------
+# AI Provider Status Schemas (Phase R5)
+# ---------------------------------------------------------------------------
+class AIProviderDetail(BaseModel):
+    provider: str
+    available: bool
+    status: str
+    model: str
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AIProvidersStatusResponse(BaseModel):
+    active_provider: str
+    configured_mode: str
+    providers: Dict[str, AIProviderDetail]
 
 
 # ---------------------------------------------------------------------------

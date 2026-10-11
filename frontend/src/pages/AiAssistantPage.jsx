@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Sparkles,
   Bot,
@@ -35,6 +35,27 @@ export const AiAssistantPage = ({ onNavigate }) => {
 
   // Active sub-tab: 'recommend' (Tư vấn sản phẩm) | 'image-search' (Tìm kiếm bằng hình ảnh) | 'report' (Phân tích doanh thu AI)
   const [activeTab, setActiveTab] = useState('recommend');
+
+  // --- AI PROVIDER STATE (PHASE R5) ---
+  const [providersInfo, setProvidersInfo] = useState(null);
+  const [selectedProvider, setSelectedProvider] = useState('auto'); // 'auto' | 'ollama' | 'gemini' | 'grounded'
+  const [loadingProviders, setLoadingProviders] = useState(false);
+
+  useEffect(() => {
+    fetchProviders();
+  }, []);
+
+  const fetchProviders = async () => {
+    try {
+      setLoadingProviders(true);
+      const res = await aiAPI.getProviders();
+      setProvidersInfo(res);
+    } catch (err) {
+      console.warn('Không thể tải danh sách AI providers:', err);
+    } finally {
+      setLoadingProviders(false);
+    }
+  };
 
   // --- TAB 1: PRODUCT RECOMMENDATION STATE ---
   const [recQuery, setRecQuery] = useState('');
@@ -180,7 +201,8 @@ export const AiAssistantPage = ({ onNavigate }) => {
     }
     try {
       setRecLoading(true);
-      const data = await aiAPI.recommend(recQuery.trim(), recBudget || null, 5);
+      const provParam = selectedProvider === 'auto' ? null : selectedProvider;
+      const data = await aiAPI.recommend(recQuery.trim(), recBudget || null, 5, provParam);
       setRecResult(data);
     } catch (err) {
       addToast(err.message, 'error');
@@ -198,7 +220,8 @@ export const AiAssistantPage = ({ onNavigate }) => {
     try {
       setRepLoading(true);
       setRepPeriod(period);
-      const data = await aiAPI.generateSalesReport(period);
+      const provParam = selectedProvider === 'auto' ? null : selectedProvider;
+      const data = await aiAPI.generateSalesReport(period, provParam);
       setRepResult(data);
     } catch (err) {
       addToast(err.message, 'error');
@@ -404,18 +427,76 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     boxShadow: '0 0 6px var(--accent-green)',
                   }}
                 />
-                HYBRID RAG ONLINE
+                RETRIEVAL & GROUNDING ONLINE
               </span>
             </div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-              Engine: <span style={{ color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>gemini-3.6-flash</span> | Index:{' '}
-              <span style={{ color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>ChromaDB Persistent</span> | Verification:{' '}
-              <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)' }}>SQLite WAL Guard</span>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span>
+                Active Engine:{' '}
+                <strong style={{
+                  color: providersInfo?.active_provider === 'ollama' ? 'var(--accent-cyan)' :
+                         providersInfo?.active_provider === 'gemini' ? 'var(--accent-green)' : 'var(--accent-amber)',
+                  fontFamily: 'var(--font-mono)'
+                }}>
+                  {providersInfo?.active_provider === 'ollama'
+                    ? `Ollama Local (${providersInfo.providers?.ollama?.model || 'qwen2.5:1.5b'})`
+                    : providersInfo?.active_provider === 'gemini'
+                    ? `Google Gemini (${providersInfo.providers?.gemini?.model || '3.6-flash'})`
+                    : 'Grounded Direct Lookup (SQLite WAL)'}
+                </strong>
+              </span>
+              <span>|</span>
+              <span>Index: <span style={{ color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>ChromaDB Persistent</span></span>
+              <span>|</span>
+              <span>Guard: <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)' }}>SQLite WAL Guard</span></span>
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* AI Provider Switcher (Phase R5) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              background: 'rgba(0, 0, 0, 0.25)',
+              padding: '0.35rem 0.65rem',
+              borderRadius: '4px',
+              border: '1px solid var(--border-color)',
+              fontSize: '0.8rem',
+            }}
+          >
+            <Cpu size={14} style={{ color: 'var(--accent-cyan)' }} />
+            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Provider:</span>
+            <select
+              value={selectedProvider}
+              onChange={(e) => setSelectedProvider(e.target.value)}
+              style={{
+                background: 'var(--panel-bg)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '3px',
+                padding: '2px 6px',
+                fontSize: '0.78rem',
+                fontFamily: 'var(--font-mono)',
+                cursor: 'pointer',
+              }}
+              title="Chọn AI Provider xử lý (Local Ollama, Cloud Gemini hoặc Grounded Fallback)"
+            >
+              <option value="auto">
+                Tự động ({providersInfo?.active_provider ? providersInfo.active_provider.toUpperCase() : 'MẶC ĐỊNH'})
+              </option>
+              <option value="ollama" disabled={providersInfo && !providersInfo.providers?.ollama?.available}>
+                Ollama Local {providersInfo?.providers?.ollama?.available ? '🟢 (Khả dụng)' : '🔴 (Chưa chạy)'}
+              </option>
+              <option value="gemini" disabled={providersInfo && !providersInfo.providers?.gemini?.available}>
+                Gemini Cloud {providersInfo?.providers?.gemini?.available ? '🟢 (Khả dụng)' : '🔴 (Thiếu Key)'}
+              </option>
+              <option value="grounded">Grounded Fallback 🟢 (SQLite thuần)</option>
+            </select>
+          </div>
+
           {isAdmin && (
             <button
               onClick={handleSyncIndex}
@@ -441,6 +522,29 @@ export const AiAssistantPage = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+
+      {/* Ollama Not Ready Warning Banner */}
+      {selectedProvider === 'ollama' && providersInfo && !providersInfo.providers?.ollama?.available && (
+        <div
+          style={{
+            marginBottom: '1rem',
+            padding: '0.75rem 1rem',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            fontSize: '0.85rem',
+            color: 'var(--accent-red)',
+          }}
+        >
+          <AlertCircle size={18} />
+          <div>
+            <strong>Ollama Local Service chưa khởi động hoặc chưa tải model:</strong> Dịch vụ chưa sẵn sàng tại <code>http://127.0.0.1:11434</code>. Hệ thống sẽ tự động fallback sang chế độ tra cứu SQLite Grounded để bảo đảm không gián đoạn giao dịch.
+          </div>
+        </div>
+      )}
 
       {/* Navigation Tabs */}
       <div
@@ -660,9 +764,9 @@ export const AiAssistantPage = ({ onNavigate }) => {
               <div style={{ display: 'inline-block', marginBottom: '0.75rem' }}>
                 <Bot size={36} className="spin-animation" />
               </div>
-              <div style={{ fontSize: '1rem', fontWeight: 600 }}>StoreFlow AI đang xử lý Hybrid RAG...</div>
+              <div style={{ fontSize: '1rem', fontWeight: 600 }}>StoreFlow AI đang xử lý truy vấn sản phẩm...</div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                1. Semantic Search ChromaDB Top-K ➔ 2. SQLite Stock Verification Guard ➔ 3. Gemini 3.6 Flash Generation
+                1. Dense Vector ChromaDB Top-K ➔ 2. Lexical Reranking & SQLite Stock Guard ➔ 3. AI Generation ({selectedProvider === 'ollama' ? 'Ollama Local' : selectedProvider === 'gemini' ? 'Gemini Cloud' : 'Active Provider'})
               </div>
             </div>
           )}
@@ -694,8 +798,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     <Terminal size={16} />
                     PHÂN TÍCH TƯ VẤN CỦA TRỢ LÝ AI
                   </div>
-                  {recResult.is_fallback ? (
-                    <Badge variant="warning">Chế độ tra cứu trực tiếp</Badge>
+                  {recResult.is_fallback || recResult.provider === 'grounded' ? (
+                    <Badge variant="warning">Chế độ tra cứu trực tiếp SQLite</Badge>
+                  ) : recResult.provider === 'ollama' ? (
+                    <Badge variant="blue">Ollama Local (Qwen 2.5 1.5B GPU)</Badge>
                   ) : (
                     <Badge variant="success">Gemini 3.6 Flash Grounded</Badge>
                   )}
@@ -1336,7 +1442,9 @@ export const AiAssistantPage = ({ onNavigate }) => {
               <div style={{ display: 'inline-block', marginBottom: '0.75rem' }}>
                 <Cpu size={36} className="spin-animation" />
               </div>
-              <div style={{ fontSize: '1.05rem', fontWeight: 600 }}>Gemini 3.6 Flash đang tổng hợp số liệu kinh doanh...</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 600 }}>
+                AI Engine ({selectedProvider === 'ollama' ? 'Ollama Local GPU' : selectedProvider === 'gemini' ? 'Gemini Cloud' : 'Multi-Provider'}) đang tổng hợp số liệu kinh doanh...
+              </div>
               <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
                 Trích xuất SQL Doanh thu ➔ Phân tích Top sản phẩm ➔ Phát hiện nguy cơ hết kho ➔ Đề xuất kế hoạch nhập hàng
               </div>
@@ -1393,10 +1501,12 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     <Terminal size={16} />
                     BÁO CÁO CHIẾN LƯỢC KINH DOANH & ĐỀ XUẤT NHẬP KHO (STOREFLOW BI)
                   </div>
-                  {repResult.is_fallback ? (
-                    <Badge variant="warning">Chế độ SQL Aggregation</Badge>
+                  {repResult.is_fallback || repResult.provider === 'grounded' ? (
+                    <Badge variant="warning">Chế độ SQL Aggregation (Fallback)</Badge>
+                  ) : repResult.provider === 'ollama' ? (
+                    <Badge variant="blue">Ollama Local BI Analysis</Badge>
                   ) : (
-                    <Badge variant="success">AI Grounded Analysis</Badge>
+                    <Badge variant="success">Gemini Grounded Analysis</Badge>
                   )}
                 </div>
 

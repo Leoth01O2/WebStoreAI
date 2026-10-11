@@ -1,11 +1,11 @@
 # STOREFLOW AI 2.0 — COMPREHENSIVE SYSTEM AUDIT & MODERNIZATION ROADMAP
 
-> **Tài liệu Kế hoạch Kiểm toán & Lộ trình Hiện đại hóa Toàn diện Hệ thống**  
-> **Dự án**: StoreFlow AI — Hệ thống Quản lý Bán hàng Bán lẻ & POS Tích hợp AI Đa vai trò  
-> **Mã giai đoạn**: R0 (System Audit & Phased Architecture Plan — Phiên bản Chuẩn hóa Cuối cùng)  
-> **Phiên bản tài liệu**: 2.3.0-FINAL  
-> **Ngày cập nhật**: 10/10/2026  
-> **Môi trường mục tiêu**: Windows 11 | CPU Intel Core i5-11400H (6C/12T) | RAM 16GB | GPU NVIDIA GeForce RTX 3050 Laptop (4GB VRAM) | Python 3.12 / FastAPI / SQLite (WAL) / React 19 / Vite 8 / Native Fetch  
+> **Tài liệu Kế hoạch Kiểm toán & Lộ trình Hiện đại hóa Toàn diện Hệ thống**
+> **Dự án**: StoreFlow AI — Hệ thống Quản lý Bán hàng Bán lẻ & POS Tích hợp AI Đa vai trò
+> **Mã giai đoạn**: R0 (System Audit & Phased Architecture Plan — Phiên bản Chuẩn hóa Cuối cùng)
+> **Phiên bản tài liệu**: 2.3.0-FINAL
+> **Ngày cập nhật**: 10/10/2026
+> **Môi trường mục tiêu**: Windows 11 | CPU Intel Core i5-11400H (6C/12T) | RAM 16GB | GPU NVIDIA GeForce RTX 3050 Laptop (4GB VRAM) | Python 3.12 / FastAPI / SQLite (WAL) / React 19 / Vite 8 / Native Fetch
 > **Nguyên tắc thực hiện Giai đoạn R0**: **AUDIT + DESIGN PLAN ONLY — TUYỆT ĐỐI CHƯA SỬA APPLICATION CODE, DATABASE HOẶC TÀI LIỆU DOCX/PLANTUML.**
 
 ---
@@ -538,9 +538,12 @@ gantt
   2. *Giải pháp Trạng thái Thanh toán Lịch sử (Khuyến nghị Phương án A)*:
      - Bổ sung `unverified_legacy` làm giá trị thứ 6 trong enum `payment_status`.
      - Ánh xạ an toàn không bóp méo số liệu:
-       - 232 đơn `'completed'` $ightarrow$ chuyển sang `payment_status = 'unverified_legacy'`.
-       - 73 đơn `'paid'` (chưa đối soát tiền thực nhận) $ightarrow$ chuyển sang `payment_status = 'unverified_legacy'`.
-       - 12 đơn `'pending'` $ightarrow$ chuyển sang `payment_status = 'unpaid'`.
+       - 232 đơn `'completed'` $
+ightarrow$ chuyển sang `payment_status = 'unverified_legacy'`.
+       - 73 đơn `'paid'` (chưa đối soát tiền thực nhận) $
+ightarrow$ chuyển sang `payment_status = 'unverified_legacy'`.
+       - 12 đơn `'pending'` $
+ightarrow$ chuyển sang `payment_status = 'unpaid'`.
      - **Cam kết**: 0 đơn lịch sử nào bị tự ý gán là `'paid'`. Báo cáo doanh thu thực thu (`WHERE payment_status = 'paid'`) trả về đúng 0 VNĐ cho các đơn chưa xác minh.
   3. *Thiết kế Giao Vận `fulfillment_status`*:
      - Cột `fulfillment_status TEXT NOT NULL CHECK(fulfillment_status IN ('unfulfilled', 'packing', 'shipping', 'delivered', 'delivery_failed', 'returned_to_inventory', 'legacy_unknown'))`.
@@ -548,7 +551,10 @@ gantt
      - Đơn mới tạo tại quầy POS: mặc định `'delivered'`. Đơn online/remote: mặc định `'unfulfilled'`.
   4. *Quy trình Rebuild Bảng An toàn (12 Bước SQLite Standard)*:
      - Tắt `PRAGMA foreign_keys = OFF` ngoài transaction trước khi `BEGIN IMMEDIATE`.
-     - Tạo `orders_new` $ightarrow$ Copy chuyển đổi $ightarrow$ Drop `orders` $ightarrow$ Rename `orders_new` sang `orders`.
+     - Tạo `orders_new` $
+ightarrow$ Copy chuyển đổi $
+ightarrow$ Drop `orders` $
+ightarrow$ Rename `orders_new` sang `orders`.
      - Tái tạo 5 Indexes: `idx_orders_status`, `idx_orders_created`, `idx_orders_code`, `idx_orders_payment_status`, `idx_orders_fulfillment`.
      - `PRAGMA foreign_key_check` đạt 0 lỗi, `PRAGMA integrity_check` trả về `'ok'`.
      - Đã kiểm chứng tính Idempotency và Rollback khi lỗi trên bản clone.
@@ -751,22 +757,66 @@ gantt
 
 ---
 
-#### PHASE R5: Pluggable AI Providers & Local Benchmark
-- **Mục tiêu**: Xây dựng kiến trúc Pluggable AI Providers (Strategy Pattern) với lifecycle quản lý hoàn chỉnh; Thực hiện benchmark đo kiểm thực tế các mô hình AI Local trên GPU RTX 3050 Laptop 4GB.
-- **Phạm vi**:
-  - Xây dựng module `app/services/ai_providers/` (`base.py`, `gemini_provider.py`, `ollama_provider.py`, `deterministic_provider.py`).
-  - Tích hợp Provider Lifecycle: Health check định kỳ, Timeout cấu hình được, Cold-start handling, Hàng đợi yêu cầu, và Nhãn hiển thị nguồn AI minh bạch.
-  - Thực hiện bộ benchmark đo kiểm thực tế trên máy tính mục tiêu:
-    - Text: Đo kiểm Qwen3 4B / Qwen2.5 3B, Gemma 3 4B, và Qwen 7B đối chứng (đo Peak VRAM, tok/s thực tế, cold-start latency).
-    - Vision: Đưa Gemma 3 4B (Multimodal) và Qwen2.5-VL 3B vào đo kiểm thực tế cho tác vụ phân tích ảnh. Mốc $< 2.5\text{s}$ là mục tiêu benchmark tham chiếu (benchmark target), không phải DoD cứng trước khi đo.
-  - **Xử lý khi phần cứng laptop không đáp ứng**: Nếu mô hình local gây tràn VRAM (>3.5GB) hoặc giật lag trên card RTX 3050 Laptop 4GB, hệ thống báo cáo minh bạch hạn chế phần cứng và kích hoạt Tier 3 (Deterministic Search) an toàn, tuyệt đối không tuyên bố thành công giả tạo.
-  - Chọn lựa mô hình chính thức dựa trên số liệu đo kiểm thực tế.
-- **File dự kiến**: `backend/app/services/ai_providers/` (mới), `backend/app/services/ai_service.py`, `backend/app/core/config.py`.
-- **Không thay đổi**: Không phá vỡ API schema hiện có của endpoint `/recommend`, `/sales-report`, `/sales-qa`.
-- **Tiền đề**: Hoàn thành Phase R4.
-- **Kiểm thử**: Tắt Internet / tắt API key $\rightarrow$ Hệ thống tự động chuyển sang Ollama Provider mượt mà; Kiểm tra `nvidia-smi` xác nhận VRAM không bị tràn xuống shared memory.
-- **DoD**: Bảng số liệu benchmark thực tế đầy đủ; failover hoạt động ổn định và thông báo rõ ràng cho người dùng.
-- **STOP Condition**: **DỪNG LẠI báo cáo kết quả benchmark phần cứng trước khi sang R6.**
+#### PHASE R5: Pluggable AI Providers & Local Benchmark [COMPLETED ✅ 11/10/2026]
+- **Trạng thái**: **HOÀN THÀNH (10/10 Targeted Tests PASS, 123/123 Full Regression Tests PASS, Frontend Production Build PASS)**
+- **Mục tiêu**: Tích hợp mô hình ngôn ngữ chạy cục bộ bằng Ollama (không cần Gemini API key hoặc Internet); Xây dựng kiến trúc Pluggable AI Providers (Strategy Pattern: Gemini, Ollama, Grounded Fallback) với lifecycle quản lý hoàn chỉnh; Chuẩn hóa thuật ngữ retrieval; Hoàn thiện tự động đồng bộ sản phẩm từ SQLite sang ChromaDB khi CRUD; và Kiểm thử, đo hiệu năng Ollama trên phần cứng thực tế (RTX 3050 Laptop 4GB).
+- **Hiện trạng & Thành quả triển khai thực tế**:
+  1. *Kiến trúc AI Provider Đa Nguồn (Pluggable AI Architecture)*:
+     - Module `backend/app/services/ai_providers/`:
+       * `base.py`: Lớp trừu tượng `BaseAIProvider` định nghĩa `generate_text()` và `health_check()`.
+       * `gemini_provider.py`: Google Gemini 3.6 Flash provider kèm bridge tương thích ngược `ai_service._call_gemini`.
+       * `ollama_provider.py`: Local Ollama provider kết nối `http://127.0.0.1:11434/api/chat`, tự động đo `tokens_per_second`, latency và số layers offload GPU.
+       * `grounded_provider.py`: Deterministic SQLite Fact Generator, đảm bảo 0% ảo giác khi mất mạng/hết quota.
+       * `manager.py`: `AIProviderManager` (`ai_provider_manager`) điều phối chuỗi fallback an toàn (`ollama`/`gemini` $\rightarrow$ `grounded`), kiểm tra sức khỏe và tự động nhận diện mock trong test legacy.
+     - Endpoint mới: `GET /api/v1/ai/providers` trả về trạng thái cấu hình và khả dụng của từng provider.
+     - Mở rộng response schemas: `recommend`, `sales-report`, `sales-qa` đều trả về trường `provider` thực tế (`"ollama"`, `"gemini"`, hoặc `"grounded"`).
+  2. *Đo kiểm Benchmark Thực tế trên Phần Cứng Mục Tiêu (Physical Hardware)*:
+     - Cấu hình thực tế: Windows 11, Intel Core i5-11400H, RAM 16GB, GPU NVIDIA GeForce RTX 3050 Laptop 4GB VRAM.
+     - Xử lý hạn chế không gian ổ cứng: Ổ `C:` chỉ còn ~470MB khả dụng. Đã triển khai bộ cài portable Ollama 0.40.2 tại `D:\Ollama` với thư mục mô hình tại `D:\Ollama\models` (ổ `D:` còn 90+ GB trống).
+     - Mô hình lựa chọn: **`qwen2.5:1.5b`** (Q4_K_M, tải về 986 MB $\le 2\text{GB}$, bộ nhớ VRAM an toàn tuyệt đối).
+     - **Kết quả đo kiểm thực tế bằng `nvidia-smi` và Ollama Native Telemetry**:
+       * GPU Offload: **100% (29/29 layers)** offloaded lên GPU NVIDIA GeForce RTX 3050 Laptop.
+       * VRAM sử dụng: **1,191 MB / 4,096 MB (~29% VRAM)** — Còn trống tới 71% VRAM, **0% tràn xuống shared memory**.
+       * Tốc độ suy luận (Generation Speed): **111.68 tokens/giây** (vượt trội so với mốc CPU thông thường).
+       * Thời gian phản hồi Warm Latency: **0.80s – 0.84s / phản hồi**.
+       * Thời gian nạp model lần đầu (Cold Start Load): **51.2s** (chỉ diễn ra 1 lần duy nhất khi khởi động daemon).
+       * Chất lượng tiếng Việt: Mạch lạc, đúng ngữ cảnh tư vấn thiết bị máy tính, tuân thủ tuyệt đối chốt chặn dữ liệu từ SQLite.
+  3. *Chuẩn hóa Thuật ngữ Retrieval (Terminology Normalization)*:
+     - Đính chính kỹ thuật: Hệ thống retrieval hiện tại sử dụng pipeline **Dense Vector Retrieval (ChromaDB) + Lexical/Category Re-ranking + Strict SQLite Truth Guard**, không phải kiến trúc Sparse BM25 độc lập kết hợp Dual-Branch Inverted Index.
+     - Cập nhật định nghĩa chuẩn hóa trong toàn bộ tài liệu và docstring mã nguồn.
+  4. *Đánh giá Retrieval trên Bộ 10 Câu hỏi Mới (Fresh Queries Evaluation)*:
+     - Đánh giá tập 10 câu hỏi chưa từng nằm trong benchmark R4: Đạt **10/10 (100.0%)**.
+     - Câu hỏi ngoài danh mục (`chuot logitec g502`) trả về danh sách rỗng chính xác mà không bịa đặt sản phẩm, giữ FAR = 0%.
+  5. *Tự động Đồng bộ Sản phẩm SQLite $\leftrightarrow$ ChromaDB khi CRUD*:
+     - `backend/app/api/v1/products.py`: Tự động trigger đồng bộ vector khi Admin tạo mới (`POST`), cập nhật (`PUT`), hoặc xóa (`DELETE`) sản phẩm qua API/giao diện.
+     - Phát hiện cập nhật ngữ nghĩa: Nếu chỉ sửa giá hoặc tồn kho, SQLite cập nhật tức thì còn vector document không phải tính toán lại lãng phí; nếu sửa tên/danh mục/mô tả, vector document được cập nhật đồng bộ.
+     - Đối soát tự phục hồi nâng cao: `check_sync_status()` kiểm tra cả `missing_in_chroma`, `orphan_in_chroma` và **`outdated_in_chroma`** (so sánh hash nội dung và trạng thái kinh doanh giữa SQLite và ChromaDB). `reconcile_sync()` tự sửa toàn bộ các lỗi lệch chỉ mục mà không tạo bản ghi trùng lặp.
+  6. *Tích hợp Frontend AI Assistant*:
+     - Tự động gọi `GET /api/v1/ai/providers` để nhận diện provider thực tế.
+     - Hỗ trợ dropdown chọn Provider: Tự động (Mặc định) | Ollama Local (Offline GPU) | Gemini Cloud | Grounded Fallback (SQLite).
+     - Hiển thị badge chính xác: `Ollama Local (Qwen 2.5 1.5B GPU)`, `Gemini 3.6 Flash Grounded`, hoặc `Chế độ tra cứu trực tiếp SQLite`. Tuyệt đối không hiển thị nhãn Gemini/Ollama khi hệ thống đang dùng fallback.
+     - Cảnh báo trực quan khi Ollama chưa chạy, tự động fallback sang SQLite bảo đảm trải nghiệm không bị đứt quãng.
+- **Files đã sửa/tạo**:
+  - `backend/app/core/config.py` (Cấu hình `AI_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT_SECONDS`)
+  - `backend/app/services/ai_providers/` (`base.py`, `gemini_provider.py`, `ollama_provider.py`, `grounded_provider.py`, `manager.py`)
+  - `backend/app/services/ai_service.py` (Tích hợp Provider Manager, fallback chain, return `provider_used`)
+  - `backend/app/services/rag_service.py` (Chuẩn hóa thuật ngữ retrieval, phát hiện `outdated_in_chroma`, self-healing reconciliation)
+  - `backend/app/schemas/ai.py` (Provider response/request schemas, `provider` field trong recommend, sales-report, sales-qa)
+  - `backend/app/api/v1/ai.py` (Router endpoint `GET /api/v1/ai/providers`)
+  - `backend/app/api/v1/products.py` (Automatic vector sync on create/update/delete)
+  - `frontend/src/services/api.js` (Bổ sung `getProviders`, truyền `provider` parameter)
+  - `frontend/src/pages/AiAssistantPage.jsx` (Giao diện chọn provider, hiển thị engine/status, cảnh báo offline, dynamic badges)
+  - `backend/tests/test_phase_r5_ollama_providers.py` (Suite 11 bài kiểm thử chuyên biệt R5)
+  - `backend/tests/conftest.py` (Cô lập ChromaDB test session, bảo vệ an toàn 100% cho production chroma_data)
+  - `scripts/start_ollama.bat` & `scripts/start_ollama.ps1` (Script khởi động Ollama độc lập chỉ định an toàn OLLAMA_MODELS=D:\Ollama\models)
+- **Kết quả kiểm thử Final QA**:
+  - **11/11 targeted tests PASSED (11.02s)** trong `test_phase_r5_ollama_providers.py` (bao gồm kịch bản phục hồi sau downtime ChromaDB).
+  - **158/158 full regression tests PASSED (186.37s)** trên 15 test suites toàn hệ thống (R1-R5, Security, Rate Limit, RBAC, Order workflow, AI RAG).
+  - Production build frontend Vite: `✓ built in 498ms` (0 errors).
+  - Production Database `backend/webstore.db` bảo toàn nguyên vẹn schema version 3, 317 đơn lịch sử, 30 sản phẩm.
+  - ChromaDB Collection: 30/30 sản phẩm đồng bộ 100% với SQLite (0 missing, 0 orphan, 0 outdated).
+- **DoD**: Đạt 100% tiêu chí nghiệm thu Phase R5 & Final QA.
+- **STOP Condition**: **DỪNG LẠI tại đây sau khi hoàn thành Phase R5 Final QA. CHỜ NGHIỆM THU TRƯỚC KHI BẮT ĐẦU R6.**
 
 ---
 

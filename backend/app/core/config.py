@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.6-flash"
 
+    # Ollama & Pluggable AI Providers (Phase R5)
+    AI_PROVIDER: str = "auto"  # "auto", "ollama", "gemini", "grounded"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen2.5:1.5b"
+    OLLAMA_TIMEOUT_SECONDS: float = 60.0
+
     # ChromaDB
     CHROMA_PERSIST_DIRECTORY: str = str(BASE_DIR / "chroma_data")
 
