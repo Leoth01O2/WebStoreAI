@@ -11,7 +11,43 @@ from app.services.ai_providers.base import BaseAIProvider
 logger = logging.getLogger(__name__)
 
 
+def detect_repetition(text: str) -> bool:
+    """
+    Detects severe repetitive loops in LLM generated output.
+    Returns True if degenerate repetition is detected.
+    """
+    if not text or len(text) < 80:
+        return False
+
+    lines = [line.strip() for line in text.split("\n") if len(line.strip()) >= 20]
+    line_counts = {}
+    for line in lines:
+        line_counts[line] = line_counts.get(line, 0) + 1
+        if line_counts[line] >= 4:
+            return True
+
+    sentences = [s.strip() for s in text.replace("!", ".").replace("?", ".").split(".") if len(s.strip()) >= 25]
+    sent_counts = {}
+    for s in sentences:
+        sent_counts[s] = sent_counts.get(s, 0) + 1
+        if sent_counts[s] >= 4:
+            return True
+
+    words = text.split()
+    if len(words) >= 40:
+        ngram_size = 6
+        ngrams = [" ".join(words[i:i+ngram_size]) for i in range(len(words) - ngram_size + 1)]
+        ng_counts = {}
+        for ng in ngrams:
+            ng_counts[ng] = ng_counts.get(ng, 0) + 1
+            if ng_counts[ng] >= 5:
+                return True
+
+    return False
+
+
 class OllamaProvider(BaseAIProvider):
+
     """
     Local Ollama AI Provider (Phase R5).
     Runs local open-weights LLMs (such as Qwen 2.5 1.5B/3B) offline on localhost.
@@ -83,7 +119,8 @@ class OllamaProvider(BaseAIProvider):
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.3,
-        max_tokens: int = 2048
+        max_tokens: int = 2048,
+        format: Optional[str] = None
     ) -> str:
         """
         Invokes Ollama /api/chat with the provided prompt and system instruction.
@@ -92,6 +129,11 @@ class OllamaProvider(BaseAIProvider):
         sys_inst = system_instruction or prompt_loader.get_system_prompt()
         start_time = time.time()
 
+        options = {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+            "repeat_penalty": 1.18,
+        }
         payload = {
             "model": self.model,
             "messages": [
@@ -99,11 +141,11 @@ class OllamaProvider(BaseAIProvider):
                 {"role": "user", "content": prompt}
             ],
             "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-            }
+            "options": options
         }
+        if format:
+            payload["format"] = format
+
 
         try:
             with self._get_client() as client:

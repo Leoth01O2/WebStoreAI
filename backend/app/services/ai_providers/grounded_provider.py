@@ -20,7 +20,8 @@ class GroundedProvider(BaseAIProvider):
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.0,
-        max_tokens: int = 2048
+        max_tokens: int = 2048,
+        format: Optional[str] = None
     ) -> str:
         """
         Direct text generator for Grounded provider.

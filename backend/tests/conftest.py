@@ -62,6 +62,31 @@ def isolate_test_database():
     init_db()
     seed_database()
 
+    # Seed Sony product into test_webstore.db to mirror real store scenario (Sony over budget)
+    from app.core.database import get_db
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT id FROM products WHERE sku = 'SKU-841798'")
+        if not c.fetchone():
+            c.execute("SELECT id FROM categories WHERE code = 'CAT-AUDIO'")
+            cat_row = c.fetchone()
+            cat_id = cat_row["id"] if cat_row else 1
+            c.execute("""
+                INSERT INTO products (sku, name, category_id, cost_price, selling_price, stock_quantity, min_stock_alert, unit, description, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                "SKU-841798",
+                "Tai nghe Chống ồn Không dây Sony WH-1000XM4",
+                cat_id,
+                12000000.0,
+                16780000.0,
+                1,
+                1,
+                "chiếc",
+                "Tai nghe chống ồn cao cấp Sony chính hãng, âm thanh Hi-Res, pin 30h",
+                "active"
+            ))
+
     # Isolate ChromaDB collections for the test session
     rag_service.persist_dir = Path(TEST_CHROMA_PATH)
     rag_service.persist_dir.mkdir(parents=True, exist_ok=True)

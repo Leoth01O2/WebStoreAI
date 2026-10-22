@@ -38,14 +38,18 @@ export const AiAssistantPage = ({ onNavigate }) => {
 
   // --- AI PROVIDER STATE (PHASE R5) ---
   const [providersInfo, setProvidersInfo] = useState(null);
+  const [providersLoading, setProvidersLoading] = useState(true);
   const [selectedProvider, setSelectedProvider] = useState('auto'); // 'auto' | 'ollama' | 'gemini' | 'grounded'
 
   const fetchProviders = async () => {
+    setProvidersLoading(true);
     try {
       const res = await aiAPI.getProviders();
       setProvidersInfo(res);
     } catch (err) {
       console.warn('Không thể tải danh sách AI providers:', err);
+    } finally {
+      setProvidersLoading(false);
     }
   };
 
@@ -431,11 +435,14 @@ export const AiAssistantPage = ({ onNavigate }) => {
               <span>
                 Active Engine:{' '}
                 <strong style={{
-                  color: providersInfo?.active_provider === 'ollama' ? 'var(--accent-cyan)' :
+                  color: providersLoading ? 'var(--text-muted)' :
+                         providersInfo?.active_provider === 'ollama' ? 'var(--accent-cyan)' :
                          providersInfo?.active_provider === 'gemini' ? 'var(--accent-green)' : 'var(--accent-amber)',
                   fontFamily: 'var(--font-mono)'
                 }}>
-                  {providersInfo?.active_provider === 'ollama'
+                  {providersLoading
+                    ? '⏳ Đang kiểm tra trạng thái engine...'
+                    : providersInfo?.active_provider === 'ollama'
                     ? `Ollama Local (${providersInfo.providers?.ollama?.model || 'qwen2.5:1.5b'})`
                     : providersInfo?.active_provider === 'gemini'
                     ? `Google Gemini (${providersInfo.providers?.gemini?.model || '3.6-flash'})`
@@ -482,13 +489,13 @@ export const AiAssistantPage = ({ onNavigate }) => {
               title="Chọn AI Provider xử lý (Local Ollama, Cloud Gemini hoặc Grounded Fallback)"
             >
               <option value="auto">
-                Tự động ({providersInfo?.active_provider ? providersInfo.active_provider.toUpperCase() : 'MẶC ĐỊNH'})
+                Tự động {providersLoading ? '⏳ (Đang kiểm tra...)' : `(${providersInfo?.active_provider ? providersInfo.active_provider.toUpperCase() : 'MẶC ĐỊNH'})`}
               </option>
-              <option value="ollama" disabled={providersInfo && !providersInfo.providers?.ollama?.available}>
-                Ollama Local {providersInfo?.providers?.ollama?.available ? '🟢 (Khả dụng)' : '🔴 (Chưa chạy)'}
+              <option value="ollama" disabled={!providersLoading && !providersInfo?.providers?.ollama?.available}>
+                Ollama Local {providersLoading ? '⏳ (Đang kiểm tra...)' : (providersInfo?.providers?.ollama?.available ? '🟢 (Khả dụng)' : '🔴 (Chưa chạy)')}
               </option>
-              <option value="gemini" disabled={providersInfo && !providersInfo.providers?.gemini?.available}>
-                Gemini Cloud {providersInfo?.providers?.gemini?.available ? '🟢 (Khả dụng)' : '🔴 (Thiếu Key)'}
+              <option value="gemini" disabled={!providersLoading && !providersInfo?.providers?.gemini?.available}>
+                Gemini Cloud {providersLoading ? '⏳ (Đang kiểm tra...)' : (providersInfo?.providers?.gemini?.available ? '🟢 (Khả dụng)' : '🔴 (Thiếu Key)')}
               </option>
               <option value="grounded">Grounded Fallback 🟢 (SQLite thuần)</option>
             </select>
@@ -521,7 +528,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
       </div>
 
       {/* Ollama Not Ready Warning Banner */}
-      {selectedProvider === 'ollama' && providersInfo && !providersInfo.providers?.ollama?.available && (
+      {!providersLoading && selectedProvider === 'ollama' && providersInfo && !providersInfo.providers?.ollama?.available && (
         <div
           style={{
             marginBottom: '1rem',
@@ -795,13 +802,41 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     <Terminal size={16} />
                     PHÂN TÍCH TƯ VẤN CỦA TRỢ LÝ AI
                   </div>
-                  {recResult.is_fallback || recResult.provider === 'grounded' ? (
-                    <Badge variant="warning">Chế độ tra cứu trực tiếp SQLite</Badge>
-                  ) : recResult.provider === 'ollama' ? (
-                    <Badge variant="blue">Ollama Local (Qwen 2.5 1.5B GPU)</Badge>
-                  ) : (
-                    <Badge variant="success">Gemini 3.6 Flash Grounded</Badge>
-                  )}
+                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                    {recResult.intent_provider_used && (
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginRight: '4px' }}>
+                        Intent: <strong style={{ color: recResult.intent_provider_used === 'ollama' ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>{recResult.intent_provider_used.toUpperCase()}</strong> |
+                      </span>
+                    )}
+                    {recResult.generation_provider_used === 'ollama' ? (
+                      <Badge variant="blue">Ollama Local ({providersInfo?.providers?.ollama?.model || 'Qwen 2.5 1.5B'})</Badge>
+                    ) : recResult.generation_provider_used === 'gemini' ? (
+                      <Badge variant="success">Gemini Cloud Grounded</Badge>
+                    ) : recResult.generation_provider_used === 'ambiguity_guard' ? (
+                      <Badge variant="warning">Ambiguity Guard (Quy tắc làm rõ)</Badge>
+                    ) : recResult.generation_provider_used === 'domain_guard' ? (
+                      <Badge variant="warning">Domain Guard (Phạm vi kinh doanh)</Badge>
+                    ) : (
+                      <Badge variant="warning">Chế độ tra cứu trực tiếp SQLite</Badge>
+                    )}
+                    {recResult.fallback_reason && (
+                      <span
+                        style={{
+                          fontSize: '0.7rem',
+                          color: 'var(--accent-amber)',
+                          fontFamily: 'var(--font-mono)',
+                          marginLeft: '4px',
+                          border: '1px solid rgba(255, 180, 84, 0.3)',
+                          padding: '1px 6px',
+                          borderRadius: '3px',
+                          background: 'rgba(255, 180, 84, 0.1)',
+                        }}
+                        title={`Lý do chuyển chế độ dự phòng: ${recResult.fallback_reason}`}
+                      >
+                        [{recResult.fallback_reason}]
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div
@@ -843,7 +878,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.83rem', color: 'var(--accent-green)', fontWeight: 600 }}>
                         <ShieldCheck size={16} />
-                        <span>Đã đối chiếu <strong>{recResult.recommended_products.length} sản phẩm</strong> còn hàng trong kho SQLite (danh sách chi tiết ở cột bên phải).</span>
+                        <span>Đã xác minh <strong>{recResult.recommended_products.length} sản phẩm phù hợp</strong> đáp ứng tiêu chí trong kho SQLite.</span>
                       </div>
                       <span style={{ fontSize: '0.76rem', color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                         👉 Chọn sản phẩm ở cột phải để Mở bán POS / Thêm giỏ hàng
@@ -857,14 +892,14 @@ export const AiAssistantPage = ({ onNavigate }) => {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <h3 style={{ fontSize: '0.95rem', margin: 0, fontWeight: 700, color: 'var(--text-primary)' }}>
-                    Sản phẩm khả dụng ({recResult.recommended_products.length})
+                    Sản phẩm phù hợp ({recResult.recommended_products ? recResult.recommended_products.length : 0})
                   </h3>
                   <span style={{ fontSize: '0.75rem', color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'var(--font-mono)' }}>
-                    <ShieldCheck size={14} /> Tồn kho xác thực &gt; 0
+                    <ShieldCheck size={14} /> Tiêu chí & Tồn kho &gt; 0
                   </span>
                 </div>
 
-                {recResult.recommended_products.length === 0 ? (
+                {(!recResult.recommended_products || recResult.recommended_products.length === 0) ? (
                   <div
                     style={{
                       background: 'var(--panel-bg)',
@@ -873,12 +908,13 @@ export const AiAssistantPage = ({ onNavigate }) => {
                       padding: '2rem',
                       textAlign: 'center',
                       color: 'var(--text-muted)',
+                      marginBottom: '1rem',
                     }}
                   >
-                    Không tìm thấy sản phẩm nào còn hàng khớp với yêu cầu.
+                    Không có sản phẩm nào đáp ứng đầy đủ tất cả tiêu chí yêu cầu trong kho.
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', marginBottom: '1rem' }}>
                     {recResult.recommended_products.map((p) => (
                       <ProductCard
                         key={p.product_id || p.id || p.sku}
@@ -893,6 +929,37 @@ export const AiAssistantPage = ({ onNavigate }) => {
                         actionLabel={user?.role === 'customer' ? 'Thêm giỏ / POS' : 'Mở bán POS'}
                       />
                     ))}
+                  </div>
+                )}
+
+                {/* Alternative Suggestions (Separately Labeled) */}
+                {recResult.alternative_products && recResult.alternative_products.length > 0 && (
+                  <div style={{ marginTop: '1.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <h4 style={{ fontSize: '0.85rem', margin: 0, fontWeight: 600, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>
+                        Gợi ý tham khảo — chưa đáp ứng đầy đủ yêu cầu ({recResult.alternative_products.length})
+                      </h4>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Chưa đáp ứng đủ tiêu chí</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.75rem' }}>
+                      {recResult.alternative_products.map((p) => (
+                        <ProductCard
+                          key={`alt-${p.product_id || p.id || p.sku}`}
+                          product={{
+                            ...p,
+                            match_reason: p.match_reason || p.ineligible_reason || 'Chưa đáp ứng đầy đủ tiêu chí'
+                          }}
+                          onViewDetail={(prod) => setSelectedProductDetail(prod)}
+                          onSelect={(prod) => {
+                            if (onNavigate) {
+                              onNavigate('pos');
+                              addToast(`Đã chuyển tới POS. Mã sản phẩm: ${prod.sku}`, 'info');
+                            }
+                          }}
+                          actionLabel={user?.role === 'customer' ? 'Xem / Giỏ hàng' : 'Mở bán POS'}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

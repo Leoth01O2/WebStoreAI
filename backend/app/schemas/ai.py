@@ -25,15 +25,46 @@ class RecommendedProductItem(BaseModel):
     image_url: Optional[str] = None
     status: Optional[str] = "active"
     relevance_score: Optional[float] = None
+    match_reason: Optional[str] = None
+
+
+class UserQueryIntent(BaseModel):
+    intent: str = Field(default="search_products", description="Intent type: search_products, check_brand, check_stock, compare_products, out_of_domain, general_inquiry")
+    brand: Optional[str] = Field(default=None, description="Explicit target brand requested e.g. Apple, Sony, Logitech")
+    product_type: Optional[str] = Field(default=None, description="Explicit target product class if user named one (e.g. mouse, keyboard, headphone, hub). Must be null if user only describes a function or host device.")
+    user_device: Optional[str] = Field(default=None, description="Host device user already owns or connects to, e.g. 'laptop Type-C', 'iPhone 15', 'PC'")
+    desired_capabilities: List[str] = Field(default_factory=list, description="Desired functional capabilities, e.g. ['xuất hình ra màn HDMI', 'sạc nhanh', 'nghe nhạc', 'chơi game', 'chống ồn']")
+    device_compatibility: List[str] = Field(default_factory=list, description="Required ports or protocols, e.g. ['Type-C', 'HDMI', 'Bluetooth', 'USB-A']")
+    required_attributes: List[str] = Field(default_factory=list, description="Mandatory constraints, e.g. ['wireless', 'mechanical', 'silent', 'anc']")
+    preferred_attributes: List[str] = Field(default_factory=list, description="Nice-to-have preferences")
+    negative_constraints: List[str] = Field(default_factory=list, description="Features explicitly NOT wanted, e.g. ['wired', 'rgb']")
+    attributes: Dict[str, Any] = Field(default_factory=dict, description="Backwards-compatible dict of boolean flags e.g. gaming, wireless, wired, mechanical, silent, anc, ergonomic")
+    min_price: Optional[float] = Field(default=None, ge=0, description="Minimum budget constraint in VND")
+    max_price: Optional[float] = Field(default=None, ge=0, description="Maximum budget constraint in VND")
+    needs_clarification: bool = Field(default=False, description="True if query is ambiguous or vague, requiring user clarification")
+    clarification_question: Optional[str] = Field(default=None, description="Clarification question to present to the user")
+    is_out_of_domain: bool = Field(default=False, description="True if query is out of tech/retail store catalog domain")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Confidence score of intent extraction")
+    source: str = Field(default="rule_based", description="Analyzer source: 'llm_ollama', 'llm_gemini', or 'rule_based'")
 
 
 class ProductRecommendResponse(BaseModel):
     ai_response: str
     recommended_products: List[RecommendedProductItem]
+    alternative_products: Optional[List[RecommendedProductItem]] = []
+    effective_budget: Optional[float] = None
     query: str
     total_candidates_found: int
     is_fallback: bool = False
     provider: Optional[str] = Field("grounded", description="Active AI provider: 'ollama', 'gemini', or 'grounded'")
+    requested_provider: Optional[str] = Field(None, description="Provider requested by user/client")
+    intent_provider_used: Optional[str] = Field("grounded", description="Provider used for intent understanding")
+    generation_provider_used: Optional[str] = Field("grounded", description="Provider used for text generation")
+    fallback_reason: Optional[str] = Field(None, description="Reason why fallback occurred, if any")
+    intent_analysis: Optional[UserQueryIntent] = Field(default=None, description="Structured intent analysis from LLM / Rule-based engine")
+    timing_ms: Optional[Dict[str, int]] = Field(default=None, description="Latency breakdown in milliseconds")
+    verification_passed: bool = Field(default=True, description="Whether Double SQL verification passed")
+    guardrail_status: Optional[str] = Field(default="verified", description="Guardrail outcome: verified, corrected, or fallback")
 
 
 # ---------------------------------------------------------------------------

@@ -70,7 +70,7 @@ export default function ProductImage({
         style={{
           width: '100%',
           height: '100%',
-          objectFit: 'cover',
+          objectFit: style?.objectFit || 'cover',
           display: 'block',
           opacity: loaded ? 1 : 0.4,
           transition: 'opacity 0.25s ease, transform 0.3s ease',

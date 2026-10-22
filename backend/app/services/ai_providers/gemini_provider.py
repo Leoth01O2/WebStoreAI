@@ -39,7 +39,8 @@ class GeminiProvider(BaseAIProvider):
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.3,
-        max_tokens: int = 2048
+        max_tokens: int = 2048,
+        format: Optional[str] = None
     ) -> str:
         from app.services.ai_service import ai_service
         try:

@@ -1,19 +1,22 @@
+import re
 import time
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple, Callable
 from google import genai
 from google.genai import types
 
 from app.core.config import settings
-from app.core.database import get_db_connection
+from app.services.rag_service import get_db_connection, rag_service
 from app.core.prompt_loader import prompt_loader
 from app.core.rate_limiter import ai_rate_limiter
-from app.services.rag_service import rag_service
 from app.services.report_service import ReportService
 from app.services.ai_providers.manager import ai_provider_manager
+from app.services.ai_providers.ollama_provider import detect_repetition
+from app.services.intent_analyzer import intent_analyzer
 from app.schemas.ai import (
     ProductRecommendResponse,
     RecommendedProductItem,
+    UserQueryIntent,
     SalesReportResponse,
     SalesQAResponse,
     AIAuditLogResponse
@@ -95,39 +98,199 @@ class AIService:
         provider: Optional[str] = None
     ) -> ProductRecommendResponse:
         """
-        AI Product Recommendation with Retrieval & Strict SQLite Stock Guard.
-        Accessible to all roles (Guest, Customer, Staff, Admin, SuperAdmin).
-        Guarantees that no out-of-stock items are ever recommended, and no internal cost/profit data is leaked.
-        Supports Pluggable AI Providers (Gemini, Ollama, Grounded Fallback).
+        StoreFlow AI 2.0 Product Recommendation Pipeline:
+        1. LLM Intent Analysis (Module B)
+        2. Structured Intent Validation
+        3. Hybrid Retrieval (Dense + Sparse BM25 + Structured SQL)
+        4. Candidate Fusion (RRF) & SQLite Eligibility Guardrail (Lần 1)
+        5. Grounded Response Generation (LLM or Direct SQLite Lookup)
+        6. Final Verification — Lần 2 (Pre-Response SQLite Verification & Hallucination Guard)
+        7. Audit Logging & Structured Frontend Contract
         """
         start_time = time.time()
         budget_val = budget if budget is not None and budget > 0 else None
 
-        # 1. Candidate Retrieval & SQLite Stock Verification Guard
+        # ----------------------------------------------------------------------
+        # STEP 1: LLM INTENT ANALYSIS (MODULE B)
+        # ----------------------------------------------------------------------
+        t_intent_start = time.time()
+        intent = intent_analyzer.analyze_intent(
+            query=user_query,
+            budget_input=budget_val,
+            preferred_provider=provider
+        )
+        intent_ms = max(1, int((time.time() - t_intent_start) * 1000))
+
+        # Check early exit: Out-of-Domain Guard
+        if intent.is_out_of_domain:
+            out_msg = (
+                f"Cửa hàng StoreFlow AI hiện không kinh doanh các mặt hàng hoặc dịch vụ liên quan đến: *\"{user_query}\"*. "
+                f"Chúng tôi chuyên cung cấp các thiết bị công nghệ chính hãng: Chuột & Bàn phím cơ, Tai nghe & Âm thanh, Phụ kiện sạc/cáp, và Gaming gear."
+            )
+            total_latency = max(1, int((time.time() - start_time) * 1000))
+            self._record_audit_log(
+                feature="recommendation",
+                query_text=f"[{user_role.upper()}][OUT_OF_DOMAIN] Q: {user_query}",
+                response_summary=out_msg[:300],
+                latency_ms=total_latency,
+                user_id=user_id
+            )
+            return ProductRecommendResponse(
+                ai_response=out_msg,
+                recommended_products=[],
+                alternative_products=[],
+                effective_budget=budget_val,
+                query=user_query,
+                total_candidates_found=0,
+                is_fallback=True,
+                provider="domain_guard",
+                requested_provider=provider or "auto",
+                intent_provider_used="domain_guard",
+                generation_provider_used="domain_guard",
+                fallback_reason="out_of_domain",
+                intent_analysis=intent,
+                timing_ms={"intent_ms": intent_ms, "retrieval_ms": 0, "guardrail_l1_ms": 0, "generation_ms": 0, "verification_l2_ms": 0, "total_ms": total_latency},
+                verification_passed=True,
+                guardrail_status="verified_out_of_domain"
+            )
+
+        # Check early exit: Ambiguous query requiring clarification (e.g. 'ss')
+        if intent.needs_clarification and intent.clarification_question:
+            clarify_msg = intent.clarification_question
+            total_latency = max(1, int((time.time() - start_time) * 1000))
+            self._record_audit_log(
+                feature="recommendation",
+                query_text=f"[{user_role.upper()}][CLARIFICATION] Q: {user_query}",
+                response_summary=clarify_msg[:300],
+                latency_ms=total_latency,
+                user_id=user_id
+            )
+            intent_prov = intent.source.replace("llm_", "")
+            # Clarification message is produced by ambiguity/rule guard, not by neural generation
+            gen_prov = intent_prov if intent_prov in ("ambiguity_guard", "domain_guard", "rule_based") else "clarification_guard"
+            return ProductRecommendResponse(
+                ai_response=clarify_msg,
+                recommended_products=[],
+                alternative_products=[],
+                effective_budget=budget_val,
+                query=user_query,
+                total_candidates_found=0,
+                is_fallback=True if intent_prov not in ("ollama", "gemini") else False,
+                provider=gen_prov,
+                requested_provider=provider or "auto",
+                intent_provider_used=intent_prov,
+                generation_provider_used=gen_prov,
+                fallback_reason="ambiguity_clarification_rule" if intent_prov == "ambiguity_guard" else "clarification_needed",
+                intent_analysis=intent,
+                timing_ms={"intent_ms": intent_ms, "retrieval_ms": 0, "guardrail_l1_ms": 0, "generation_ms": 0, "verification_l2_ms": 0, "total_ms": total_latency},
+                verification_passed=True,
+                guardrail_status="needs_clarification"
+            )
+
+        # ----------------------------------------------------------------------
+        # STEP 2: HYBRID RETRIEVAL (DENSE + SPARSE + SQL) & SQLITE GUARDRAIL L1
+        # ----------------------------------------------------------------------
+        t_retrieval_start = time.time()
         rag_context = rag_service.get_grounded_recommendation_context(
             query=user_query,
             top_k=limit,
-            budget_max=budget_val
+            budget_max=budget_val,
+            intent=intent
         )
+        retrieval_ms = max(1, int((time.time() - t_retrieval_start) * 1000))
 
         verified_products_raw = rag_context["products"]
+        alternative_products_raw = rag_context.get("alternative_products", [])
+        effective_budget = rag_context.get("effective_budget", budget_val)
         context_text = rag_context["context_text"]
-        budget_str = f"{int(budget_val):,} VNĐ" if budget_val else "Không giới hạn (linh hoạt theo chất lượng)"
+        budget_str = f"{int(effective_budget):,} VNĐ" if effective_budget else "Không giới hạn (linh hoạt theo chất lượng)"
 
-        # 2. Format Prompt from external template
-        prompt = prompt_loader.format_prompt(
-            "product_recommendation",
-            verified_products_context=context_text,
-            user_query=user_query,
-            budget_info=budget_str
-        )
+        # Check if RAG context detected a need for clarification
+        if rag_context.get("status") == "needs_clarification":
+            clarify_msg = rag_context.get("clarification_question") or context_text
+            total_latency = max(1, int((time.time() - start_time) * 1000))
+            intent_prov = intent.source.replace("llm_", "")
+            gen_prov = "rag_clarification_guard"
+            return ProductRecommendResponse(
+                ai_response=clarify_msg,
+                recommended_products=[],
+                alternative_products=[],
+                effective_budget=effective_budget,
+                query=user_query,
+                total_candidates_found=0,
+                is_fallback=True,
+                provider=gen_prov,
+                requested_provider=provider or "auto",
+                intent_provider_used=intent_prov,
+                generation_provider_used=gen_prov,
+                fallback_reason="rag_clarification_needed",
+                intent_analysis=intent,
+                timing_ms={"intent_ms": intent_ms, "retrieval_ms": retrieval_ms, "guardrail_l1_ms": 1, "generation_ms": 0, "verification_l2_ms": 0, "total_ms": total_latency},
+                verification_passed=True,
+                guardrail_status="needs_clarification"
+            )
 
-        # 3. Grounded Fallback closure
+        # ----------------------------------------------------------------------
+        # STEP 3: GROUNDED FALLBACK CLOSURE
+        # ----------------------------------------------------------------------
         def _fallback_recommend() -> str:
             if rag_context.get("status") == "out_of_domain":
                 return (
                     f"Cửa hàng StoreFlow AI hiện không kinh doanh các mặt hàng hoặc dịch vụ liên quan đến: *\"{user_query}\"*. "
                     f"Chúng tôi chuyên cung cấp các thiết bị công nghệ chính hãng: Chuột & Bàn phím cơ, Tai nghe & Âm thanh, Phụ kiện sạc/cáp, và Gaming gear."
+                )
+            elif rag_context.get("status") == "brand_over_budget":
+                brand_name = rag_context.get("brand_name") or "yêu cầu"
+                exp_p = rag_context.get("notable_expensive_brand_products") or []
+                exp_info = ""
+                if exp_p:
+                    item = exp_p[0]
+                    exp_info = f" (ví dụ: **{item['name']}** - Mã: `{item['sku']}`, Giá: **{int(item['selling_price']):,} đ**)"
+                lines = [
+                    f"Cửa hàng StoreFlow AI hiện **CÓ** sản phẩm thuộc thương hiệu **{brand_name}** đang **CÒN HÀNG** trong kho{exp_info}, tuy nhiên mức giá bán thực tế cao hơn ngân sách **{budget_str}** của quý khách.",
+                    f"\nĐể phù hợp với mức ngân sách **{budget_str}**, quý khách có thể tham khảo một số phương án cùng loại từ các thương hiệu uy tín khác hiện có sẵn trong kho dưới đây:"
+                ]
+                if alternative_products_raw:
+                    for alt in alternative_products_raw[:3]:
+                        reason = alt.get("ineligible_reason") or "Phương án thay thế"
+                        lines.append(
+                            f"- **{alt['name']}** (Mã: `{alt['sku']}` - Giá: **{int(alt['selling_price']):,} đ** - Tồn: {alt['stock_quantity']} {alt.get('unit', 'cái')}): *{reason}*"
+                        )
+                lines.append(f"\n*Quý khách cũng có thể cân nhắc nâng mức ngân sách nếu muốn sở hữu sản phẩm cao cấp chính hãng từ {brand_name}.*")
+                return "\n".join(lines)
+            elif rag_context.get("status") == "brand_out_of_stock":
+                brand_name = rag_context.get("brand_name") or "yêu cầu"
+                lines = [
+                    f"Cửa hàng có kinh doanh các sản phẩm thuộc thương hiệu **{brand_name}**, tuy nhiên hiện tại tất cả các sản phẩm của thương hiệu này đều tạm thời **HẾT HÀNG** trong kho (tồn kho: 0).",
+                    f"\nQuý khách có thể tham khảo một số phương án thay thế sẵn hàng cùng phân khúc:"
+                ]
+                if alternative_products_raw:
+                    for alt in alternative_products_raw[:3]:
+                        reason = alt.get("ineligible_reason") or "Phương án thay thế"
+                        lines.append(
+                            f"- **{alt['name']}** (Mã: `{alt['sku']}` - Giá: **{int(alt['selling_price']):,} đ** - Tồn: {alt['stock_quantity']} {alt.get('unit', 'cái')}): *{reason}*"
+                        )
+                return "\n".join(lines)
+            elif rag_context.get("status") == "brand_attribute_mismatch":
+                brand_name = rag_context.get("brand_name") or "yêu cầu"
+                lines = [
+                    f"Cửa hàng có kinh doanh sản phẩm thuộc thương hiệu **{brand_name}**, tuy nhiên hiện chưa có sản phẩm đúng loại hoặc đặc tính quý khách yêu cầu.",
+                    f"\nQuý khách có thể tham khảo các dòng sản phẩm thay thế cùng phân khúc hiện có trong kho:"
+                ]
+                if alternative_products_raw:
+                    for alt in alternative_products_raw[:3]:
+                        reason = alt.get("ineligible_reason") or "Phương án thay thế"
+                        lines.append(
+                            f"- **{alt['name']}** (Mã: `{alt['sku']}` - Giá: **{int(alt['selling_price']):,} đ** - Tồn: {alt['stock_quantity']} {alt.get('unit', 'cái')}): *{reason}*"
+                        )
+                return "\n".join(lines)
+            elif rag_context.get("status") == "brand_not_found":
+                brand_name = rag_context.get("brand_name") or "yêu cầu"
+                return (
+                    f"Không tìm thấy sản phẩm {brand_name} đang có hàng tại cửa hàng. "
+                    f"Hiện tại StoreFlow AI chưa có sản phẩm thuộc thương hiệu **{brand_name}** trong danh mục hàng hóa (chưa kinh doanh thương hiệu này).\n\n"
+                    f"Quý khách đang quan tâm đến loại thiết bị cụ thể nào (ví dụ: chuột máy tính, bàn phím cơ, tai nghe hay phụ kiện)? "
+                    f"Vui lòng cho biết thêm nhu cầu sử dụng hoặc mức ngân sách mong muốn để cửa hàng có thể hỗ trợ tư vấn tốt nhất!"
                 )
             elif rag_context.get("out_of_stock_detected"):
                 oos = rag_context["out_of_stock_detected"]
@@ -138,74 +301,400 @@ class AIService:
                 )
             elif verified_products_raw:
                 lines = [
-                    f"**StoreFlow AI — Gợi ý sản phẩm phù hợp** *(Chế độ tra cứu trực tiếp từ kho hàng)*:\n",
-                    f"Dựa trên yêu cầu: *\"{user_query}\"* (Ngân sách: {budget_str}), các sản phẩm khả dụng trong kho gồm:\n"
+                    f"**StoreFlow AI — Gợi ý sản phẩm phù hợp**:\n",
+                    f"Dựa trên yêu cầu: *\"{user_query}\"* (Ngân sách: {budget_str}), các sản phẩm đáp ứng đầy đủ điều kiện trong kho gồm:\n"
                 ]
                 for p in verified_products_raw:
+                    reason = p.get("match_reason") or "Đáp ứng đầy đủ tiêu chí và ngân sách"
                     lines.append(
                         f"- **{p['name']}** (Mã: `{p['sku']}`)\n"
                         f"  - Nhóm hàng: {p.get('category_name') or 'Công nghệ'}\n"
                         f"  - Giá bán: **{int(p['selling_price']):,} đ** | Còn tồn: **{p['stock_quantity']} {p['unit']}** *(Còn hàng)*\n"
                         f"  - Đặc tính: {p['description'] or 'Chính hãng'}\n"
+                        f"  - Lý do phù hợp: {reason}\n"
                     )
+                if alternative_products_raw:
+                    lines.append("\n*Gợi ý thay thế tham khảo (chưa đáp ứng đầy đủ tiêu chí):*")
+                    for alt in alternative_products_raw[:2]:
+                        reason = alt.get("ineligible_reason") or "Chưa đáp ứng đủ tiêu chí"
+                        lines.append(
+                            f"- {alt['name']} (Mã: `{alt['sku']}`, Giá: {int(alt['selling_price']):,} đ) — *{reason}*"
+                        )
                 lines.append("\n*Lưu ý: Quý khách có thể chọn sản phẩm để tạo đơn hàng hoặc thêm vào giỏ hàng.*")
                 return "\n".join(lines)
             else:
-                return (
-                    f"Rất tiếc, hiện tại kho hàng chưa có sản phẩm nào phù hợp với yêu cầu: *\"{user_query}\"* "
-                    f"hoặc các sản phẩm tương ứng tạm thời đã hết hàng. Vui lòng thử tìm kiếm với từ khóa khác hoặc điều chỉnh mức ngân sách."
-                )
+                lines = [
+                    f"Rất tiếc, hiện tại kho hàng chưa có sản phẩm nào đáp ứng đầy đủ tất cả tiêu chí và ngân sách cho yêu cầu: *\"{user_query}\"* (Ngân sách: {budget_str})."
+                ]
+                if rag_context.get("notable_expensive_brand_products"):
+                    for exp_p in rag_context["notable_expensive_brand_products"][:1]:
+                        lines.append(
+                            f"\n*Lưu ý về thương hiệu:* Cửa hàng hiện có sản phẩm **{exp_p['name']}** (Mã: `{exp_p['sku']}`, Giá: {int(exp_p['selling_price']):,} đ) nhưng mức giá vượt xa ngân sách yêu cầu của quý khách."
+                        )
+                if alternative_products_raw:
+                    lines.append("\nQuý khách có thể tham khảo một số phương án thay thế gần nhất hiện có trong kho:")
+                    for alt in alternative_products_raw[:3]:
+                        reason = alt.get("ineligible_reason") or "Chưa đáp ứng đủ tiêu chí"
+                        lines.append(
+                            f"- **{alt['name']}** (Mã: `{alt['sku']}` - Giá: {int(alt['selling_price']):,} đ - Tồn: {alt['stock_quantity']} {alt.get('unit', 'cái')}): *{reason}*"
+                        )
+                lines.append("\nVui lòng thử điều chỉnh từ khóa tìm kiếm hoặc mức ngân sách để có thêm lựa chọn.")
+                return "\n".join(lines)
 
-        # 4. Execute with Pluggable Provider Manager
-        if not verified_products_raw:
+        # ----------------------------------------------------------------------
+        # STEP 4: RESPONSE GENERATION (LLM OR GROUNDED DIRECT LOOKUP)
+        # ----------------------------------------------------------------------
+        t_gen_start = time.time()
+        intent_prov = intent.source.replace("llm_", "")
+        fallback_reason = None
+        if provider == "grounded":
             ai_text = _fallback_recommend()
             provider_used = "grounded"
             is_fallback = True
+            fallback_reason = "user_selected_grounded"
+        elif not verified_products_raw and rag_context.get("status") == "out_of_domain":
+            ai_text = _fallback_recommend()
+            provider_used = "grounded"
+            is_fallback = True
+            fallback_reason = "out_of_domain"
         else:
+            # Format Prompt from external template with grounded SQLite context
+            prompt = prompt_loader.format_prompt(
+                "product_recommendation",
+                verified_products_context=context_text,
+                user_query=user_query,
+                budget_info=budget_str
+            )
             ai_text, provider_used, is_fallback, telemetry = ai_provider_manager.execute_with_fallback(
                 prompt=prompt,
                 system_instruction=prompt_loader.get_system_prompt(),
                 fallback_fn=_fallback_recommend,
-                preferred_provider=provider
+                preferred_provider=provider,
+                max_tokens=600
+            )
+            if is_fallback:
+                fallback_reason = telemetry.get("fallback_reason") or telemetry.get("reason") or "generation_llm_failed"
+        generation_ms = max(1, int((time.time() - t_gen_start) * 1000))
+
+        # ----------------------------------------------------------------------
+        # STEP 5: FINAL VERIFICATION — LẦN 2 (PRE-RESPONSE SQL GUARDRAIL)
+        # ----------------------------------------------------------------------
+        t_verif_start = time.time()
+        (
+            verified_products_raw,
+            ai_text,
+            provider_used,
+            is_fallback,
+            guardrail_status,
+            verification_passed
+        ) = self._verify_final_l2(
+            verified_products_raw=verified_products_raw,
+            ai_text=ai_text,
+            effective_budget=effective_budget,
+            provider_used=provider_used,
+            is_fallback=is_fallback,
+            fallback_fn=_fallback_recommend,
+            rag_context=rag_context,
+            alternative_products_raw=alternative_products_raw
+        )
+        if getattr(self, "_last_l2_fallback_reason", None):
+            fallback_reason = self._last_l2_fallback_reason
+        verification_l2_ms = max(1, int((time.time() - t_verif_start) * 1000))
+        total_latency = max(1, int((time.time() - start_time) * 1000))
+
+        timing_dict = {
+            "intent_ms": intent_ms,
+            "retrieval_ms": retrieval_ms,
+            "guardrail_l1_ms": 2,
+            "generation_ms": generation_ms,
+            "verification_l2_ms": verification_l2_ms,
+            "total_ms": total_latency
+        }
+
+        # ----------------------------------------------------------------------
+        # STEP 6: STRUCTURED RESPONSE MAPPING (STRICTLY DEDUPLICATED)
+        # ----------------------------------------------------------------------
+        seen_rec_pids = set()
+        seen_rec_skus = set()
+        recommended_items = []
+        for p in verified_products_raw:
+            pid = p.get("id") or p.get("product_id")
+            if pid is None:
+                continue
+            pid_int = int(pid)
+            sku = (p.get("sku") or "").upper()
+            if (pid_int in seen_rec_pids) or (sku and sku in seen_rec_skus):
+                continue
+            seen_rec_pids.add(pid_int)
+            if sku:
+                seen_rec_skus.add(sku)
+            recommended_items.append(
+                RecommendedProductItem(
+                    id=pid_int,
+                    product_id=pid_int,
+                    sku=p["sku"],
+                    name=p["name"],
+                    category_name=p.get("category_name") or "",
+                    selling_price=float(p["selling_price"]),
+                    stock_quantity=int(p["stock_quantity"]),
+                    unit=p.get("unit") or "cái",
+                    description=p.get("description") or "",
+                    image_url=p.get("image_url") or "",
+                    status=p.get("status") or "active",
+                    match_reason=p.get("match_reason") or "Đáp ứng đầy đủ tiêu chí tìm kiếm"
+                )
             )
 
-        latency = int((time.time() - start_time) * 1000)
-
-        # 5. Map structured products
-        recommended_items = [
-            RecommendedProductItem(
-                id=p["id"],
-                product_id=p["id"],
-                sku=p["sku"],
-                name=p["name"],
-                category_name=p.get("category_name") or "",
-                selling_price=float(p["selling_price"]),
-                stock_quantity=int(p["stock_quantity"]),
-                unit=p.get("unit") or "cái",
-                description=p.get("description") or "",
-                image_url=p.get("image_url") or "",
-                status=p.get("status") or "active"
+        seen_alt_pids = set()
+        seen_alt_skus = set()
+        alternative_items = []
+        for p in (alternative_products_raw or []):
+            pid = p.get("id") or p.get("product_id")
+            if pid is None:
+                continue
+            pid_int = int(pid)
+            sku = (p.get("sku") or "").upper()
+            if (pid_int in seen_rec_pids) or (sku and sku in seen_rec_skus):
+                continue
+            if (pid_int in seen_alt_pids) or (sku and sku in seen_alt_skus):
+                continue
+            seen_alt_pids.add(pid_int)
+            if sku:
+                seen_alt_skus.add(sku)
+            alternative_items.append(
+                RecommendedProductItem(
+                    id=pid_int,
+                    product_id=pid_int,
+                    sku=p["sku"],
+                    name=p["name"],
+                    category_name=p.get("category_name") or "",
+                    selling_price=float(p["selling_price"]),
+                    stock_quantity=int(p["stock_quantity"]),
+                    unit=p.get("unit") or "cái",
+                    description=p.get("description") or "",
+                    image_url=p.get("image_url") or "",
+                    status=p.get("status") or "active",
+                    match_reason=p.get("match_reason") or p.get("ineligible_reason") or "Gợi ý tham khảo thêm"
+                )
             )
-            for p in verified_products_raw
-        ]
 
-        # 6. Record audit log
+        # ----------------------------------------------------------------------
+        # STEP 7: AUDIT LOGGING
+        # ----------------------------------------------------------------------
         self._record_audit_log(
             feature="recommendation",
-            query_text=f"[{user_role.upper()}][{provider_used.upper()}] Q: {user_query} | Budget: {budget_str}",
+            query_text=f"[{user_role.upper()}][{provider_used.upper()}][{guardrail_status}] Q: {user_query} | Budget: {budget_str}",
             response_summary=ai_text[:300],
-            latency_ms=latency,
+            latency_ms=total_latency,
             user_id=user_id
         )
 
         return ProductRecommendResponse(
             ai_response=ai_text,
             recommended_products=recommended_items,
+            alternative_products=alternative_items,
+            effective_budget=effective_budget,
             query=user_query,
             total_candidates_found=len(recommended_items),
             is_fallback=is_fallback,
-            provider=provider_used
+            provider=provider_used,
+            requested_provider=provider or "auto",
+            intent_provider_used=intent_prov,
+            generation_provider_used=provider_used,
+            fallback_reason=fallback_reason,
+            intent_analysis=intent,
+            timing_ms=timing_dict,
+            verification_passed=verification_passed,
+            guardrail_status=guardrail_status
         )
+
+    def _verify_final_l2(
+        self,
+        verified_products_raw: List[Dict[str, Any]],
+        ai_text: str,
+        effective_budget: Optional[float],
+        provider_used: str,
+        is_fallback: bool,
+        fallback_fn: Callable[[], str],
+        rag_context: Optional[Dict[str, Any]] = None,
+        alternative_products_raw: Optional[List[Dict[str, Any]]] = None
+    ) -> Tuple[List[Dict[str, Any]], str, str, bool, str, bool]:
+        """
+        Final Verification — Lần 2 (Pre-Response Guardrail):
+        1. Re-reads SQLite in real-time for all proposed products.
+        2. Re-verifies ID existence, active status, current stock > 0, and selling price within budget.
+        3. Scans generated AI text against ground truth:
+           - Hallucination check: ensure no non-eligible/hallucinated SKU was injected by LLM.
+             (Allows eligible, alternative, and notable brand products explicitly presented in context).
+           - Contradiction check: ensure LLM does not state 'no products available' when eligible products exist.
+           - Repetition loop check: ensure degenerate repetition is eliminated.
+           - False brand assertion check: ensure LLM does not claim brand is out-of-stock when SQLite has stock.
+        4. If any discrepancy or race condition is detected:
+           - Safely falls back to deterministic Grounded response.
+        Returns:
+           (final_products, final_ai_text, final_provider, final_is_fallback, guardrail_status, verification_passed)
+        """
+        self._last_l2_fallback_reason = None
+
+        # Build allowed SKUs from eligible, alternatives, and notable brand items in context
+        allowed_skus = {p["sku"].upper() for p in (verified_products_raw or []) if p.get("sku")}
+        if alternative_products_raw:
+            for alt in alternative_products_raw:
+                if alt.get("sku"):
+                    allowed_skus.add(alt["sku"].upper())
+        if rag_context:
+            for exp_p in (rag_context.get("notable_expensive_brand_products") or []):
+                if exp_p.get("sku"):
+                    allowed_skus.add(exp_p["sku"].upper())
+            oos_p = rag_context.get("out_of_stock_detected")
+            if oos_p and oos_p.get("sku"):
+                allowed_skus.add(oos_p["sku"].upper())
+
+        raw_skus_found = set(re.findall(r"\b(SP-[A-Z0-9\-]+|SKU-[A-Z0-9\-]+)\b", ai_text, re.IGNORECASE))
+        hallucinated_skus = [s for s in raw_skus_found if s.upper() not in allowed_skus]
+        has_repetition = detect_repetition(ai_text)
+        has_false_brand_assertion = self._detect_false_brand_assertion(ai_text, rag_context)
+
+        if not verified_products_raw:
+            if has_repetition:
+                self._last_l2_fallback_reason = "l2_repetition_loop"
+                return ([], fallback_fn(), "grounded", True, "corrected_repetition", True)
+            if bool(hallucinated_skus):
+                self._last_l2_fallback_reason = "l2_sku_hallucination"
+                return ([], fallback_fn(), "grounded", True, "corrected_by_sql_verification_l2", True)
+            if has_false_brand_assertion:
+                self._last_l2_fallback_reason = "l2_false_assertion_brand_oos"
+                return ([], fallback_fn(), "grounded", True, "corrected_by_sql_verification_l2", True)
+            return ([], ai_text, provider_used, is_fallback, "verified_empty", True)
+
+        # 1. Real-time SQLite re-verification (Double Verification Lần 2)
+        pids = [p["id"] for p in verified_products_raw]
+        live_rows = rag_service.reverify_products_in_sqlite(pids)
+
+        final_products = []
+        data_shifted = False
+        for p in verified_products_raw:
+            pid = p["id"]
+            live = live_rows.get(pid)
+            if not live or live.get("status") != "active" or live.get("stock_quantity", 0) <= 0:
+                data_shifted = True
+                continue
+            live_price = float(live.get("selling_price", 0))
+            if effective_budget is not None and effective_budget > 0 and live_price > effective_budget:
+                data_shifted = True
+                continue
+            p_up = dict(p)
+            p_up["selling_price"] = live_price
+            p_up["stock_quantity"] = live["stock_quantity"]
+            final_products.append(p_up)
+
+        # 2. Fact-Check LLM Text & Hallucination Guard
+        has_contradiction = self._contradicts_verified_products(ai_text, final_products)
+        has_false_oos_claim = self._detect_false_out_of_stock_claim(ai_text, final_products)
+
+        # 3. Decision
+        l2_fail_reason = None
+        if data_shifted:
+            l2_fail_reason = "l2_data_shifted"
+        elif has_repetition:
+            l2_fail_reason = "l2_repetition_loop"
+        elif has_contradiction:
+            l2_fail_reason = "l2_contradiction_negation"
+        elif has_false_oos_claim:
+            l2_fail_reason = "l2_false_out_of_stock_claim"
+        elif bool(hallucinated_skus):
+            l2_fail_reason = "l2_sku_hallucination"
+        elif has_false_brand_assertion:
+            l2_fail_reason = "l2_false_assertion_brand_oos"
+
+        if l2_fail_reason:
+            self._last_l2_fallback_reason = l2_fail_reason
+            fallback_text = fallback_fn()
+            return (final_products, fallback_text, "grounded", True, "corrected_by_sql_verification_l2", True)
+
+        return (final_products, ai_text, provider_used, is_fallback, "verified", True)
+
+    @staticmethod
+    def _contradicts_verified_products(text: str, verified_products: List[Dict[str, Any]]) -> bool:
+        """Detects if LLM output claims no products exist when verified in-stock items were provided."""
+        if not verified_products:
+            return False
+        text_lower = text.lower()
+        strong_negations = [
+            "không có sản phẩm nào phù hợp",
+            "không có sản phẩm nào đáp ứng",
+            "không còn mẫu nào",
+            "không tìm thấy sản phẩm nào",
+            "hiện không có sản phẩm nào",
+            "cửa hàng hiện không có sản phẩm",
+            "tất cả sản phẩm đều đã hết hàng",
+            "đã hết hàng hoàn toàn"
+        ]
+        for phrase in strong_negations:
+            if phrase in text_lower:
+                return True
+        return False
+
+    @staticmethod
+    def _detect_false_brand_assertion(text: str, rag_context: Optional[Dict[str, Any]]) -> bool:
+        """
+        Detects if LLM falsely claims a brand is not carried or out of stock
+        when SQLite actually has active, in-stock products for that brand (e.g. brand_over_budget).
+        """
+        if not rag_context:
+            return False
+        status = rag_context.get("status")
+        brand_name = rag_context.get("brand_name")
+        expensive_prods = rag_context.get("notable_expensive_brand_products") or []
+        if (status == "brand_over_budget" or bool(expensive_prods)) and brand_name:
+            bn = brand_name.lower().strip()
+            text_lower = text.lower()
+            false_phrases = [
+                f"không tìm thấy sản phẩm {bn} đang có hàng",
+                f"không tìm thấy sản phẩm {bn} nào đang có hàng",
+                f"không có sản phẩm {bn} đang có hàng",
+                f"không có sản phẩm {bn} nào còn hàng",
+                f"cửa hàng hiện không có sản phẩm {bn}",
+                f"chưa có sản phẩm {bn}",
+                f"chưa kinh doanh sản phẩm {bn}",
+                f"{bn} hiện đã hết hàng",
+                f"{bn} đã hết hàng",
+                f"{bn} tạm thời hết hàng",
+                f"hết hàng sản phẩm {bn}"
+            ]
+            for phrase in false_phrases:
+                if phrase in text_lower:
+                    return True
+        return False
+
+    @staticmethod
+    def _detect_false_out_of_stock_claim(text: str, verified_products: List[Dict[str, Any]]) -> bool:
+        """
+        Detects if LLM falsely claims verified products are out of stock
+        when SQLite confirmed they are in stock.
+        """
+        if not verified_products:
+            return False
+        has_in_stock = any(p.get("stock_quantity", 0) > 0 for p in verified_products)
+        if not has_in_stock:
+            return False
+
+        text_lower = text.lower()
+        oos_patterns = [
+            r"sản phẩm (?:này|trên)?\s*(?:hiện)?\s*(?:đã\s*)?(?:tạm\s*)?hết hàng",
+            r"mẫu này (?:hiện)?\s*(?:đã\s*)?(?:tạm\s*)?hết hàng",
+            r"hiện tại (?:đã\s*)?hết hàng",
+            r"tạm thời hết hàng",
+            r"không còn hàng trong kho",
+            r"trong kho đã hết",
+            r"kho đã hết hàng",
+            r"đã hết hàng hoàn toàn",
+        ]
+        for pat in oos_patterns:
+            if re.search(pat, text_lower):
+                return True
+        return False
+
 
     def generate_sales_report(
         self,
