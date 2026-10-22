@@ -506,6 +506,7 @@ def test_section8_02_ollama_generation_case_b_factual_sony_response():
     assert res.is_fallback is False
     assert res.guardrail_status == "verified_empty"
     assert len(res.recommended_products) == 0
+    assert res.alternative_products is not None
     assert len(res.alternative_products) > 0
     # Response must not claim brand is out of stock or does not exist
     text_lower = res.ai_response.lower()
@@ -527,6 +528,7 @@ def test_section8_03_brand_over_budget_grounded_distinction():
     assert "Sony" in text
     assert "CÒN HÀNG" in text or "có sản phẩm" in text.lower()
     assert "vượt quá ngân sách" in text or "cao hơn ngân sách" in text
+    assert res.alternative_products is not None
     assert len(res.alternative_products) > 0
 
 
