@@ -404,7 +404,7 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
         target_type = "stand"
     elif any(k in q_lower for k in ["chuột", "mouse"]) and not any(k in q_lower for k in ["lót chuột", "bàn di chuột", "pad chuột", "cắm chuột", "hình chuột", "dây cáp", "cáp sạc", "hub", "chuyển đổi"]):
         target_type = "mouse"
-    elif any(k in q_lower for k in ["bàn phím", "keyboard", "phím cơ", "bàn phím cơ"]) and not any(k in q_lower for k in ["lót bàn phím", "cắm phím"]):
+    elif any(k in q_lower for k in ["bàn phím", "keyboard", "phím cơ", "bàn phím cơ", "gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"]) and not any(k in q_lower for k in ["lót bàn phím", "cắm phím", "pad chuột", "lót chuột", "bàn di"]):
         target_type = "keyboard"
     elif any(k in q_lower for k in ["tai nghe", "headphone", "earphone", "earbuds", "tws"]):
         target_type = "headphone"
@@ -431,6 +431,14 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
         desired_capabilities.append("nghe nhạc âm thanh")
     if any(k in q_lower for k in ["cắm mạng", "mạng dây", "lan", "ethernet"]):
         desired_capabilities.append("cắm mạng LAN")
+
+    # Dynamic integrated / special capability extraction (e.g. tích hợp máy đo huyết áp, có màn hình led)
+    m_integrated = re.search(r"\b(?:tích hợp|kèm theo|tích hợp thêm|có kèm|có chức năng|tính năng)\s+([^,.;!?]+)", q_lower)
+    if m_integrated:
+        cap_val = m_integrated.group(1).strip()
+        common_traits = {"bluetooth", "pin sạc", "led", "rgb", "không dây", "có dây"}
+        if cap_val and len(cap_val) >= 3 and cap_val not in common_traits:
+            desired_capabilities.append(cap_val)
 
     # Device Compatibility Extraction
     device_compatibility = []
@@ -484,7 +492,7 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
         is_wired = bool(re.search(r"\b(có dây|cắm dây|wired|dây cắm usb)\b", q_lower)) and not is_wireless
 
     is_mechanical = bool(re.search(r"\b(phím cơ|bàn phím cơ|switch cơ|cơ)\b", q_lower)) if target_type == "keyboard" else False
-    is_silent = bool(re.search(r"(silent|êm|yên tĩnh|chống ồn click|không tiếng click|không kêu|không ồn)", q_lower))
+    is_silent = bool(re.search(r"\b(silent|êm|yên tĩnh|chống ồn click|không tiếng click|không tiếng|không kêu|không ồn|không ồn ào|không lách cách|bấm êm)\b", q_lower))
     is_anc = bool(re.search(r"\b(chống ồn|anc|noise cancel|khử ồn)\b", q_lower)) and not bool(re.search(r"\b(chống ồn click)\b", q_lower))
     is_ergonomic = bool(re.search(r"\b(công thái học|ergonomic|chống mỏi)\b", q_lower))
     neg_constraints = []
@@ -595,14 +603,34 @@ def check_product_eligibility(
                 return False, f"Không phải pin sạc dự phòng ({prod_type})"
             elif target_type == "stand" and prod_type not in ("stand", "charger_cable"):
                 return False, f"Không phải giá đỡ ({prod_type})"
-            elif target_type in ("charger", "cable") and prod_type not in ("charger", "cable", "charger_cable"):
-                return False, f"Không đúng phụ kiện sạc/cáp ({prod_type})"
+            elif target_type == "charger" and prod_type != "charger":
+                return False, f"Không phải củ sạc ({prod_type})"
+            elif target_type == "cable" and prod_type != "cable":
+                return False, f"Không phải dây cáp ({prod_type})"
 
     name_str = (product.get("name") or "").lower()
     cat_str = (product.get("category_name") or "").lower()
     desc_str = (product.get("description") or "").lower()
     full_info = f"{name_str} {cat_str} {desc_str}"
     query_str = (reqs.get("query") or "").lower()
+
+    # When target_type is not explicitly defined, guard against completely mismatched categories
+    if not target_type:
+        if any(k in query_str for k in ["gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"]):
+            if prod_type != "keyboard":
+                return False, f"Không phải thiết bị phục vụ gõ văn bản/đánh máy ({prod_type})"
+        elif any(k in query_str for k in ["nghe nhạc", "âm thanh", "tai nghe", "loa"]) and not any(k in query_str for k in ["chuột", "phím", "hub", "sạc"]):
+            if prod_type not in ("headphone", "speaker"):
+                return False, f"Không phải thiết bị phục vụ nghe nhìn/âm thanh ({prod_type})"
+
+    # Battery constraint verification (e.g. pin tiểu AA / AAA vs pin sạc)
+    forbids_aa_battery = bool(re.search(r"\b(không (?:dùng|cần|chơi|xài|muốn)?\s*(?:loại\s*)?(?:pin tiểu|pin aa|pin aaa|pin rời)|tuyệt đối không (?:dùng|chơi|xài)?\s*pin tiểu)\b", query_str))
+    needs_aa_battery = bool(re.search(r"\b(pin tiểu|pin aa|pin aaa)\b", query_str)) and not forbids_aa_battery
+
+    if forbids_aa_battery and any(k in full_info for k in ["pin tiểu", "pin aa", "pin aaa", "1x aa", "2x aa"]):
+        return False, "Sử dụng pin tiểu AA/AAA, vi phạm điều kiện loại trừ của khách hàng"
+    if needs_aa_battery and not any(k in full_info for k in ["pin tiểu", "pin aa", "pin aaa", "1x aa", "2x aa"]):
+        return False, "Không dùng pin tiểu AA/AAA theo yêu cầu"
 
     # Functional Capability & Compatibility Evidence Checks
     compat_list = reqs.get("device_compatibility") or []
@@ -640,6 +668,15 @@ def check_product_eligibility(
         if not any(k in full_info for k in ["tản nhiệt", "làm mát", "quạt", "cooler"]):
             return False, "Không hỗ trợ tính năng làm mát tản nhiệt"
 
+    # General required capabilities check (purges ungrounded candidate matches)
+    stop_cap_words = {"tính", "năng", "chức", "thêm", "kèm", "theo", "cho", "của", "máy", "thiết", "bị", "loại"}
+    for c in caps:
+        c_l = c.lower().strip()
+        sig_words = [w for w in re.findall(r"\w+", c_l) if len(w) >= 3 and w not in stop_cap_words]
+        if sig_words and not any(k in c_l for k in ["xuất hình", "sạc nhanh", "giá đỡ", "tản nhiệt", "nghe nhạc", "cắm mạng"]):
+            if not any(w in full_info for w in sig_words):
+                return False, f"Không có tính năng/bộ phận '{c}' theo yêu cầu"
+
     # Boolean Feature Attributes Checks
     if reqs.get("is_gaming"):
         is_prod_gaming = bool(re.search(r"\b(gaming|game|chơi game)\b", full_info)) or (cat_str == "gaming gear")
@@ -662,9 +699,9 @@ def check_product_eligibility(
             return False, "Không phải bàn phím cơ"
 
     if reqs.get("is_silent"):
-        is_prod_silent = bool(re.search(r"\b(silent|êm|yên tĩnh|chống ồn click)\b", full_info))
+        is_prod_silent = bool(re.search(r"\b(silent|êm|yên tĩnh|chống ồn click|không gây ồn|không kêu|không tiếng|không lách cách|bấm êm)\b", full_info))
         if not is_prod_silent:
-            return False, "Không có tính năng silent êm"
+            return False, "Không có tính năng silent bấm êm không gây ồn"
 
     if reqs.get("is_anc"):
         is_prod_anc = bool(re.search(r"\b(chống ồn|anc|khử ồn)\b", full_info))
@@ -1776,7 +1813,8 @@ class RAGService:
                         f"  Lý do tham khảo: {alt.get('ineligible_reason', 'Phương án thay thế')}"
                     )
         elif not oos_detected:
-            context_lines.append("KHÔNG TÌM THẤY SẢN PHẨM NÀO TRONG KHO ĐÁP ỨNG ĐẦY ĐỦ TIÊU CHÍ VÀ NGÂN SÁCH YÊU CẦU.")
+            context_lines.append("THÔNG BÁO TỒN KHO THỰC TẾ: Kho hàng hiện tại KHÔNG CÓ sản phẩm nào đáp ứng đầy đủ tất cả tiêu chí và ngân sách của khách hàng.")
+            context_lines.append("CHỈ DẪN BẮT BUỘC CHO TRỢ LÝ: Hãy thông báo trung thực, rõ ràng rằng cửa hàng hiện chưa có sản phẩm đáp ứng đầy đủ yêu cầu này. TUYỆT ĐỐI KHÔNG tự sáng tác, bịa đặt tên sản phẩm, mã SKU, giá bán hoặc số lượng tồn kho.")
             if alternative_products:
                 context_lines.append("\nCÁC PHƯƠNG ÁN THAY THẾ GẦN NHẤT CÓ THỂ THAM KHẢO:")
                 for alt in alternative_products[:3]:

@@ -550,8 +550,14 @@ class AIService:
             if oos_p and oos_p.get("sku"):
                 allowed_skus.add(oos_p["sku"].upper())
 
-        raw_skus_found = set(re.findall(r"\b(SP-[A-Z0-9\-]+|SKU-[A-Z0-9\-]+)\b", ai_text, re.IGNORECASE))
-        hallucinated_skus = [s for s in raw_skus_found if s.upper() not in allowed_skus]
+        # Comprehensive SKU extraction: capture standard patterns as well as explicit mentions (e.g. CHUOT_256789)
+        raw_skus_found = set(re.findall(r"\b(SP-[A-Z0-9\-]+|SKU-[A-Z0-9\-]+|[A-Z]{3,}_[0-9]{4,})\b", ai_text, re.IGNORECASE))
+        explicit_sku_mentions = re.findall(r"(?:mã\s+sku|mã\s+sản\s+phẩm|sku)[:\s]+`?([A-Za-z0-9_\-]+)`?", ai_text, re.IGNORECASE)
+        for s in explicit_sku_mentions:
+            if not s.upper().startswith("ID"):
+                raw_skus_found.add(s)
+
+        hallucinated_skus = [s for s in raw_skus_found if s.upper() not in allowed_skus and not s.upper().startswith("ID")]
         has_repetition = detect_repetition(ai_text)
         has_false_brand_assertion = self._detect_false_brand_assertion(ai_text, rag_context)
 
@@ -565,6 +571,19 @@ class AIService:
             if has_false_brand_assertion:
                 self._last_l2_fallback_reason = "l2_false_assertion_brand_oos"
                 return ([], fallback_fn(), "grounded", True, "corrected_by_sql_verification_l2", True)
+            
+            # Guard against fabricated product proposals when no eligible products exist
+            has_fabricated_recommendation = False
+            if bool(re.search(r"\b(sản phẩm phù hợp và đáp ứng|sản phẩm có thanh toán|chúng tôi có sản phẩm|sản phẩm tốt nhất đáp ứng)\b", ai_text, re.IGNORECASE)):
+                has_fabricated_recommendation = True
+            elif bool(re.search(r"(?:giá bán chính thức|tồn kho khả dụng|tình trạng còn hàng)[:\s]+", ai_text, re.IGNORECASE)):
+                if not allowed_skus:
+                    has_fabricated_recommendation = True
+
+            if has_fabricated_recommendation:
+                self._last_l2_fallback_reason = "l2_fabricated_product_on_empty"
+                return ([], fallback_fn(), "grounded", True, "corrected_by_sql_verification_l2", True)
+
             return ([], ai_text, provider_used, is_fallback, "verified_empty", True)
 
         # 1. Real-time SQLite re-verification (Double Verification Lần 2)
@@ -628,11 +647,19 @@ class AIService:
             "hiện không có sản phẩm nào",
             "cửa hàng hiện không có sản phẩm",
             "tất cả sản phẩm đều đã hết hàng",
-            "đã hết hàng hoàn toàn"
+            "đã hết hàng hoàn toàn",
+            "không tìm thấy sản phẩm đáp ứng",
+            "không có sản phẩm đáp ứng",
+            "không có sản phẩm phù hợp"
         ]
         for phrase in strong_negations:
             if phrase in text_lower:
                 return True
+
+        if re.search(r"(không|chưa)\s+(tìm thấy|có|còn)\s+sản phẩm\s+(nào|đáp ứng|phù hợp|thỏa mãn)", text_lower):
+            return True
+        if re.search(r"rất tiếc.*không.*sản phẩm.*(đáp ứng|phù hợp)", text_lower):
+            return True
         return False
 
     @staticmethod

@@ -46,14 +46,11 @@ Nhiệm vụ: Trích xuất ý định của người dùng thành DUY NHẤT m�
 
 QUY TẮC BẮT BUỘC:
 1. PHÂN BIỆT THIẾT BỊ NGƯỜI DÙNG ĐANG CÓ (user_device) VÀ SẢN PHẨM CẦN MUA (product_type):
-   - Phân biệt rõ thiết bị người dùng ĐANG SỞ HỮU (ví dụ: "Laptop của tôi", "máy tính bàn", "iPhone 15") với món đồ họ CẦN MUA.
-   - Khi người dùng nói "Laptop tôi giờ toàn cổng Type-C, muốn xuất hình ra màn HDMI":
-     + user_device = "laptop cổng Type-C"
-     + desired_capabilities = ["xuất hình ra màn HDMI"]
-     + device_compatibility = ["Type-C", "HDMI"]
-     + product_type = null (TUYỆT ĐỐI KHÔNG ép thành "keyboard", "laptop", hay "mouse").
+   - user_device: Thiết bị người dùng ĐANG SỞ HỮU (ví dụ: máy tính, điện thoại, máy tính bảng...).
+   - product_type: Món đồ người dùng CẦN MUA.
    - CHỈ điền product_type khi người dùng gọi tên rõ ràng loại sản phẩm muốn mua: "chuột" -> "mouse", "bàn phím" -> "keyboard", "tai nghe" -> "headphone", "loa" -> "speaker", "tay cầm" -> "gamepad", "hub chuyển đổi" -> "hub_adapter", "củ sạc" -> "charger", "cáp sạc" -> "cable", "pin dự phòng" -> "powerbank", "giá đỡ" -> "stand", "đế tản nhiệt" -> "cooler", "lót chuột" -> "mousepad".
-   - Nếu người dùng chỉ mô tả nhu cầu, sự cố hoặc chức năng: ĐẶT product_type = null và trích xuất vào desired_capabilities.
+   - Nếu người dùng chỉ mô tả nhu cầu, sự cố hoặc chức năng (ví dụ: gõ văn bản, sạc nhanh, xuất hình): ĐẶT product_type tương ứng nếu rõ ràng hoặc null và trích xuất vào desired_capabilities.
+   - TUYỆT ĐỐI KHÔNG tự bịa đặt user_device hay desired_capabilities nếu câu hỏi người dùng không nhắc tới. Không sao chép các thông tin không có trong câu hỏi.
 
 2. CHỨC NĂNG (desired_capabilities) & CHUẨN KẾT NỐI (device_compatibility):
    - desired_capabilities: Các khả năng/chức năng sản phẩm cần đáp ứng (ví dụ: "xuất hình ra màn HDMI", "chơi game", "sạc nhanh", "chống ồn", "làm mát tản nhiệt", "kê cao laptop").
@@ -291,32 +288,53 @@ class IntentAnalyzer:
         """
         q_lower = query.lower()
 
-        # 1. Grounding check on boolean attributes: A feature constraint is ONLY valid if grounded in the query
-        has_wireless_mention = bool(re.search(r"\b(không cần dây|không dùng dây|không có dây|không dây|wireless|bluetooth|tws|2\.4ghz)\b", q_lower))
-        has_wired_mention = bool(re.search(r"\b(có dây|cắm dây|cắm usb|wired)\b", q_lower)) and not has_wireless_mention
+        # 1. Grounding check on boolean attributes & negative constraints:
+        has_wireless_mention = bool(re.search(r"\b(không cần dây|không dùng dây|không có dây|không dây|wireless|bluetooth|tws|2\.4ghz|pin sạc)\b", q_lower))
+        has_wired_mention = bool(re.search(r"\b(có dây|cắm dây|cắm usb|dây cáp|dây cắm|wired)\b", q_lower)) and not has_wireless_mention
 
-        intent.attributes["wireless"] = has_wireless_mention
-        intent.attributes["wired"] = has_wired_mention
-        if has_wireless_mention and "wired" not in intent.negative_constraints:
+        has_wireless_neg = bool(re.search(r"\b(không (?:dùng|cần|muốn|thích)?\s*(?:bluetooth|không dây|wireless))\b", q_lower))
+        has_wired_neg = bool(re.search(r"\b(không (?:dùng|cần|muốn|thích)?\s*(?:loại\s*)?(?:có dây|dây cáp|dây lằng nhằng))\b", q_lower)) or bool(re.search(r"\b(không cần dây|không dùng dây|không có dây)\b", q_lower))
+
+        # Sanitize LLM-provided negative constraints against actual query evidence
+        sanitized_neg = []
+        for neg in intent.negative_constraints:
+            neg_l = str(neg).lower().strip()
+            if neg_l in ("wired", "có dây", "dây") and (has_wireless_mention or has_wired_neg):
+                if "wired" not in sanitized_neg:
+                    sanitized_neg.append("wired")
+            elif neg_l in ("wireless", "không dây", "bluetooth") and (has_wired_mention or has_wireless_neg):
+                if "wireless" not in sanitized_neg:
+                    sanitized_neg.append("wireless")
+            elif neg_l in q_lower:
+                sanitized_neg.append(neg)
+        intent.negative_constraints = sanitized_neg
+
+        if (has_wireless_mention or has_wired_neg) and "wired" not in intent.negative_constraints:
             intent.negative_constraints.append("wired")
-        elif has_wired_mention and "wireless" not in intent.negative_constraints:
+        elif (has_wired_mention or has_wireless_neg) and "wireless" not in intent.negative_constraints:
             intent.negative_constraints.append("wireless")
 
+        has_battery_neg = bool(re.search(r"\b(không (?:dùng|cần|chơi|xài|muốn)?\s*(?:loại\s*)?(?:pin tiểu|pin aa|pin aaa|pin rời)|tuyệt đối không (?:dùng|chơi|xài)?\s*pin tiểu)\b", q_lower))
+        if has_battery_neg and "pin tiểu" not in intent.negative_constraints:
+            intent.negative_constraints.append("pin tiểu")
+
+        intent.attributes["wireless"] = has_wireless_mention or has_wired_neg
+        intent.attributes["wired"] = has_wired_mention or has_wireless_neg
         intent.attributes["gaming"] = bool(re.search(r"\b(gaming|chơi game|game|esport)\b", q_lower))
-        intent.attributes["silent"] = bool(re.search(r"\b(silent|êm|yên tĩnh|không ồn)\b", q_lower))
-        intent.attributes["anc"] = bool(re.search(r"\b(chống ồn|anc|khử ồn)\b", q_lower)) and not bool(re.search(r"\b(chống ồn click)\b", q_lower))
-        intent.attributes["mechanical"] = bool(re.search(r"\b(cơ|phím cơ|switch|cherry|blue switch|red switch)\b", q_lower))
+        intent.attributes["silent"] = bool(re.search(r"\b(silent|êm|yên tĩnh|không ồn|không ồn ào|không kêu|không tiếng|không lách cách|chống ồn click|bấm êm)\b", q_lower))
+        intent.attributes["anc"] = bool(re.search(r"\b(chống ồn|anc|khử ồn|noise cancel)\b", q_lower)) and not bool(re.search(r"\b(chống ồn click)\b", q_lower))
+        intent.attributes["mechanical"] = bool(re.search(r"\b(cơ|phím cơ|switch|cherry|blue switch|red switch|brown switch)\b", q_lower))
         intent.attributes["ergonomic"] = bool(re.search(r"\b(công thái học|ergonomic|chống mỏi)\b", q_lower))
 
         # 2. Grounding check on LLM product_type: Purge hallucinated types
         type_keywords_map = {
             "mouse": ["chuột", "mouse", "con chuột"],
-            "keyboard": ["bàn phím", "keyboard", "phím cơ", "phím", "keycap", "switch"],
+            "keyboard": ["bàn phím", "keyboard", "phím cơ", "phím", "keycap", "switch", "gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"],
             "headphone": ["tai nghe", "headphone", "earphone", "earbuds", "tws"],
             "speaker": ["loa", "speaker", "soundbar"],
             "gamepad": ["tay cầm", "gamepad", "controller"],
             "cooler": ["tản nhiệt", "cooler"],
-            "mousepad": ["lót chuột", "tấm lót chuột", "bàn di chuột", "pad chuột", "pad"],
+            "mousepad": ["lót chuột", "tấm lót chuột", "bàn di chuột", "pad chuột", "mousepad"],
             "hub_adapter": ["hub", "chuyển đổi", "adapter", "dock"],
             "charger": ["củ sạc", "cốc sạc"],
             "cable": ["dây cáp", "cáp sạc", "dây sạc"],
@@ -340,7 +358,7 @@ class IntentAnalyzer:
             intent.product_type = "mouse"
         elif re.search(r"\b(tai nghe|headphone|earbuds)\b", q_lower):
             intent.product_type = "headphone"
-        elif re.search(r"\b(bàn phím|phím cơ|keyboard)\b", q_lower):
+        elif any(k in q_lower for k in ["bàn phím", "phím cơ", "keyboard", "gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"]) and not any(k in q_lower for k in ["lót chuột", "bàn di chuột", "pad chuột", "lót bàn phím"]):
             intent.product_type = "keyboard"
         elif re.search(r"\b(loa|speaker|soundbar)\b", q_lower):
             intent.product_type = "speaker"
@@ -355,7 +373,39 @@ class IntentAnalyzer:
         elif re.search(r"\b(pin dự phòng|sạc dự phòng|powerbank)\b", q_lower):
             intent.product_type = "powerbank"
 
-        # 3. Supplement capabilities & compatibility from query
+        # 3. Grounding check on desired_capabilities, device_compatibility, and user_device:
+        # Purge any LLM hallucinations that have zero evidence in the query
+        stop_words = {"cho", "của", "để", "ra", "vào", "các", "những", "và", "với", "được", "có", "màn", "mình", "tôi", "em", "shop"}
+        def _cap_has_evidence(c_text: str) -> bool:
+            sig_words = [w for w in re.findall(r"\w+", c_text.lower()) if len(w) >= 2 and w not in stop_words]
+            return any(w in q_lower for w in sig_words) if sig_words else False
+
+        intent.desired_capabilities = [c for c in intent.desired_capabilities if _cap_has_evidence(c)]
+
+        def _compat_has_evidence(comp_text: str) -> bool:
+            c_l = comp_text.lower().strip()
+            if "hdmi" in c_l:
+                return "hdmi" in q_lower
+            if "type-c" in c_l or "usb-c" in c_l:
+                return bool(re.search(r"\b(type-c|type c|usb-c)\b", q_lower))
+            if "bluetooth" in c_l:
+                return bool(re.search(r"\b(bluetooth|không dây|wireless|tws)\b", q_lower))
+            if "usb-a" in c_l or "usb 3" in c_l or "usb" in c_l:
+                return bool(re.search(r"\b(usb|usb-a|usb 3)\b", q_lower))
+            if "lan" in c_l or "rj45" in c_l or "ethernet" in c_l:
+                return bool(re.search(r"\b(lan|rj45|ethernet|mạng)\b", q_lower))
+            if "3.5" in c_l or "aux" in c_l:
+                return bool(re.search(r"\b(3\.5|aux|jack)\b", q_lower))
+            return c_l in q_lower
+
+        intent.device_compatibility = [c for c in intent.device_compatibility if _compat_has_evidence(c)]
+
+        if intent.user_device:
+            host_device_terms = ["laptop", "macbook", "máy tính", "điện thoại", "iphone", "ipad", "tablet", "pc", "máy bàn", "tivi"]
+            if not any(k in q_lower for k in host_device_terms):
+                intent.user_device = None
+
+        # Supplement verified capabilities & compatibility from rule parser
         reqs = parse_query_requirements(query)
         for cap in reqs.get("desired_capabilities", []):
             if cap not in intent.desired_capabilities:
@@ -373,7 +423,11 @@ class IntentAnalyzer:
         elif intent.brand:
             # Check if LLM brand actually exists in the query words
             b_norm = intent.brand.lower().strip()
-            if b_norm not in q_lower and b_norm != "apple":
+            if b_norm == "apple" and any(k in q_lower for k in ["táo", "apple"]):
+                intent.brand = "Apple"
+            elif b_norm in q_lower:
+                intent.brand = intent.brand
+            else:
                 intent.brand = None
 
         # 5. Budget reconciliation
@@ -439,6 +493,9 @@ class IntentAnalyzer:
             negative_constraints.append("wired")
         elif reqs.get("is_wired") and not reqs.get("is_wireless"):
             negative_constraints.append("wireless")
+
+        if bool(re.search(r"\b(không (?:dùng|cần|chơi|xài|muốn)?\s*(?:loại\s*)?(?:pin tiểu|pin aa|pin aaa|pin rời)|tuyệt đối không (?:dùng|chơi|xài)?\s*pin tiểu)\b", query.lower())):
+            negative_constraints.append("pin tiểu")
 
         # Check out of domain
         if rag_service.is_out_of_domain(query):
