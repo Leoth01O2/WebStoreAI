@@ -10,6 +10,7 @@ from app.services.rag_service import (
     resolve_effective_budget,
     extract_brand_from_query,
     parse_query_requirements,
+    extract_negative_feature_clauses,
     rag_service,
 )
 
@@ -45,11 +46,16 @@ Nhiệm vụ: Trích xuất ý định của người dùng thành DUY NHẤT m�
 }
 
 QUY TẮC BẮT BUỘC:
-1. PHÂN BIỆT THIẾT BỊ NGƯỜI DÙNG ĐANG CÓ (user_device) VÀ SẢN PHẨM CẦN MUA (product_type):
-   - user_device: Thiết bị người dùng ĐANG SỞ HỮU (ví dụ: máy tính, điện thoại, máy tính bảng...).
-   - product_type: Món đồ người dùng CẦN MUA.
-   - CHỈ điền product_type khi người dùng gọi tên rõ ràng loại sản phẩm muốn mua: "chuột" -> "mouse", "bàn phím" -> "keyboard", "tai nghe" -> "headphone", "loa" -> "speaker", "tay cầm" -> "gamepad", "hub chuyển đổi" -> "hub_adapter", "củ sạc" -> "charger", "cáp sạc" -> "cable", "pin dự phòng" -> "powerbank", "giá đỡ" -> "stand", "đế tản nhiệt" -> "cooler", "lót chuột" -> "mousepad".
-   - Nếu người dùng chỉ mô tả nhu cầu, sự cố hoặc chức năng (ví dụ: gõ văn bản, sạc nhanh, xuất hình): ĐẶT product_type tương ứng nếu rõ ràng hoặc null và trích xuất vào desired_capabilities.
+1. PHÂN BIỆT THIẾT BỊ NGƯỜI DÙNG ĐANG CÓ (user_device) VÀ SẢN PHẨM CẦN MUA (product_type) — Head Noun vs. Object Noun Disambiguation:
+   - user_device: Thiết bị người dùng ĐANG SỞ HỮU (ví dụ: máy tính, laptop, điện thoại, máy tính bảng...).
+   - product_type: Món đồ người dùng CẦN MUA: "chuột" -> "mouse", "bàn phím" -> "keyboard", "tai nghe" -> "headphone", "loa" -> "speaker", "tay cầm" -> "gamepad", "hub chuyển đổi" -> "hub_adapter", "củ sạc" -> "charger", "cáp sạc" -> "cable", "pin dự phòng" -> "powerbank", "giá đỡ" -> "stand", "đế tản nhiệt" -> "cooler", "lót chuột" -> "mousepad".
+   - KHI GẶP CỤM TỪ PHỤ KIỆN / TRIỆU CHỨNG CÔNG NĂNG ĐI VỚI THIẾT BỊ (Universal Scenario Ontology):
+     + "kê laptop", "nâng laptop", "đỡ laptop", "kê cao màn hình", "đỡ mỏi cổ", "đau vai gáy", "cúi đầu", "ngồi làm việc mỏi cổ", "chân đế", "giá đỡ" -> user_device: "laptop", product_type: "stand" (TUYỆT ĐỐI KHÔNG gán product_type: "laptop").
+     + "sạc điện thoại", "sạc laptop", "hết pin", "sập nguồn", "đi công tác/du lịch không có ổ điện", "pin dự phòng" -> product_type: "powerbank" hoặc "charger".
+     + "cắm vào laptop/macbook", "thiếu cổng USB/HDMI/Type-C", "chuyển đổi cổng", "xuất màn hình" -> product_type: "hub_adapter" hoặc "cable".
+     + "di chuột mỏi tay", "đau cổ tay", "bấm không ồn ban đêm" -> product_type: "mouse".
+     + "gõ văn bản/code mỏi tay", "gõ êm không ồn" -> product_type: "keyboard".
+     + "họp trực tuyến", "phòng ồn", "nghe rõ giọng", "mic thu âm/đàm thoại" -> product_type: "headphone".
    - TUYỆT ĐỐI KHÔNG tự bịa đặt user_device hay desired_capabilities nếu câu hỏi người dùng không nhắc tới. Không sao chép các thông tin không có trong câu hỏi.
 
 2. CHỨC NĂNG (desired_capabilities) & CHUẨN KẾT NỐI (device_compatibility):
@@ -57,11 +63,16 @@ QUY TẮC BẮT BUỘC:
    - device_compatibility: Các cổng hoặc chuẩn kết nối (ví dụ: "Type-C", "HDMI", "Bluetooth", "USB-A", "3.5mm").
 
 3. ĐIỀU KIỆN PHỦ ĐỊNH & TÍNH NĂNG (attributes & negative_constraints):
+   - MỆNH ĐỀ PHỦ ĐỊNH TÍNH NĂNG (Negative Feature Clauses):
+     + Khi gặp cấu trúc "(không cần | không dùng | không lấy | không có | khỏi cần) + <tính năng X>" (ví dụ: "không cần quạt tản nhiệt"):
+       Bắt buộc đưa vào negative_constraints: ["quạt tản nhiệt"], TUYỆT ĐỐI KHÔNG đưa vào desired_capabilities!
    - "không cần dây", "không dùng dây", "không dây", "wireless", "bluetooth" -> wireless: true, wired: false; negative_constraints: ["wired"].
    - "có dây", "cắm dây", "wired" -> wired: true, wireless: false; negative_constraints: ["wireless"].
    - "chơi game", "gaming", "game" -> gaming: true.
-   - "không ồn", "silent", "êm" -> silent: true.
-   - "chống ồn", "anc" -> anc: true.
+   - PHÂN BIỆT NGỮ CẢNH TỪ "ỒN":
+     + Nếu người dùng nói "phòng ồn", "môi trường ồn", "nghe rõ trong phòng ồn", "lọc tiếng ồn mic" -> ĐÂY LÀ NHU CẦU TAI NGHE / ĐÀM THOẠI (anc: true, silent: false).
+     + CHỈ đặt silent: true khi nói về bấm êm, gõ êm, click không ồn của chuột hoặc phím ("bấm không ồn", "click êm", "chuột silent", "gõ êm").
+   - "chống ồn", "anc", "khử ồn" -> anc: true.
    - Các thuộc tính không nhắc đến: đặt false.
 
 4. THƯƠNG HIỆU (brand):
@@ -248,7 +259,9 @@ class IntentAnalyzer:
         pref_attrs = _clean_str_list(parsed_dict.get("preferred_attributes"))
         neg_constraints = _clean_str_list(parsed_dict.get("negative_constraints"))
         user_dev = parsed_dict.get("user_device")
-        if not isinstance(user_dev, str) or not user_dev.strip():
+        if isinstance(user_dev, str) and user_dev.strip():
+            user_dev = user_dev.strip().lower()
+        else:
             user_dev = None
 
         return UserQueryIntent(
@@ -287,18 +300,20 @@ class IntentAnalyzer:
         6. Reconciles natural Vietnamese budgets.
         """
         q_lower = query.lower()
+        pos_query, extracted_neg_clauses = extract_negative_feature_clauses(query)
+        pos_lower = pos_query.lower()
 
         # 1. Grounding check on boolean attributes & negative constraints:
-        has_wireless_mention = bool(re.search(r"\b(không cần dây|không dùng dây|không có dây|không dây|wireless|bluetooth|tws|2\.4ghz|pin sạc)\b", q_lower))
+        has_wireless_mention = bool(re.search(r"\b(không cần dây|không dùng dây|không có dây|không dây|wireless|bluetooth|tws|2\.4ghz)\b", q_lower))
         has_wired_mention = bool(re.search(r"\b(có dây|cắm dây|cắm usb|dây cáp|dây cắm|wired)\b", q_lower)) and not has_wireless_mention
 
         has_wireless_neg = bool(re.search(r"\b(không (?:dùng|cần|muốn|thích)?\s*(?:bluetooth|không dây|wireless))\b", q_lower))
         has_wired_neg = bool(re.search(r"\b(không (?:dùng|cần|muốn|thích)?\s*(?:loại\s*)?(?:có dây|dây cáp|dây lằng nhằng))\b", q_lower)) or bool(re.search(r"\b(không cần dây|không dùng dây|không có dây)\b", q_lower))
 
-        # Sanitize LLM-provided negative constraints against actual query evidence
+        # Sanitize LLM-provided negative constraints against actual query evidence & incorporate extracted negative clauses
         sanitized_neg = []
         for neg in intent.negative_constraints:
-            neg_l = str(neg).lower().strip()
+            neg_l = neg.lower().strip()
             if neg_l in ("wired", "có dây", "dây") and (has_wireless_mention or has_wired_neg):
                 if "wired" not in sanitized_neg:
                     sanitized_neg.append("wired")
@@ -307,11 +322,17 @@ class IntentAnalyzer:
                     sanitized_neg.append("wireless")
             elif neg_l in q_lower:
                 sanitized_neg.append(neg)
+
+        for enc in extracted_neg_clauses:
+            if enc not in sanitized_neg:
+                sanitized_neg.append(enc)
+
         intent.negative_constraints = sanitized_neg
 
-        if (has_wireless_mention or has_wired_neg) and "wired" not in intent.negative_constraints:
+        # Only add wired/wireless negative constraints for relevant peripheral devices
+        if (has_wireless_mention or has_wired_neg) and intent.product_type in ("mouse", "keyboard", "headphone") and "wired" not in intent.negative_constraints:
             intent.negative_constraints.append("wired")
-        elif (has_wired_mention or has_wireless_neg) and "wireless" not in intent.negative_constraints:
+        elif (has_wired_mention or has_wireless_neg) and intent.product_type in ("mouse", "keyboard", "headphone") and "wireless" not in intent.negative_constraints:
             intent.negative_constraints.append("wireless")
 
         has_battery_neg = bool(re.search(r"\b(không (?:dùng|cần|chơi|xài|muốn)?\s*(?:loại\s*)?(?:pin tiểu|pin aa|pin aaa|pin rời)|tuyệt đối không (?:dùng|chơi|xài)?\s*pin tiểu)\b", q_lower))
@@ -321,25 +342,60 @@ class IntentAnalyzer:
         intent.attributes["wireless"] = has_wireless_mention or has_wired_neg
         intent.attributes["wired"] = has_wired_mention or has_wireless_neg
         intent.attributes["gaming"] = bool(re.search(r"\b(gaming|chơi game|game|esport)\b", q_lower))
-        intent.attributes["silent"] = bool(re.search(r"\b(silent|êm|yên tĩnh|không ồn|không ồn ào|không kêu|không tiếng|không lách cách|chống ồn click|bấm êm)\b", q_lower))
+        # Noise Disambiguation: distinguish room/ambient noise (headphone/mic need) vs quiet click/typing (mouse/keyboard need)
+        is_room_noise = bool(re.search(r"\b(phòng (?:khá\s*)?ồn|môi trường (?:khá\s*)?ồn|xung quanh (?:khá\s*)?ồn|tiếng ồn bên ngoài|phòng ồn)\b", q_lower))
+        is_click_silent = bool(re.search(r"\b(bấm không ồn|click êm|gõ không ồn|không kêu lách cách|chống ồn click|không gây tiếng click|chuột êm|chuột yên tĩnh|phím yên tĩnh|chuột silent|phím silent)\b", q_lower))
+
+        if is_click_silent:
+            intent.attributes["silent"] = True
+        elif is_room_noise and not any(k in q_lower for k in ["chuột", "phím", "click", "bấm", "gõ"]):
+            intent.attributes["silent"] = False
+        else:
+            intent.attributes["silent"] = bool(re.search(r"\b(silent|yên tĩnh|không ồn|không ồn ào|không kêu|không tiếng|không lách cách|chống ồn click|bấm không ồn|gõ không ồn)\b", q_lower)) and not is_room_noise
+
         intent.attributes["anc"] = bool(re.search(r"\b(chống ồn|anc|khử ồn|noise cancel)\b", q_lower)) and not bool(re.search(r"\b(chống ồn click)\b", q_lower))
         intent.attributes["mechanical"] = bool(re.search(r"\b(cơ|phím cơ|switch|cherry|blue switch|red switch|brown switch)\b", q_lower))
         intent.attributes["ergonomic"] = bool(re.search(r"\b(công thái học|ergonomic|chống mỏi)\b", q_lower))
 
-        # 2. Grounding check on LLM product_type: Purge hallucinated types
+        # Audio / Meeting Scenario Detection
+        has_audio_scenario = bool(re.search(
+            r"\b(họp trực tuyến|họp online|zoom|meet|teams|đàm thoại|nghe rõ|nghe giọng|nghe tiếng|giọng người|lọc tiếng ồn mic|lọc ồn mic|mic lọc ồn|cách âm|chống ồn khi nghe|nghe trong phòng ồn)\b",
+            q_lower
+        )) or (
+            bool(re.search(r"\b(họp|đàm thoại|gọi điện|voice|call)\b", q_lower)) and
+            bool(re.search(r"\b(nghe|ồn|tiếng|mic|âm thanh|tai)\b", q_lower))
+        )
+
+        # 2. Grounding check on LLM product_type & Universal Scenario Ontology
+        # First, decouple host device (laptop, phone, macbook, pc) when LLM mistakes host device for product_type
+        if intent.product_type:
+            pt_clean = intent.product_type.lower().strip()
+            if pt_clean in ("laptop", "macbook", "máy tính", "phone", "điện thoại", "pc", "máy bàn", "tablet", "ipad"):
+                if not intent.user_device:
+                    intent.user_device = "laptop" if pt_clean in ("laptop", "macbook", "máy tính") else ("phone" if pt_clean in ("phone", "điện thoại") else pt_clean)
+                intent.product_type = None
+
         type_keywords_map = {
-            "mouse": ["chuột", "mouse", "con chuột"],
+            "mouse": ["chuột", "mouse", "con chuột", "di chuột mỏi tay", "đau cổ tay"],
             "keyboard": ["bàn phím", "keyboard", "phím cơ", "phím", "keycap", "switch", "gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"],
-            "headphone": ["tai nghe", "headphone", "earphone", "earbuds", "tws"],
+            "headphone": [
+                "tai nghe", "headphone", "earphone", "earbuds", "tws",
+                "họp trực tuyến", "họp online", "zoom", "meet", "teams", "đàm thoại",
+                "nghe rõ", "giọng người", "mic đàm thoại", "lọc ồn mic", "mic lọc ồn", "nghe giọng", "phòng khá ồn", "phòng ồn"
+            ],
             "speaker": ["loa", "speaker", "soundbar"],
             "gamepad": ["tay cầm", "gamepad", "controller"],
             "cooler": ["tản nhiệt", "cooler"],
             "mousepad": ["lót chuột", "tấm lót chuột", "bàn di chuột", "pad chuột", "mousepad"],
-            "hub_adapter": ["hub", "chuyển đổi", "adapter", "dock"],
+            "hub_adapter": ["hub", "chuyển đổi", "adapter", "dock", "thiếu cổng", "thêm cổng", "xuất màn hình"],
             "charger": ["củ sạc", "cốc sạc"],
             "cable": ["dây cáp", "cáp sạc", "dây sạc"],
-            "powerbank": ["pin dự phòng", "sạc dự phòng", "powerbank"],
-            "stand": ["giá đỡ", "stand", "chân đế"],
+            "powerbank": ["pin dự phòng", "sạc dự phòng", "powerbank", "hết pin", "sập nguồn"],
+            "stand": [
+                "giá đỡ", "stand", "chân đế", "kê laptop", "nâng laptop", "đỡ laptop",
+                "kê cao laptop", "kê máy", "nâng máy", "đỡ máy", "kê cao màn hình",
+                "đỡ mỏi cổ", "đau vai gáy", "mỏi cổ", "mỏi vai gáy", "cúi đầu", "ngồi làm việc mỏi cổ"
+            ],
             "smarthome": ["đèn", "đồng hồ", "cân", "quạt"],
         }
         if intent.product_type:
@@ -351,36 +407,85 @@ class IntentAnalyzer:
             elif pt_norm not in q_lower:
                 intent.product_type = None
 
-        # Override product_type if query explicitly names one with high precision
-        if re.search(r"\b(lót chuột|tấm lót chuột|bàn di chuột|pad chuột)\b", q_lower):
+        # Scenario detectors
+        has_stand_keywords = any(k in pos_lower for k in [
+            "giá đỡ", "chân đế", "kê laptop", "nâng laptop", "đỡ laptop", "kê cao laptop",
+            "kê máy", "nâng máy", "đỡ máy", "kê cao màn hình", "nâng cao màn hình"
+        ])
+        has_neck_strain = bool(re.search(r"\b(mỏi cổ|đỡ mỏi cổ|đau vai gáy|mỏi vai gáy|cúi đầu|ngồi làm việc mỏi cổ)\b(?!\s*tay\b)", pos_lower))
+        is_stand_scenario = (has_stand_keywords or has_neck_strain) and not any(k in pos_lower for k in ["chuột", "mouse", "bàn phím", "keyboard", "cổ tay", "mỏi tay"])
+
+        is_mouse_scenario = (
+            any(k in pos_lower for k in ["chuột", "con chuột", "mouse", "di chuột mỏi tay", "đau cổ tay", "chuột công thái học", "bấm không ồn", "click êm", "chuột silent"]) and
+            not any(k in pos_lower for k in ["lót chuột", "tấm lót chuột", "bàn di chuột", "pad chuột"])
+        )
+        is_powerbank_scenario = any(k in pos_lower for k in [
+            "pin dự phòng", "sạc dự phòng", "powerbank", "pin sạc dự phòng",
+            "hết pin", "sập nguồn", "không có ổ điện", "không có ổ cắm",
+            "đi công tác không có ổ điện", "du lịch không có ổ điện", "dự phòng pin"
+        ])
+        is_hub_scenario = any(k in pos_lower for k in [
+            "hub", "chuyển đổi", "đầu chuyển", "cáp chuyển", "adapter", "dock",
+            "cắm vào macbook", "cắm vào laptop", "thiếu cổng", "thêm cổng",
+            "xuất màn hình", "xuất hình ra", "nối ra màn"
+        ])
+
+        # If negative constraint forbids cooler, clear accidental cooler classification
+        has_cooler_in_neg = any(k in [n.lower() for n in intent.negative_constraints] for k in ["quạt tản nhiệt", "tản nhiệt", "cooler", "quạt"])
+        if has_cooler_in_neg and intent.product_type == "cooler":
+            intent.product_type = "stand" if is_stand_scenario else None
+
+        # Override product_type if query explicitly names one with high precision or describes implicit functional scenario
+        if re.search(r"\b(lót chuột|tấm lót chuột|bàn di chuột|pad chuột)\b", pos_lower):
             intent.product_type = "mousepad"
-        elif re.search(r"\b(chuột|con chuột|mouse)\b", q_lower) and not any(k in q_lower for k in ["lót chuột", "bàn di chuột", "pad chuột"]):
-            intent.product_type = "mouse"
-        elif re.search(r"\b(tai nghe|headphone|earbuds)\b", q_lower):
-            intent.product_type = "headphone"
-        elif any(k in q_lower for k in ["bàn phím", "phím cơ", "keyboard", "gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"]) and not any(k in q_lower for k in ["lót chuột", "bàn di chuột", "pad chuột", "lót bàn phím"]):
-            intent.product_type = "keyboard"
-        elif re.search(r"\b(loa|speaker|soundbar)\b", q_lower):
-            intent.product_type = "speaker"
-        elif re.search(r"\b(tay cầm|gamepad)\b", q_lower) and not re.search(r"\b(chuột)\b", q_lower):
-            intent.product_type = "gamepad"
-        elif re.search(r"\b(tản nhiệt|đế tản nhiệt)\b", q_lower):
-            intent.product_type = "cooler"
-        elif re.search(r"\b(hub|chuyển đổi|adapter|dock)\b", q_lower):
-            intent.product_type = "hub_adapter"
-        elif re.search(r"\b(giá đỡ|chân đế|kê laptop)\b", q_lower):
+        elif is_stand_scenario:
             intent.product_type = "stand"
-        elif re.search(r"\b(pin dự phòng|sạc dự phòng|powerbank)\b", q_lower):
+            if not intent.user_device and any(k in q_lower for k in ["laptop", "macbook", "máy tính"]):
+                intent.user_device = "laptop"
+        elif is_powerbank_scenario:
             intent.product_type = "powerbank"
+        elif is_hub_scenario:
+            intent.product_type = "hub_adapter"
+        elif re.search(r"\b(củ sạc|cốc sạc)\b", pos_lower):
+            intent.product_type = "charger"
+        elif re.search(r"\b(dây cáp|cáp sạc|dây sạc)\b", pos_lower):
+            intent.product_type = "cable"
+        elif is_mouse_scenario:
+            intent.product_type = "mouse"
+        elif re.search(r"\b(tai nghe|headphone|earbuds)\b", pos_lower) or (has_audio_scenario and not any(k in pos_lower for k in ["chuột", "bàn phím", "pad chuột", "lót chuột", "củ sạc", "cáp sạc"])):
+            intent.product_type = "headphone"
+        elif any(k in pos_lower for k in ["bàn phím", "phím cơ", "keyboard", "gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"]) and not any(k in pos_lower for k in ["lót chuột", "bàn di chuột", "pad chuột", "lót bàn phím"]):
+            intent.product_type = "keyboard"
+        elif re.search(r"\b(loa|speaker|soundbar)\b", pos_lower):
+            intent.product_type = "speaker"
+        elif re.search(r"\b(tay cầm|gamepad)\b", pos_lower) and not re.search(r"\b(chuột)\b", pos_lower):
+            intent.product_type = "gamepad"
+        elif re.search(r"\b(tản nhiệt|đế tản nhiệt)\b", pos_lower) and not has_cooler_in_neg:
+            intent.product_type = "cooler"
+
+        if has_audio_scenario and not any(k in q_lower for k in ["chuột", "bàn phím", "pad chuột"]):
+            if "họp trực tuyến đàm thoại" not in intent.desired_capabilities:
+                intent.desired_capabilities.append("họp trực tuyến đàm thoại")
+        if is_stand_scenario:
+            if "giá đỡ laptop nâng hạ độ cao công thái học" not in intent.desired_capabilities:
+                intent.desired_capabilities.append("giá đỡ laptop nâng hạ độ cao công thái học")
 
         # 3. Grounding check on desired_capabilities, device_compatibility, and user_device:
-        # Purge any LLM hallucinations that have zero evidence in the query
+        # Purge any LLM hallucinations that have zero evidence in the query or that violate negative constraints
         stop_words = {"cho", "của", "để", "ra", "vào", "các", "những", "và", "với", "được", "có", "màn", "mình", "tôi", "em", "shop"}
         def _cap_has_evidence(c_text: str) -> bool:
             sig_words = [w for w in re.findall(r"\w+", c_text.lower()) if len(w) >= 2 and w not in stop_words]
             return any(w in q_lower for w in sig_words) if sig_words else False
 
-        intent.desired_capabilities = [c for c in intent.desired_capabilities if _cap_has_evidence(c)]
+        # Remove capabilities that conflict with negative constraints (e.g. 'quạt tản nhiệt')
+        clean_caps = []
+        for c in intent.desired_capabilities:
+            c_l = c.lower()
+            if has_cooler_in_neg and any(k in c_l for k in ["quạt", "tản nhiệt", "cooler"]):
+                continue
+            if _cap_has_evidence(c) or (is_stand_scenario and "giá đỡ" in c_l):
+                clean_caps.append(c)
+        intent.desired_capabilities = clean_caps
 
         def _compat_has_evidence(comp_text: str) -> bool:
             c_l = comp_text.lower().strip()
@@ -400,6 +505,13 @@ class IntentAnalyzer:
 
         intent.device_compatibility = [c for c in intent.device_compatibility if _compat_has_evidence(c)]
 
+        # Filter out boolean attribute keywords from desired_capabilities (e.g. 'game', 'gaming', 'silent', 'wireless')
+        attr_cap_keywords = {"game", "gaming", "chơi game", "silent", "im lặng", "không ồn", "không dây", "wireless", "có dây", "wired"}
+        intent.desired_capabilities = [
+            c for c in intent.desired_capabilities
+            if c.lower().strip() not in attr_cap_keywords
+        ]
+
         if intent.user_device:
             host_device_terms = ["laptop", "macbook", "máy tính", "điện thoại", "iphone", "ipad", "tablet", "pc", "máy bàn", "tivi"]
             if not any(k in q_lower for k in host_device_terms):
@@ -416,21 +528,28 @@ class IntentAnalyzer:
         if reqs.get("user_device") and not intent.user_device:
             intent.user_device = reqs["user_device"]
 
+        # Override product_type if rule ontology locks onto specific accessory scenario (hub, powerbank, stand)
+        rule_target_type = reqs.get("target_type")
+        if rule_target_type in ("hub_adapter", "powerbank", "stand", "mousepad", "cooler"):
+            intent.product_type = rule_target_type
+        elif not intent.product_type and rule_target_type:
+            intent.product_type = rule_target_type
+
         # 4. Brand verification & hallucination guard
+        # Strictly rely on ground-truth brand extractor; discard hallucinated brands or owned host device brands
         extracted_brand = extract_brand_from_query(query)
         if extracted_brand:
             intent.brand = extracted_brand["canonical_name"]
-        elif intent.brand:
-            # Check if LLM brand actually exists in the query words
-            b_norm = intent.brand.lower().strip()
-            if b_norm == "apple" and any(k in q_lower for k in ["táo", "apple"]):
-                intent.brand = "Apple"
-            elif b_norm in q_lower:
-                intent.brand = intent.brand
-            else:
-                intent.brand = None
+        else:
+            intent.brand = None
 
-        # 5. Budget reconciliation
+        # 5. Attributes synchronization (silent click, ergonomics)
+        if reqs.get("is_silent"):
+            intent.attributes["silent"] = True
+        if reqs.get("is_ergonomic"):
+            intent.attributes["ergonomic"] = True
+
+        # 6. Budget reconciliation
         resolved_budget = resolve_effective_budget(query, budget_input)
         if resolved_budget:
             intent.max_price = resolved_budget
@@ -439,7 +558,7 @@ class IntentAnalyzer:
         elif budget_input:
             intent.max_price = budget_input
 
-        # 6. Suppress unwarranted clarification if actionable info exists
+        # 7. Suppress unwarranted clarification if actionable info exists
         has_actionable_target = bool(intent.product_type or intent.brand or intent.desired_capabilities or intent.max_price)
         is_isolated_ss = bool(re.search(r"\b(ss)\b", q_lower)) and not bool(re.search(r"\b(samsung|steelseries)\b", q_lower))
 
@@ -447,13 +566,13 @@ class IntentAnalyzer:
             intent.needs_clarification = False
             intent.clarification_question = None
 
-        # 7. Intent classification alignment
+        # 8. Intent classification alignment
         if intent.brand and not intent.product_type and not intent.desired_capabilities:
             intent.intent = "check_brand"
         elif intent.product_type or intent.desired_capabilities or intent.max_price:
             intent.intent = "search_products"
 
-        # 8. Domain guard reconciliation
+        # 9. Domain guard reconciliation
         if intent.product_type or intent.brand or intent.desired_capabilities or not rag_service.is_out_of_domain(query):
             intent.is_out_of_domain = False
             if intent.intent == "out_of_domain":
@@ -488,13 +607,13 @@ class IntentAnalyzer:
             "ergonomic": bool(reqs.get("is_ergonomic")),
         }
 
-        negative_constraints = []
-        if reqs.get("is_wireless") and not reqs.get("is_wired"):
+        negative_constraints = list(reqs.get("negative_constraints") or [])
+        if reqs.get("target_type") in ("mouse", "keyboard", "headphone") and reqs.get("is_wireless") and not reqs.get("is_wired") and "wired" not in negative_constraints:
             negative_constraints.append("wired")
-        elif reqs.get("is_wired") and not reqs.get("is_wireless"):
+        elif reqs.get("target_type") in ("mouse", "keyboard", "headphone") and reqs.get("is_wired") and not reqs.get("is_wireless") and "wireless" not in negative_constraints:
             negative_constraints.append("wireless")
 
-        if bool(re.search(r"\b(không (?:dùng|cần|chơi|xài|muốn)?\s*(?:loại\s*)?(?:pin tiểu|pin aa|pin aaa|pin rời)|tuyệt đối không (?:dùng|chơi|xài)?\s*pin tiểu)\b", query.lower())):
+        if bool(re.search(r"\b(không (?:dùng|cần|chơi|xài|muốn)?\s*(?:loại\s*)?(?:pin tiểu|pin aa|pin aaa|pin rời)|tuyệt đối không (?:dùng|chơi|xài)?\s*pin tiểu)\b", query.lower())) and "pin tiểu" not in negative_constraints:
             negative_constraints.append("pin tiểu")
 
         # Check out of domain

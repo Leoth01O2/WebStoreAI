@@ -16,6 +16,15 @@ from app.services.intent_analyzer import intent_analyzer
 from app.services.rag_service import rag_service, parse_query_requirements, check_product_eligibility
 from app.services.ai_service import ai_service
 from app.core.database import get_db_connection
+from app.core.rate_limiter import ai_rate_limiter
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    ai_rate_limiter.reset()
+    yield
+    ai_rate_limiter.reset()
+
 
 
 def test_typing_need_product_type_mapping_and_no_unrelated_gadgets():
@@ -85,7 +94,7 @@ def test_dry_battery_negative_constraint_strictly_enforced():
 
     assert el_rechargeable is True
     assert el_dry is False
-    assert "pin tiểu" in reason_dry.lower() or "pin" in reason_dry.lower()
+    assert "pin tiểu" in (reason_dry or "").lower() or "pin" in (reason_dry or "").lower()
 
 
 def test_silent_click_office_requirement():
@@ -157,3 +166,151 @@ def test_end_to_end_recommendation_verified_in_sqlite():
             assert row["status"] == "active", f"Recommended SKU {sku} is inactive!"
             assert row["stock_quantity"] > 0, f"Recommended SKU {sku} is out of stock!"
             assert row["selling_price"] <= 2000000, f"Recommended SKU {sku} price {row['selling_price']} exceeds budget 2,000,000!"
+
+
+def test_online_meeting_noisy_room_headset_recommendation():
+    """
+    Test case for user query:
+    'Tôi thường họp trực tuyến trong phòng khá ồn, muốn nghe rõ giọng người họp hơn, ngân sách khoảng 600 nghìn'
+    Must:
+    1. Infer product_type == 'headphone' and filter strictly for audio devices.
+    2. Context must contain SP-GAME-01 (Tai nghe Gaming 7.1 Rung Bass G200, 590k <= 600k, mic lọc ồn, đệm tai êm).
+    3. Context and recommendations must NOT contain SP-OFFICE-02 (Chuột Silent), SP-OFFICE-04 (Chuột Basic),
+       SP-ACC-04 (Sạc dự phòng), SP-ACC-05 (Giá đỡ laptop).
+    4. End-to-end recommendation must succeed with SP-GAME-01 and not trigger l2_sku_hallucination.
+    """
+    q = "Tôi thường họp trực tuyến trong phòng khá ồn, muốn nghe rõ giọng người họp hơn, ngân sách khoảng 600 nghìn"
+
+    # 1. Intent Analysis
+    intent = intent_analyzer.analyze_intent(q, preferred_provider="grounded")
+    assert intent.product_type == "headphone"
+    assert intent.max_price == 600000.0
+    assert intent.attributes.get("silent") is not True
+    assert "silent" not in intent.required_attributes
+
+    # 2. Grounded RAG Context Retrieval
+    ctx = rag_service.get_grounded_recommendation_context(q)
+    products = ctx["products"]
+    product_skus = [p["sku"] for p in products]
+
+    assert "SP-GAME-01" in product_skus
+    assert "SP-OFFICE-02" not in product_skus
+    assert "SP-OFFICE-04" not in product_skus
+    assert "SP-ACC-04" not in product_skus
+    assert "SP-ACC-05" not in product_skus
+
+    # 3. End-to-end Recommendation
+    ai_rate_limiter.reset()
+    from app.services.ai_providers.ollama_provider import OllamaProvider
+    ollama_avail = OllamaProvider().health_check().get("available", False)
+    provider_to_use = "ollama" if ollama_avail else "grounded"
+
+    res = ai_service.recommend_products(user_query=q, provider=provider_to_use)
+    recommended_skus = [p.sku for p in res.recommended_products]
+
+    assert "SP-GAME-01" in recommended_skus
+    assert "SP-OFFICE-02" not in recommended_skus
+    assert "SP-OFFICE-04" not in recommended_skus
+    assert "SP-ACC-04" not in recommended_skus
+    assert "SP-ACC-05" not in recommended_skus
+    assert getattr(ai_service, "_last_l2_fallback_reason", None) != "l2_sku_hallucination"
+    assert res.fallback_reason != "l2_sku_hallucination"
+    assert res.verification_passed is True
+
+
+def test_laptop_stand_anti_neck_strain_with_negative_fan_constraint():
+    """
+    Test case for user query:
+    'Tôi muốn kê laptop lên cao cho đỡ mỏi cổ, không cần quạt tản nhiệt, chi phí dưới 300 nghìn'
+    Must:
+    1. Disambiguate 'kê laptop' / 'đỡ mỏi cổ' into target_type == 'stand' (NOT 'laptop' or 'cooler').
+    2. Extract 'quạt tản nhiệt' into negative_constraints and exclude cooler requirement.
+    3. Retrieval must find SP-ACC-05 (Giá đỡ laptop Hợp kim nhôm Xoay 360 độ, 290,000đ <= 300,000đ).
+    4. End-to-end response must have len(recommended_products) >= 1 with SP-ACC-05.
+    5. Response text must NOT leak prompt instructions ('Tuyệt đối không tự sáng tác', 'Tuyệt đối không tự tạo thêm').
+    6. Response text must NOT contain fake SKUs (S01G-9876543, D02-9876543, B02-9876543).
+    """
+    q = "Tôi muốn kê laptop lên cao cho đỡ mỏi cổ, không cần quạt tản nhiệt, chi phí dưới 300 nghìn"
+
+    # 1. Intent Analysis
+    intent = intent_analyzer.analyze_intent(q, preferred_provider="grounded")
+    assert intent.product_type == "stand", f"Expected target_type 'stand', got {intent.product_type}"
+    assert intent.user_device == "laptop"
+    assert intent.max_price == 300000.0
+    assert any("quạt" in n.lower() or "tản nhiệt" in n.lower() for n in intent.negative_constraints)
+
+    # 2. RAG Context Retrieval
+    ctx = rag_service.get_grounded_recommendation_context(q, intent=intent)
+    products = ctx["products"]
+    product_skus = [p["sku"] for p in products]
+
+    assert "SP-ACC-05" in product_skus, f"SP-ACC-05 missing from retrieved products: {product_skus}"
+    assert len(products) >= 1
+
+    # 3. End-to-End Recommendation Call
+    ai_rate_limiter.reset()
+    from app.services.ai_providers.ollama_provider import OllamaProvider
+    ollama_avail = OllamaProvider().health_check().get("available", False)
+    provider_to_use = "ollama" if ollama_avail else "grounded"
+
+    res = ai_service.recommend_products(user_query=q, provider=provider_to_use)
+    rec_skus = [p.sku for p in res.recommended_products]
+
+    assert len(res.recommended_products) >= 1, "Expected at least 1 recommended product"
+    assert "SP-ACC-05" in rec_skus, f"SP-ACC-05 not recommended: {rec_skus}"
+
+    resp_text = res.ai_response or ""
+    # Prompt Instruction Leakage Check
+    assert "tuyệt đối không tự sáng tác" not in resp_text.lower()
+    assert "tuyệt đối không tự tạo thêm" not in resp_text.lower()
+    assert "áp dụng system prompt" not in resp_text.lower()
+    assert "quy tắc tư vấn sản phẩm" not in resp_text.lower()
+
+    # General SKU Hallucination Check
+    for fake_sku in ["S01G-9876543", "D02-9876543", "B02-9876543", "SP-FAKE"]:
+        assert fake_sku.lower() not in resp_text.lower()
+
+
+def test_powerbank_travel_accessory_disambiguation():
+    """
+    Test case: 'Tôi cần pin sạc dự phòng cho điện thoại khi đi du lịch không có ổ cắm, ngân sách tầm 600k'
+    Must infer target_type == 'powerbank', retrieve SP-ACC-04 (590k), and recommend it.
+    """
+    q = "Tôi cần pin sạc dự phòng cho điện thoại khi đi du lịch không có ổ cắm, ngân sách tầm 600k"
+    intent = intent_analyzer.analyze_intent(q, preferred_provider="grounded")
+    assert intent.product_type == "powerbank"
+
+    ctx = rag_service.get_grounded_recommendation_context(q, intent=intent)
+    skus = [p["sku"] for p in ctx["products"]]
+    assert "SP-ACC-04" in skus
+
+
+def test_hub_adapter_missing_ports_laptop_disambiguation():
+    """
+    Test case: 'Laptop của mình thiếu cổng chỉ có mỗi Type-C, cần xuất màn hình HDMI và cắm thêm chuột USB giá tầm 450k'
+    Must infer target_type == 'hub_adapter', retrieve SP-ACC-03 (420k), and recommend it.
+    """
+    q = "Laptop của mình thiếu cổng chỉ có mỗi Type-C, cần xuất màn hình HDMI và cắm thêm chuột USB giá tầm 450k"
+    intent = intent_analyzer.analyze_intent(q, preferred_provider="grounded")
+    assert intent.product_type == "hub_adapter"
+
+    ctx = rag_service.get_grounded_recommendation_context(q, intent=intent)
+    skus = [p["sku"] for p in ctx["products"]]
+    assert "SP-ACC-03" in skus
+
+
+def test_ergonomic_mouse_wrist_strain_disambiguation():
+    """
+    Test case: 'Mình dùng máy tính nhiều bị mỏi cổ tay, cần chuột công thái học không dây bấm êm dưới 350k'
+    Must infer target_type == 'mouse', retrieve SP-OFFICE-02 (320k), and recommend it.
+    """
+    q = "Mình dùng máy tính nhiều bị mỏi cổ tay, cần chuột công thái học không dây bấm êm dưới 350k"
+    intent = intent_analyzer.analyze_intent(q, preferred_provider="grounded")
+    assert intent.product_type == "mouse"
+
+    ctx = rag_service.get_grounded_recommendation_context(q, intent=intent)
+    skus = [p["sku"] for p in ctx["products"]]
+    assert "SP-OFFICE-02" in skus
+
+
+

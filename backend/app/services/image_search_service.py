@@ -30,6 +30,28 @@ ALLOWED_MIME_TYPES = {
 }
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
 
+DEVICE_PARENT_CATEGORIES = {
+    "speaker": "Âm thanh & Tai nghe",
+    "headphone": "Âm thanh & Tai nghe",
+    "earbuds": "Âm thanh & Tai nghe",
+    "microphone": "Âm thanh & Tai nghe",
+    "mouse": "Chuột & Bàn phím",
+    "keyboard": "Chuột & Bàn phím",
+    "mousepad": "Chuột & Bàn phím",
+    "lamp": "Gia dụng thông minh",
+    "diffuser": "Gia dụng thông minh",
+    "clock": "Gia dụng thông minh",
+    "smart_scale": "Gia dụng thông minh",
+    "fan": "Gia dụng thông minh",
+    "charger": "Phụ kiện & Dây cáp",
+    "cable": "Phụ kiện & Dây cáp",
+    "hub_adapter": "Phụ kiện & Dây cáp",
+    "power_bank": "Phụ kiện & Dây cáp",
+    "laptop_stand": "Phụ kiện & Dây cáp",
+    "cooling_pad": "Gaming Gear",
+    "game_controller": "Gaming Gear"
+}
+
 
 class ImageSearchService:
     """
@@ -209,11 +231,16 @@ class ImageSearchService:
         if provider == "local" or not settings.GEMINI_API_KEY:
             # If it's a test preset with explicit keyword, give preference to test keyword attributes
             if is_test_preset:
+                try:
+                    query_vector = local_vision_service.extract_image_embedding(image_bytes)
+                except Exception:
+                    pass
                 features = self._extract_test_preset_features(fn_lower)
                 return features, False, False, None, query_vector, "local"
 
             try:
-                features, is_np, np_reason = local_vision_service.extract_query_visual_features_local(image_bytes, filename)
+                features, is_np, np_reason, q_vec = local_vision_service.extract_query_visual_features_local(image_bytes, filename, return_vector=True)
+                query_vector = q_vec
                 return features, False, False, None, query_vector, "local"
             except Exception as e:
                 logger.error(f"[IMAGE_SEARCH] Local vision feature extraction failed: {e}")
@@ -287,8 +314,8 @@ class ImageSearchService:
 
             # Gracefully fallback to Local Vision Engine
             try:
-                local_feat, _, _ = local_vision_service.extract_query_visual_features_local(image_bytes, filename)
-                return local_feat, True, is_quota, api_error_detail, query_vector, "local"
+                local_feat, _, _, q_vec = local_vision_service.extract_query_visual_features_local(image_bytes, filename, return_vector=True)
+                return local_feat, True, is_quota, api_error_detail, q_vec, "local"
             except Exception:
                 fallback_feat = self._extract_test_preset_features(fn_lower)
                 return fallback_feat, True, is_quota, api_error_detail, query_vector, "local"
@@ -532,22 +559,58 @@ class ImageSearchService:
             cursor = conn.cursor()
             cursor.execute(f"""
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                       p.selling_price, p.stock_quantity, p.unit, p.status, p.image_url, p.description
+                       p.selling_price, p.stock_quantity, p.unit, p.status, p.image_url, p.description,
+                       v.product_type as v_product_type
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
+                LEFT JOIN product_visual_metadata v ON p.id = v.product_id
                 WHERE p.id IN ({placeholders})
             """, candidate_ids)
             db_products = {row["id"]: dict(row) for row in cursor.fetchall()}
 
-        # 5. Assemble results & Multi-Tier Classification
-        results: List[ImageSearchResultItem] = []
+            # Check all active products in warehouse to verify if this device type exists in inventory
+            cursor.execute("""
+                SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                       v.product_type as v_product_type
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                LEFT JOIN product_visual_metadata v ON p.id = v.product_id
+                WHERE p.status = 'active'
+            """)
+            all_warehouse_products = [dict(r) for r in cursor.fetchall()]
 
         norm_q_type = normalize_device_type(query_features.product_type or "")
-        category_candidates = [
-            c for c in raw_candidates
-            if normalize_device_type(c.get("product_type", "")) == norm_q_type
-        ]
-        best_cat_score = max((c["combined_score"] for c in category_candidates), default=0.0) if category_candidates else 0.0
+
+        # Check warehouse inventory for this specific device type
+        matching_warehouse_products = []
+        if norm_q_type and norm_q_type not in ["accessory", "unknown"]:
+            matching_warehouse_products = [
+                p for p in all_warehouse_products
+                if normalize_device_type(p.get("v_product_type")) == norm_q_type
+            ]
+
+        # Requirement 2.2: If uploaded image is a device not in store (or 0 items match), show clear notice
+        if norm_q_type and norm_q_type not in ["accessory", "unknown"] and len(matching_warehouse_products) == 0:
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+            msg = "Hiện tại trong kho chưa có sản phẩm nào thuộc loại thiết bị này."
+            query_features.description = msg
+            return ImageSearchResponse(
+                query_features=query_features,
+                results=[],
+                total_candidates_found=0,
+                execution_time_ms=elapsed_ms,
+                is_fallback=is_fallback,
+                error_message=msg,
+                provider_used=actual_provider
+            )
+
+        # 5. Assemble results & Strict Relevance Grouping
+        target_parent_category = DEVICE_PARENT_CATEGORIES.get(norm_q_type)
+        if not target_parent_category and matching_warehouse_products:
+            target_parent_category = matching_warehouse_products[0].get("category_name")
+
+        primary_candidates: List[Tuple[float, Dict[str, Any], Dict[str, Any], str]] = []
+        secondary_candidates: List[Tuple[float, Dict[str, Any], Dict[str, Any], str]] = []
 
         for cand in raw_candidates:
             pid = cand["product_id"]
@@ -555,30 +618,38 @@ class ImageSearchService:
                 continue
 
             prod = db_products[pid]
-
-            # Requirement 3.3: Exclude inactive or discontinued products
             if prod.get("status") == "inactive":
                 continue
 
             score = cand["combined_score"]
+            cand_type = normalize_device_type(cand.get("product_type") or prod.get("v_product_type") or "")
+            cand_cat_name = prod.get("category_name") or ""
+            display_type = cand.get("product_type") or prod.get("v_product_type") or cand_type
 
-            is_best_cat = (
-                best_cat_score > 0.0
-                and score == best_cat_score
-                and normalize_device_type(cand.get("product_type", "")) == norm_q_type
-            )
+            is_same_type = bool(norm_q_type and cand_type and norm_q_type == cand_type)
+            is_same_parent = bool(target_parent_category and cand_cat_name == target_parent_category)
 
-            relationship, reason = self.classify_relationship(
-                candidate_meta=cand,
-                query_features=query_features,
-                score=score,
-                product_name=prod["name"],
-                is_best_category_match=is_best_cat
-            )
+            # NHÓM CHÍNH: CHỈ các sản phẩm đúng loại thiết bị
+            if is_same_type:
+                primary_candidates.append((score, prod, cand, display_type))
+            # NHÓM PHỤ: Cùng nhóm danh mục cha (tối đa 2 sản phẩm tham khảo)
+            elif is_same_parent and score >= 0.25:
+                secondary_candidates.append((score, prod, cand, display_type))
+            # TUYỆT ĐỐI LOẠI BỎ sản phẩm khác danh mục (không hiển thị Chuột, Củ sạc, Hub khi tìm Loa)
 
-            in_stock = (prod["stock_quantity"] > 0)
+        final_items: List[ImageSearchResultItem] = []
 
-            item = ImageSearchResultItem(
+        # Process Primary Group (MATCH / SIMILAR)
+        primary_candidates.sort(key=lambda x: x[0], reverse=True)
+        for idx, (score, prod, cand, display_type) in enumerate(primary_candidates):
+            if idx == 0 and score >= 0.40:
+                rel = "match"
+                reason = f"Khớp chính xác chủng loại '{display_type}' và có độ tương đồng thiết kế cao nhất trong kho hàng."
+            else:
+                rel = "similar"
+                reason = f"Sản phẩm tương tự cùng chủng loại '{display_type}' trong kho hàng."
+
+            final_items.append(ImageSearchResultItem(
                 product_id=prod["id"],
                 sku=prod["sku"],
                 name=prod["name"],
@@ -586,22 +657,78 @@ class ImageSearchService:
                 category_name=prod["category_name"],
                 selling_price=float(prod["selling_price"]),
                 stock_quantity=int(prod["stock_quantity"]),
-                in_stock=in_stock,
+                in_stock=(prod["stock_quantity"] > 0),
                 status=prod["status"],
                 image_url=prod["image_url"],
                 description=prod["description"],
-                relationship=relationship,
+                relationship=rel,
                 reason=reason,
                 score=score,
                 attr_matches=cand.get("attr_matches") or []
-            )
-            results.append(item)
+            ))
 
-        # Sort results: priority order (match -> similar -> related -> none), then by score
-        priority_map = {"match": 4, "similar": 3, "related": 2, "none": 1}
-        results.sort(key=lambda x: (priority_map.get(x.relationship, 0), x.score), reverse=True)
+        # Process Secondary Group (RELATED: tối đa 2 sản phẩm cùng danh mục cha)
+        secondary_candidates.sort(key=lambda x: x[0], reverse=True)
+        for score, prod, cand, display_type in secondary_candidates[:2]:
+            parent_label = target_parent_category or "hệ sinh thái"
+            reason = f"Sản phẩm cùng nhóm {parent_label} ({display_type}) để bạn tham khảo thêm."
+            final_items.append(ImageSearchResultItem(
+                product_id=prod["id"],
+                sku=prod["sku"],
+                name=prod["name"],
+                category_id=prod["category_id"],
+                category_name=prod["category_name"],
+                selling_price=float(prod["selling_price"]),
+                stock_quantity=int(prod["stock_quantity"]),
+                in_stock=(prod["stock_quantity"] > 0),
+                status=prod["status"],
+                image_url=prod["image_url"],
+                description=prod["description"],
+                relationship="related",
+                reason=reason,
+                score=score,
+                attr_matches=cand.get("attr_matches") or []
+            ))
 
-        final_results = results[:limit]
+        # Fallback only when query device type was completely generic ('accessory' or 'unknown')
+        if not final_items and (not norm_q_type or norm_q_type in ["accessory", "unknown"]):
+            for cand in raw_candidates:
+                pid = cand["product_id"]
+                if pid not in db_products:
+                    continue
+                prod = db_products[pid]
+                if prod.get("status") == "inactive":
+                    continue
+                score = cand["combined_score"]
+                display_type = cand.get("product_type") or prod.get("v_product_type") or "thiết bị"
+                if score >= 0.40:
+                    rel = "similar"
+                    reason = f"Sản phẩm có độ tương đồng kiểu dáng thị giác ({int(score * 100)}%)."
+                elif score >= 0.25:
+                    rel = "related"
+                    reason = f"Thiết bị tham khảo trong hệ sinh thái sản phẩm."
+                else:
+                    continue
+
+                final_items.append(ImageSearchResultItem(
+                    product_id=prod["id"],
+                    sku=prod["sku"],
+                    name=prod["name"],
+                    category_id=prod["category_id"],
+                    category_name=prod["category_name"],
+                    selling_price=float(prod["selling_price"]),
+                    stock_quantity=int(prod["stock_quantity"]),
+                    in_stock=(prod["stock_quantity"] > 0),
+                    status=prod["status"],
+                    image_url=prod["image_url"],
+                    description=prod["description"],
+                    relationship=rel,
+                    reason=reason,
+                    score=score,
+                    attr_matches=cand.get("attr_matches") or []
+                ))
+
+        final_results = final_items[:limit]
         elapsed_ms = int((time.perf_counter() - start_time) * 1000)
 
         # 6. Audit Logging in SQLite
@@ -619,7 +746,7 @@ class ImageSearchService:
         return ImageSearchResponse(
             query_features=query_features,
             results=final_results,
-            total_candidates_found=len(results),
+            total_candidates_found=len(final_results),
             execution_time_ms=elapsed_ms,
             is_fallback=is_fallback,
             provider_used=actual_provider

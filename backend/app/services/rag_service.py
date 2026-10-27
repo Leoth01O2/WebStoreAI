@@ -138,24 +138,43 @@ def extract_budget_from_query(query: str) -> Optional[float]:
             val = major * 1_000_000 + minor * 10_000
         return float(val)
 
+    # Technical / non-currency units that MUST NEVER be interpreted as monetary budget:
+    NON_BUDGET_UNIT_REGEX = re.compile(
+        r"^\s*(?:độ|mah|dpi|hz|ghz|khz|w|watt|g|gram|kg|gb|tb|mb|inch|cm|mm|m|ngày|h|giờ|tiếng|phút|giây|tuần|tháng|năm|cổng|port|chân|pin|step|nấc)\b",
+        re.IGNORECASE
+    )
+
     # Pattern 2: (indicators) number (unit) or number (unit) (range indicators)
     budget_pattern = re.compile(
-        r"(?:dưới|nhỏ hơn|<=|<|tối đa|không quá|tầm|khoảng|mức giá|ngân sách|giá)\s*"
+        r"(?:giá\s+(?!đỡ)|dưới|nhỏ hơn|<=|<|tối đa|không quá|tầm|khoảng|mức giá|ngân sách|chi phí)\s*"
         r"(\d+(?:[.,]\d+)*)\s*"
-        r"(k|tr|triệu|nghìn|ngàn|đ|vnđ|vnd|đồng)?"
+        r"(k|tr|triệu|nghìn|ngàn|vnđ|vnd|đồng|đ(?![a-zA-Zà-ỹÀ-Ỹ]))?"
         r"|(?:^|\s)(\d+(?:[.,]\d+)*)\s*"
-        r"(k|tr|triệu|nghìn|ngàn|đ|vnđ|vnd|đồng)\s*"
+        r"(k|tr|triệu|nghìn|ngàn|vnđ|vnd|đồng|đ(?![a-zA-Zà-ỹÀ-Ỹ]))\s*"
         r"(?:đổ lại|trở xuống|quay đầu|trở lại)?"
         r"|(?:^|\s)(\d+(?:[.,]\d+)*)\s*"
         r"(?:đổ lại|trở xuống|quay đầu|trở lại)",
         re.IGNORECASE
     )
 
+    found_budgets: List[Tuple[float, bool]] = []  # (amount, has_explicit_budget_indicator)
+
     for match in budget_pattern.finditer(q):
         raw_num = match.group(1) or match.group(3) or match.group(5)
         raw_unit = (match.group(2) or match.group(4) or "").lower()
+        has_indicator = bool(match.group(1))
 
         if not raw_num:
+            continue
+
+        # Lookahead after raw_num in query to check for technical non-budget units (e.g. 360 độ, 20000 mah, 3 ngày)
+        num_pos = match.start(1) if match.group(1) else (match.start(3) if match.group(3) else match.start(5))
+        after_num_text = q[num_pos + len(raw_num):]
+        if NON_BUDGET_UNIT_REGEX.search(after_num_text):
+            continue
+
+        # Reject common tech spec numbers without currency (7.1, 5.0, 2.4, 360)
+        if raw_num in ("7.1", "5.0", "2.4", "360") and not raw_unit:
             continue
 
         # If formatted with thousands separators (e.g. 6.000.000 or 700.000)
@@ -172,26 +191,38 @@ def extract_budget_from_query(query: str) -> Optional[float]:
         orig_match = match.group(0)
 
         if raw_unit in ("k", "nghìn", "ngàn"):
-            return num * 1_000
+            found_budgets.append((num * 1_000, has_indicator))
         elif raw_unit in ("tr", "triệu"):
-            return num * 1_000_000
+            found_budgets.append((num * 1_000_000, has_indicator))
         elif raw_unit in ("đ", "vnđ", "vnd", "đồng"):
             if re.search(r"\d{1,3}[.,]\d{3}(?:[.,]\d{3})?", orig_match):
                 clean_int = re.sub(r"[^\d]", "", orig_match)
                 if clean_int:
-                    return float(clean_int)
+                    found_budgets.append((float(clean_int), has_indicator))
+                    continue
             if num < 1000 and "k" not in orig_match:
-                return num * 1_000
-            return num
+                found_budgets.append((num * 1_000, has_indicator))
+            else:
+                found_budgets.append((num, has_indicator))
         else:
             if re.search(r"\d{1,3}[.,]\d{3}(?:[.,]\d{3})?", orig_match):
                 clean_int = re.sub(r"[^\d]", "", orig_match)
                 if clean_int:
-                    return float(clean_int)
+                    found_budgets.append((float(clean_int), has_indicator))
+                    continue
             if num >= 10_000:
-                return num
+                found_budgets.append((num, has_indicator))
             elif num >= 10 and num < 10_000:
-                return num * 1_000
+                found_budgets.append((num * 1_000, has_indicator))
+
+    if found_budgets:
+        # Prioritize matches with explicit budget indicator (e.g. 'dưới 50 nghìn')
+        explicit_candidates = [b for b, ind in found_budgets if ind and b >= 10_000]
+        if explicit_candidates:
+            return explicit_candidates[0]
+        valid_candidates = [b for b, _ in found_budgets if b >= 10_000]
+        if valid_candidates:
+            return valid_candidates[0]
 
     return None
 
@@ -229,7 +260,7 @@ BRAND_DICTIONARY: Dict[str, BrandInfo] = {
             "sản phẩm hãng táo", "sản phẩm táo", "sản phẩm của táo",
             "sản phẩm apple", "sản phẩm của apple", "hàng apple", "đồ apple", "đồ của apple",
             "hãng táo", "nhà táo", "táo khuyết", "đồ táo", "hàng táo",
-            "apple", "iphone", "ipad", "macbook", "airpods"
+            "apple", "airpods"
         ]
     },
     "sony": {
@@ -305,6 +336,7 @@ def extract_brand_from_query(query: str) -> Optional[Dict[str, Any]]:
     even if the brand is not currently in the catalog.
     """
     q_lower = query.lower()
+    found_brand = None
     for brand_key, info in BRAND_DICTIONARY.items():
         sorted_aliases: List[str] = sorted(info["aliases"], key=len, reverse=True)
         for alias in sorted_aliases:
@@ -312,32 +344,58 @@ def extract_brand_from_query(query: str) -> Optional[Dict[str, Any]]:
                 continue
             pattern = rf"(?:^|\W){re.escape(alias)}(?:$|\W)"
             if re.search(pattern, q_lower):
-                return {
+                found_brand = {
                     "brand_key": brand_key,
                     "canonical_name": info["canonical_name"]
                 }
+                break
+        if found_brand:
+            break
 
     # Explicit brand mention: 'hãng X', 'thương hiệu X', 'nhãn hiệu X', 'nhà X'
-    explicit_match = re.search(r"\b(?:hãng|thương hiệu|nhãn hiệu|nhà)\s+([A-Za-z0-9\-]+)\b", query, re.IGNORECASE)
-    if explicit_match:
-        extracted = explicit_match.group(1).strip()
-        skip_words = {"này", "đó", "nào", "sản", "phẩm", "tai", "chuột", "bàn", "phím", "loa", "đồ", "gì", "tốt"}
-        if extracted.lower() not in skip_words:
-            return {
-                "brand_key": extracted.lower(),
-                "canonical_name": extracted.title()
-            }
+    if not found_brand:
+        explicit_match = re.search(r"\b(?:hãng|thương hiệu|nhãn hiệu|nhà)\s+([A-Za-z0-9\-]+)\b", query, re.IGNORECASE)
+        if explicit_match:
+            extracted = explicit_match.group(1).strip()
+            skip_words = {"này", "đó", "nào", "sản", "phẩm", "tai", "chuột", "bàn", "phím", "loa", "đồ", "gì", "tốt"}
+            if extracted.lower() not in skip_words:
+                found_brand = {
+                    "brand_key": extracted.lower(),
+                    "canonical_name": extracted.title()
+                }
 
     # Brand preceding 'chính hãng' (e.g. 'Sennheiser chính hãng')
-    chinh_hang_match = re.search(r"\b([A-Z][a-zA-Z0-9\-]+)\s+chính hãng\b", query)
-    if chinh_hang_match:
-        extracted = chinh_hang_match.group(1).strip()
-        skip_words = {"đồ", "hàng", "sản", "phẩm", "tai", "chuột", "bàn", "phím", "loa", "loại", "mua", "bán"}
-        if extracted.lower() not in skip_words:
-            return {
-                "brand_key": extracted.lower(),
-                "canonical_name": extracted.title()
-            }
+    if not found_brand:
+        chinh_hang_match = re.search(r"\b([A-Z][a-zA-Z0-9\-]+)\s+chính hãng\b", query)
+        if chinh_hang_match:
+            extracted = chinh_hang_match.group(1).strip()
+            skip_words = {"đồ", "hàng", "sản", "phẩm", "tai", "chuột", "bàn", "phím", "loa", "loại", "mua", "bán"}
+            if extracted.lower() not in skip_words:
+                found_brand = {
+                    "brand_key": extracted.lower(),
+                    "canonical_name": extracted.title()
+                }
+
+    if found_brand:
+        # Guard: do not misinterpret user's owned host device (e.g. 'MacBook của tôi mỏng quá', 'cắm vào MacBook') as brand request
+        b_name = found_brand["canonical_name"].lower()
+        is_host_device_context = bool(re.search(
+            r"\b(?:macbook|iphone|ipad|samsung|laptop|pc|điện thoại|máy tính)\s+(?:của tôi|đang dùng|mỏng quá|bị|đang xài|mới mua)\b",
+            q_lower
+        )) or bool(re.search(
+            r"\b(?:của tôi|đang dùng|cho|vào|cắm vào|kết nối với|kê)\s+(?:macbook|iphone|ipad|laptop)\b",
+            q_lower
+        ))
+        is_explicit_brand_demand = bool(re.search(
+            rf"\b(?:hãng|nhà|thương hiệu|đồ của|hàng của|chính hãng)\s+{re.escape(b_name)}\b",
+            q_lower
+        )) or bool(re.search(
+            rf"\b{re.escape(b_name)}\s+chính hãng\b",
+            q_lower
+        ))
+        if is_host_device_context and not is_explicit_brand_demand:
+            return None
+        return found_brand
 
     return None
 
@@ -379,61 +437,172 @@ def is_approximate_budget_query(query: str) -> bool:
     return has_approx and not has_strict_max
 
 
+def extract_negative_feature_clauses(query: str) -> Tuple[str, List[str]]:
+    """
+    Extracts negative feature clauses such as 'không cần quạt tản nhiệt', 'không dùng dây', 'khỏi cần RGB'
+    and separates them from the positive query to prevent feature misattribution and accessory traps.
+    Returns:
+        (positive_query, negative_constraints)
+    """
+    q_clean = query
+    neg_constraints: List[str] = []
+
+    pattern = r"\b(?:không\s+(?:cần|dùng|lấy|muốn|thích|có)|khỏi\s+cần|chẳng\s+cần|chả\s+cần|tuyệt\s+đối\s+không\s+(?:dùng|cần|chơi|xài))\s+([^,.;!?]+)"
+    for m in re.finditer(pattern, query, re.IGNORECASE):
+        raw_clause = m.group(1).strip()
+        clause_core = re.split(
+            r"\b(?:chi\s+phí|giá|ngân\s+sách|tầm|dưới|khoảng|cỡ|đừng\s+quá|không\s+quá|tối\s+đa)\b",
+            raw_clause,
+            maxsplit=1,
+            flags=re.IGNORECASE
+        )[0].strip()
+
+        if clause_core:
+            core_l = clause_core.lower()
+            if any(k in core_l for k in ["quạt tản nhiệt", "tản nhiệt", "cooler", "quạt"]):
+                neg_constraints.append("quạt tản nhiệt")
+            elif any(k in core_l for k in ["dây cáp", "dây", "có dây"]):
+                neg_constraints.append("wired")
+            elif any(k in core_l for k in ["không dây", "bluetooth", "wireless"]):
+                neg_constraints.append("wireless")
+            elif any(k in core_l for k in ["pin tiểu", "pin aa", "pin aaa", "pin rời"]):
+                neg_constraints.append("pin tiểu")
+            elif any(k in core_l for k in ["rgb", "led rgb", "đèn led"]):
+                neg_constraints.append("rgb")
+            else:
+                neg_constraints.append(clause_core)
+
+            # Strip the negative phrase up to the core clause from the positive query
+            full_match = m.group(0)
+            target_cut = full_match[:m.start(1) - m.start(0) + len(clause_core)]
+            q_clean = q_clean.replace(target_cut, " ")
+
+    seen = set()
+    dedup_neg = []
+    for n in neg_constraints:
+        nl = n.lower()
+        if nl not in seen:
+            seen.add(nl)
+            dedup_neg.append(n)
+
+    return q_clean.strip(), dedup_neg
+
+
 def parse_query_requirements(query: str) -> Dict[str, Any]:
     """
     Extracts structured query requirements: brand, target product type,
     desired functional capabilities, device compatibility, user host device, and mandatory attributes.
+    Applies Universal Scenario Ontology to distinguish host device from intended accessory.
     """
+    positive_query, extracted_neg_constraints = extract_negative_feature_clauses(query)
     brand = extract_brand_from_query(query)
     q_lower = query.lower()
+    pos_lower = positive_query.lower()
+
+    # Universal Scenario Ontology & Disambiguation (Head Noun vs Object Noun)
+    is_mousepad_scenario = any(k in pos_lower for k in ["lót chuột", "tấm lót chuột", "bàn di chuột", "pad chuột", "mouse pad", "lót bàn phím"])
+    has_stand_keywords = any(k in pos_lower for k in [
+        "giá đỡ", "chân đế", "kê laptop", "nâng laptop", "đỡ laptop", "kê cao laptop",
+        "kê máy", "nâng máy", "đỡ máy", "kê cao màn hình", "nâng cao màn hình"
+    ])
+    has_neck_strain = bool(re.search(r"\b(mỏi cổ|đỡ mỏi cổ|đau vai gáy|mỏi vai gáy|cúi đầu|ngồi làm việc mỏi cổ)\b(?!\s*tay\b)", pos_lower))
+    is_stand_scenario = (has_stand_keywords or has_neck_strain) and not any(k in pos_lower for k in ["chuột", "mouse", "bàn phím", "keyboard", "cổ tay", "mỏi tay"])
+
+    is_powerbank_scenario = any(k in pos_lower for k in [
+        "pin dự phòng", "sạc dự phòng", "powerbank", "pin sạc dự phòng",
+        "hết pin", "sập nguồn", "không có ổ điện", "không có ổ cắm",
+        "đi công tác không có ổ điện", "du lịch không có ổ điện", "dự phòng pin",
+        "cứu cánh", "sợ điện thoại sập nguồn", "không có ổ cắm điện"
+    ])
+    is_charger_scenario = any(k in pos_lower for k in ["củ sạc", "cốc sạc", "củ sạc nhanh", "cốc sạc nhanh", "củ sạc gan"])
+    is_cable_scenario = any(k in pos_lower for k in ["dây sạc", "cáp sạc", "dây cáp"])
+    is_hub_scenario = any(k in pos_lower for k in [
+        "hub", "chuyển đổi", "đầu chuyển", "cáp chuyển", "adapter", "dock",
+        "cắm vào macbook", "cắm vào laptop", "thiếu cổng", "thêm cổng",
+        "xuất màn hình", "xuất hình ra", "nối ra màn", "xuất hình ảnh",
+        "màn hình rời hdmi", "ra màn hình rời", "chỉ có cổng type-c", "chỉ có type-c",
+        "cắm thêm chuột"
+    ])
+    is_mouse_scenario = (
+        any(k in pos_lower for k in [
+            "chuột", "con chuột", "mouse", "di chuột mỏi tay", "đau cổ tay", "chuột công thái học",
+            "bấm không ồn", "click êm", "chuột silent"
+        ]) and
+        not is_mousepad_scenario and
+        not any(k in pos_lower for k in ["cắm chuột", "hình chuột", "cắm thêm chuột"]) and
+        not is_hub_scenario
+    )
+    is_keyboard_scenario = (
+        any(k in pos_lower for k in [
+            "bàn phím", "phím cơ", "bàn phím cơ", "keyboard", "gõ văn bản", "đánh máy",
+            "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ", "gõ mỏi tay", "gõ êm không ồn"
+        ]) and
+        not is_mousepad_scenario
+    )
+    is_audio_scenario = (
+        any(k in pos_lower for k in [
+            "tai nghe", "headphone", "earphone", "earbuds", "tws",
+            "họp trực tuyến", "họp online", "zoom", "meet", "teams", "đàm thoại",
+            "nghe rõ giọng", "nghe rõ", "mic thu âm", "mic đàm thoại", "lọc ồn mic", "mic lọc ồn",
+            "nghe trong phòng ồn", "nghe nhạc"
+        ]) or (
+            any(k in pos_lower for k in ["họp", "đàm thoại", "call"]) and
+            any(k in pos_lower for k in ["nghe", "ồn", "tiếng", "mic"])
+        )
+    )
+    has_cooler_in_neg = any(k in [n.lower() for n in extracted_neg_constraints] for k in ["quạt tản nhiệt", "tản nhiệt", "cooler", "quạt"])
+    is_cooler_scenario = (
+        any(k in pos_lower for k in ["tản nhiệt", "đế tản nhiệt", "quạt tản nhiệt", "làm mát laptop", "nóng máy", "cooler"]) and
+        not has_cooler_in_neg
+    )
 
     target_type = None
-    if any(k in q_lower for k in ["lót chuột", "tấm lót chuột", "bàn di chuột", "pad chuột", "mouse pad", "lót bàn phím"]):
+    if is_mousepad_scenario:
         target_type = "mousepad"
-    elif any(k in q_lower for k in ["hub", "chuyển đổi", "đầu chuyển", "cáp chuyển", "adapter", "dock"]):
-        target_type = "hub_adapter"
-    elif any(k in q_lower for k in ["dây sạc", "cáp sạc", "dây cáp"]):
-        target_type = "cable"
-    elif any(k in q_lower for k in ["củ sạc", "cốc sạc"]):
-        target_type = "charger"
-    elif any(k in q_lower for k in ["tản nhiệt", "đế tản nhiệt", "quạt tản nhiệt", "cooler"]):
-        target_type = "cooler"
-    elif any(k in q_lower for k in ["pin dự phòng", "sạc dự phòng", "powerbank"]):
-        target_type = "powerbank"
-    elif any(k in q_lower for k in ["giá đỡ", "chân đế", "kê laptop"]):
+    elif is_stand_scenario:
         target_type = "stand"
-    elif any(k in q_lower for k in ["chuột", "mouse"]) and not any(k in q_lower for k in ["lót chuột", "bàn di chuột", "pad chuột", "cắm chuột", "hình chuột", "dây cáp", "cáp sạc", "hub", "chuyển đổi"]):
+    elif is_powerbank_scenario:
+        target_type = "powerbank"
+    elif is_hub_scenario:
+        target_type = "hub_adapter"
+    elif is_charger_scenario:
+        target_type = "charger"
+    elif is_cable_scenario:
+        target_type = "cable"
+    elif is_cooler_scenario:
+        target_type = "cooler"
+    elif is_mouse_scenario:
         target_type = "mouse"
-    elif any(k in q_lower for k in ["bàn phím", "keyboard", "phím cơ", "bàn phím cơ", "gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"]) and not any(k in q_lower for k in ["lót bàn phím", "cắm phím", "pad chuột", "lót chuột", "bàn di"]):
+    elif is_keyboard_scenario:
         target_type = "keyboard"
-    elif any(k in q_lower for k in ["tai nghe", "headphone", "earphone", "earbuds", "tws"]):
+    elif is_audio_scenario and not (is_mouse_scenario or is_keyboard_scenario or is_charger_scenario or is_cable_scenario):
         target_type = "headphone"
-    elif any(k in q_lower for k in ["loa", "speaker", "soundbar"]):
+    elif any(k in pos_lower for k in ["loa", "speaker", "soundbar"]):
         target_type = "speaker"
-    elif any(k in q_lower for k in ["tay cầm", "gamepad", "controller"]):
+    elif any(k in pos_lower for k in ["tay cầm", "gamepad", "controller"]):
         target_type = "gamepad"
-    elif any(k in q_lower for k in ["đèn", "đồng hồ", "quạt", "cân", "tinh dầu"]) and not any(k in q_lower for k in ["quạt tản nhiệt"]):
+    elif any(k in pos_lower for k in ["đèn", "đồng hồ", "quạt", "cân", "tinh dầu"]) and not any(k in pos_lower for k in ["quạt tản nhiệt"]):
         target_type = "smarthome"
 
-    # Desired Capabilities Extraction
+    # Desired Capabilities Extraction (using positive query context)
     desired_capabilities = []
-    if any(k in q_lower for k in ["xuất hình", "ra màn", "chiếu màn", "màn hdmi", "màn hình phụ", "cổng hdmi"]):
-        desired_capabilities.append("xuất hình HDMI")
-    if any(k in q_lower for k in ["sạc nhanh", "pd", "gan", "công suất lớn"]):
-        desired_capabilities.append("sạc nhanh")
-    if any(k in q_lower for k in ["pin dự phòng", "sạc dự phòng", "powerbank"]):
+    if is_stand_scenario:
+        desired_capabilities.append("giá đỡ laptop nâng hạ độ cao công thái học")
+    if is_powerbank_scenario:
         desired_capabilities.append("pin sạc dự phòng")
-    if any(k in q_lower for k in ["giá đỡ", "chân đế", "kê laptop", "nâng máy"]):
-        desired_capabilities.append("giá đỡ laptop")
-    if any(k in q_lower for k in ["tản nhiệt", "làm mát", "hạ nhiệt", "nóng ran máy", "nóng máy"]):
+    if any(k in pos_lower for k in ["xuất hình", "ra màn", "chiếu màn", "màn hdmi", "màn hình phụ", "cổng hdmi"]):
+        desired_capabilities.append("xuất hình HDMI")
+    if any(k in pos_lower for k in ["sạc nhanh", "pd", "gan", "công suất lớn"]):
+        desired_capabilities.append("sạc nhanh")
+    if is_cooler_scenario:
         desired_capabilities.append("tản nhiệt làm mát")
-    if any(k in q_lower for k in ["nghe nhạc", "âm thanh", "thu âm", "hifi"]):
-        desired_capabilities.append("nghe nhạc âm thanh")
-    if any(k in q_lower for k in ["cắm mạng", "mạng dây", "lan", "ethernet"]):
+    if is_audio_scenario and not (is_mouse_scenario or is_keyboard_scenario):
+        desired_capabilities.append("nghe nhạc âm thanh đàm thoại")
+    if any(k in pos_lower for k in ["cắm mạng", "mạng dây", "lan", "ethernet"]):
         desired_capabilities.append("cắm mạng LAN")
 
-    # Dynamic integrated / special capability extraction (e.g. tích hợp máy đo huyết áp, có màn hình led)
-    m_integrated = re.search(r"\b(?:tích hợp|kèm theo|tích hợp thêm|có kèm|có chức năng|tính năng)\s+([^,.;!?]+)", q_lower)
+    # Dynamic integrated / special capability extraction
+    m_integrated = re.search(r"\b(?:tích hợp|kèm theo|tích hợp thêm|có kèm|có chức năng|tính năng)\s+([^,.;!?]+)", pos_lower)
     if m_integrated:
         cap_val = m_integrated.group(1).strip()
         common_traits = {"bluetooth", "pin sạc", "led", "rgb", "không dây", "có dây"}
@@ -469,7 +638,7 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
     # Decouple owned host device brand from accessory search
     if user_device and brand:
         b_name = brand["canonical_name"].lower()
-        host_device_pattern = rf"\b(?:điện thoại|laptop|máy tính|máy bàn|pc|ipad|tablet)\s+(?:[A-Za-z0-9\-]+\s+)*{re.escape(b_name)}\b"
+        host_device_pattern = rf"\b(?:điện thoại|laptop|máy tính|máy bàn|pc|ipad|tablet|macbook|iphone)\b"
         if re.search(host_device_pattern, q_lower):
             accessory_brand_pattern = rf"\b(?:sạc|tai nghe|phím|chuột|hub|cáp|củ sạc|đồ|hàng|hãng|thương hiệu)\s+(?:của\s+)?{re.escape(b_name)}\b"
             if not re.search(accessory_brand_pattern, q_lower):
@@ -488,17 +657,28 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
         is_wireless = True
         is_wired = False
     else:
-        is_wireless = bool(re.search(r"\b(không cần dây|không dùng dây|không có dây|không dây|wireless|bluetooth|tws|pin sạc)\b", q_lower))
+        is_wireless = bool(re.search(r"\b(không cần dây|không dùng dây|không có dây|không dây|wireless|bluetooth|tws)\b", q_lower))
         is_wired = bool(re.search(r"\b(có dây|cắm dây|wired|dây cắm usb)\b", q_lower)) and not is_wireless
 
     is_mechanical = bool(re.search(r"\b(phím cơ|bàn phím cơ|switch cơ|cơ)\b", q_lower)) if target_type == "keyboard" else False
-    is_silent = bool(re.search(r"\b(silent|êm|yên tĩnh|chống ồn click|không tiếng click|không tiếng|không kêu|không ồn|không ồn ào|không lách cách|bấm êm)\b", q_lower))
+
+    # Noise Disambiguation: distinguish room/ambient noise (headphone/mic need) vs quiet click/typing (mouse/keyboard need)
+    is_room_noise = bool(re.search(r"\b(phòng (?:khá\s*)?ồn|môi trường (?:khá\s*)?ồn|xung quanh (?:khá\s*)?ồn|tiếng ồn bên ngoài|phòng ồn)\b", q_lower))
+    is_click_silent = bool(re.search(r"\b(bấm không ồn|click êm|gõ không ồn|không kêu lách cách|chống ồn click|không gây tiếng click|chuột êm|chuột yên tĩnh|phím yên tĩnh|chuột silent|phím silent|tiếng click|tiếng chuột|click chuột|đánh thức|con nhỏ|phòng ngủ|bấm êm|không kêu|không gây ồn)\b", q_lower))
+
+    if is_click_silent:
+        is_silent = True
+    elif is_room_noise and not any(k in q_lower for k in ["chuột", "phím", "click", "bấm", "gõ"]):
+        is_silent = False
+    else:
+        is_silent = bool(re.search(r"\b(silent|yên tĩnh|chống ồn click|không tiếng click|không tiếng|không kêu|không ồn|không ồn ào|không lách cách|bấm không ồn|gõ không ồn)\b", q_lower)) and not is_room_noise
+
     is_anc = bool(re.search(r"\b(chống ồn|anc|noise cancel|khử ồn)\b", q_lower)) and not bool(re.search(r"\b(chống ồn click)\b", q_lower))
-    is_ergonomic = bool(re.search(r"\b(công thái học|ergonomic|chống mỏi)\b", q_lower))
-    neg_constraints = []
-    if has_wired_neg:
+    is_ergonomic = bool(re.search(r"\b(công thái học|ergonomic|chống mỏi|đau cổ tay|mỏi cổ tay|mỏi tay)\b", q_lower))
+    neg_constraints = list(extracted_neg_constraints)
+    if has_wired_neg and "wired" not in neg_constraints:
         neg_constraints.append("wired")
-    if has_wireless_neg:
+    if has_wireless_neg and "wireless" not in neg_constraints:
         neg_constraints.append("wireless")
 
     return {
@@ -508,6 +688,7 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
         "device_compatibility": device_compatibility,
         "user_device": user_device,
         "query": query,
+        "positive_query": positive_query,
         "is_gaming": is_gaming,
         "is_wireless": is_wireless,
         "is_wired": is_wired,
@@ -619,9 +800,9 @@ def check_product_eligibility(
         if any(k in query_str for k in ["gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"]):
             if prod_type != "keyboard":
                 return False, f"Không phải thiết bị phục vụ gõ văn bản/đánh máy ({prod_type})"
-        elif any(k in query_str for k in ["nghe nhạc", "âm thanh", "tai nghe", "loa"]) and not any(k in query_str for k in ["chuột", "phím", "hub", "sạc"]):
+        elif any(k in query_str for k in ["nghe nhạc", "âm thanh", "tai nghe", "loa", "họp trực tuyến", "họp online", "nghe rõ giọng", "giọng người", "đàm thoại", "lọc tiếng ồn", "phòng ồn", "phòng khá ồn", "mic"]) and not any(k in query_str for k in ["chuột", "phím", "hub", "sạc", "giá đỡ"]):
             if prod_type not in ("headphone", "speaker"):
-                return False, f"Không phải thiết bị phục vụ nghe nhìn/âm thanh ({prod_type})"
+                return False, f"Không phải thiết bị phục vụ nghe nhìn/âm thanh/họp đàm thoại ({prod_type})"
 
     # Battery constraint verification (e.g. pin tiểu AA / AAA vs pin sạc)
     forbids_aa_battery = bool(re.search(r"\b(không (?:dùng|cần|chơi|xài|muốn)?\s*(?:loại\s*)?(?:pin tiểu|pin aa|pin aaa|pin rời)|tuyệt đối không (?:dùng|chơi|xài)?\s*pin tiểu)\b", query_str))
@@ -648,33 +829,46 @@ def check_product_eligibility(
 
     # Desired Capabilities verification:
     caps = reqs.get("desired_capabilities") or []
-    needs_video_out = any(k in c.lower() for c in caps for k in ["xuất hình", "ra màn", "chiếu màn", "màn hình"]) or any(k in query_str for k in ["xuất hình", "ra màn", "chiếu màn hình", "nối ra màn"])
+    pos_q = (reqs.get("positive_query") or query_str).lower()
+    needs_video_out = any(k in c.lower() for c in caps for k in ["xuất hình", "ra màn", "chiếu màn", "màn hình"]) or any(k in pos_q for k in ["xuất hình", "ra màn", "chiếu màn hình", "nối ra màn"])
     if needs_video_out:
         if not any(k in full_info for k in ["hdmi", "xuất hình", "màn hình", "4k", "displayport", "vga"]):
             return False, "Không hỗ trợ chức năng xuất hình ra màn hình ngoài"
 
-    needs_fast_charge = any(k in c.lower() for c in caps for k in ["sạc nhanh", "công suất cao", "pd"]) or any(k in query_str for k in ["sạc nhanh", "công suất lớn", "sạc 65w", "sạc 100w"])
+    needs_fast_charge = any(k in c.lower() for c in caps for k in ["sạc nhanh", "công suất cao", "pd"]) or any(k in pos_q for k in ["sạc nhanh", "công suất lớn", "sạc 65w", "sạc 100w"])
     if needs_fast_charge:
         if not any(k in full_info for k in ["sạc nhanh", "pd", "gan", "65w", "100w", "22.5w", "công suất"]):
             return False, "Không hỗ trợ tính năng sạc nhanh"
 
-    needs_stand = any(k in c.lower() for c in caps for k in ["giá đỡ", "kê laptop", "nâng máy"]) or any(k in query_str for k in ["giá đỡ", "kê laptop", "đỡ laptop", "chân đế"])
+    needs_stand = (
+        target_type == "stand" or
+        any(k in c.lower() for c in caps for k in ["giá đỡ", "kê laptop", "nâng máy", "đỡ mỏi cổ", "chân đế"]) or
+        any(k in pos_q for k in ["giá đỡ", "kê laptop", "đỡ laptop", "chân đế", "kê cao laptop", "đỡ mỏi cổ", "đau vai gáy", "kê cao", "nâng cao"])
+    )
     if needs_stand:
-        if not any(k in full_info for k in ["giá đỡ", "chân đế", "nâng", "hợp kim nhôm xoay"]):
+        if not any(k in full_info for k in ["giá đỡ", "chân đế", "nâng", "hợp kim nhôm xoay", "độ cao công thái học"]):
             return False, "Không phải sản phẩm giá đỡ nâng hạ"
 
-    needs_cooler = any(k in c.lower() for c in caps for k in ["tản nhiệt", "làm mát", "hạ nhiệt"]) or any(k in query_str for k in ["tản nhiệt", "làm mát", "nóng máy", "quạt tản nhiệt"])
+    has_cooler_neg = any(k in str(neg).lower() for neg in (reqs.get("negative_constraints") or []) for k in ["quạt tản nhiệt", "tản nhiệt", "cooler", "quạt"])
+    needs_cooler = not has_cooler_neg and (
+        any(k in c.lower() for c in caps for k in ["tản nhiệt", "làm mát", "hạ nhiệt"]) or
+        any(k in pos_q for k in ["tản nhiệt", "làm mát", "nóng máy", "quạt tản nhiệt"])
+    )
     if needs_cooler:
         if not any(k in full_info for k in ["tản nhiệt", "làm mát", "quạt", "cooler"]):
             return False, "Không hỗ trợ tính năng làm mát tản nhiệt"
 
     # General required capabilities check (purges ungrounded candidate matches)
-    stop_cap_words = {"tính", "năng", "chức", "thêm", "kèm", "theo", "cho", "của", "máy", "thiết", "bị", "loại"}
+    stop_cap_words = {"tính", "năng", "chức", "thêm", "kèm", "theo", "cho", "của", "máy", "thiết", "bị", "loại", "không"}
     for c in caps:
         c_l = c.lower().strip()
         sig_words = [w for w in re.findall(r"\w+", c_l) if len(w) >= 3 and w not in stop_cap_words]
-        if sig_words and not any(k in c_l for k in ["xuất hình", "sạc nhanh", "giá đỡ", "tản nhiệt", "nghe nhạc", "cắm mạng"]):
-            if not any(w in full_info for w in sig_words):
+        if sig_words and not any(k in c_l for k in [
+            "xuất hình", "sạc nhanh", "giá đỡ", "tản nhiệt", "nghe nhạc", "cắm mạng", "họp", "đàm thoại",
+            "âm thanh", "game", "chơi game", "gaming", "silent", "êm", "click", "yên tĩnh", "tiếng",
+            "cổ tay", "đau", "mỏi", "công thái học", "ergonomic", "con nhỏ", "phòng ngủ", "văn phòng", "không ồn"
+        ]):
+            if not any(w in full_info or (w == "game" and "gaming" in full_info) for w in sig_words):
                 return False, f"Không có tính năng/bộ phận '{c}' theo yêu cầu"
 
     # Boolean Feature Attributes Checks
@@ -731,6 +925,9 @@ def check_product_eligibility(
         elif neg_clean in ("clicky", "ồn", "tiếng ồn"):
             if any(k in full_info for k in ["blue switch", "clicky", "phát ra tiếng gõ lớn"]):
                 return False, "Vi phạm điều kiện phủ định: Switch phát ra tiếng gõ lớn/clicky"
+        elif neg_clean in ("quạt tản nhiệt", "tản nhiệt", "cooler", "quạt"):
+            if any(k in full_info for k in ["quạt tản nhiệt", "quạt gió", "đế tản nhiệt"]):
+                return False, "Vi phạm điều kiện phủ định: Có trang bị quạt tản nhiệt (người dùng yêu cầu không cần quạt)"
 
     # Hard Constraint: Price within budget
     price = float(product.get("selling_price", 0))
@@ -772,7 +969,7 @@ class BM25Retriever:
                     SELECT p.id, p.sku, p.name, c.name as category_name, p.description
                     FROM products p
                     LEFT JOIN categories c ON p.category_id = c.id
-                    WHERE p.status = 'active'
+                    WHERE p.status = 'active' AND p.stock_quantity > 0
                 """)
                 rows = [dict(r) for r in c.fetchall()]
 
@@ -846,7 +1043,7 @@ def structured_sql_search(
                        p.selling_price, p.stock_quantity, p.status, p.description
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
-                WHERE p.status = 'active'
+                WHERE p.status = 'active' AND p.stock_quantity > 0
             """
             params: List[Any] = []
             if effective_budget is not None and effective_budget > 0:
@@ -877,6 +1074,8 @@ def structured_sql_search(
                     score += 5.0
                 elif prod_type in ("mousepad", "cooler", "charger_cable") and target_type == "mouse":
                     score -= 8.0  # Heavily demote accessories
+                elif target_type in ("headphone", "mouse", "keyboard", "speaker", "gamepad") and prod_type != target_type:
+                    score -= 15.0  # Heavily demote completely mismatched device categories
                 else:
                     score -= 2.0
 
@@ -920,13 +1119,16 @@ def structured_sql_search(
                 if any(k in name_desc for k in ["sạc nhanh", "pd", "gan", "65w", "100w"]):
                     score += 4.0
 
-            if any("tản nhiệt" in c.lower() for c in caps) or "tản nhiệt" in q_lower:
+            has_cooler_neg = any(k in str(neg).lower() for neg in (attrs.get("negative_constraints") or []) for k in ["quạt tản nhiệt", "tản nhiệt", "cooler", "quạt"])
+            if not has_cooler_neg and (any("tản nhiệt" in c.lower() for c in caps) or "tản nhiệt" in q_lower):
                 if any(k in name_desc for k in ["tản nhiệt", "làm mát", "quạt"]):
                     score += 5.0
+            elif has_cooler_neg and any(k in name_desc for k in ["quạt tản nhiệt", "quạt gió", "đế tản nhiệt"]):
+                score -= 10.0
 
-            if any("giá đỡ" in c.lower() for c in caps) or "giá đỡ" in q_lower:
-                if any(k in name_desc for k in ["giá đỡ", "chân đế", "nâng"]):
-                    score += 5.0
+            if any("giá đỡ" in c.lower() for c in caps) or "giá đỡ" in q_lower or target_type == "stand" or any(k in q_lower for k in ["kê laptop", "chân đế", "đỡ mỏi cổ", "kê cao", "nâng laptop"]):
+                if any(k in name_desc for k in ["giá đỡ", "chân đế", "nâng", "hợp kim nhôm"]):
+                    score += 6.0
 
             if any("pin sạc dự phòng" in c.lower() for c in caps) or "pin dự phòng" in q_lower:
                 if any(k in name_desc for k in ["pin sạc dự phòng", "pin dự phòng", "powerbank"]):
@@ -1257,6 +1459,35 @@ class RAGService:
     def is_out_of_domain(self, query: str) -> bool:
         """Detects whether a query falls outside the StoreFlow technology product domain."""
         q_clean = query.lower().strip()
+
+        # If the query explicitly asks for a tech catalog item, contextual scenario words
+        # (like 'du lịch', 'công tác', 'đi tour', 'uống cafe') must NOT cause out-of-domain classification.
+        tech_catalog_indicators = [
+            # Product categories & hardware items
+            "pin dự phòng", "sạc dự phòng", "powerbank", "pin sạc dự phòng",
+            "củ sạc", "cốc sạc", "cáp sạc", "dây sạc",
+            "chuột", "mouse", "bàn phím", "keyboard", "keycap",
+            "tai nghe", "headphone", "earphone", "headset", "loa", "speaker", "micro", "mic",
+            "giá đỡ", "chân đế", "kê laptop", "nâng laptop", "đỡ laptop", "đế tản nhiệt",
+            "hub", "adapter", "cổng chuyển", "đầu chuyển", "cáp chuyển", "dây hdmi", "dây type-c", "dây usb",
+            "lót chuột", "pad chuột", "mousepad", "tay cầm", "gamepad",
+            "ổ cứng", "ram", "màn hình máy tính",
+            # Host devices & tech ecosystem
+            "điện thoại", "smartphone", "iphone", "laptop", "macbook", "máy tính", "pc", "ipad", "tablet", "màn hình",
+            # Energy, battery & power scenarios
+            "sập nguồn", "hết pin", "ổ cắm", "ổ điện", "sạc", "pin", "dự phòng pin", "cứu cánh",
+            # Ergonomics & workplace health
+            "mỏi cổ", "đau cổ tay", "mỏi tay", "đau vai gáy",
+            # Workplace & acoustic scenarios
+            "phòng ồn", "họp", "click", "bấm êm", "gõ êm", "yên tĩnh", "silent",
+            # Connectivity & ports
+            "cổng", "type-c", "hdmi", "usb", "lan", "wifi", "mạng",
+            # Purchase intent, catalog search & budget queries
+            "ngân sách", "nghìn", "ngàn", "triệu", "củ", "món nào", "sản phẩm nào", "có món nào", "tư vấn", "gợi ý"
+        ]
+        if any(kw in q_clean for kw in tech_catalog_indicators):
+            return False
+
         # Decouple display appliances from connectivity accessories:
         # If user mentions TV/tivi alongside connector terms, they are seeking a cable/hub/adapter, not a TV appliance.
         has_display_host = bool(re.search(r"\b(tivi|tv)\b", q_clean))
@@ -1437,16 +1668,35 @@ class RAGService:
             }
 
         # Step 2: Three-Way Hybrid Retrieval (Dense + Sparse BM25 + Structured SQL)
+        # Semantic Query Expansion based on target_type
+        target_type = reqs.get("target_type")
+        expansion_terms = {
+            "stand": "giá đỡ laptop chân đế nâng hạ độ cao công thái học xoay nhôm",
+            "powerbank": "pin sạc dự phòng sạc nhanh 20000mah",
+            "charger": "củ sạc nhanh cốc sạc GaN công suất cao 65w",
+            "cable": "dây cáp sạc nhanh Type-C siêu bền",
+            "hub_adapter": "hub chuyển đổi adapter cổng Type-C sang HDMI",
+            "mouse": "chuột không dây công thái học chống mỏi silent",
+            "keyboard": "bàn phím gõ văn bản êm tay đánh máy",
+            "headphone": "tai nghe đàm thoại mic lọc tiếng ồn họp trực tuyến",
+            "cooler": "đế tản nhiệt làm mát laptop quạt gió",
+            "mousepad": "tấm lót chuột bàn di chuột da đệm"
+        }
+        pos_q = reqs.get("positive_query") or query
+        retrieval_query = query
+        if target_type and target_type in expansion_terms:
+            retrieval_query = f"{pos_q} {expansion_terms[target_type]}".strip()
+
         # Source 1: Dense Retrieval from ChromaDB
-        dense_candidates = self.search_candidates(query, top_k=max(top_k * 4, 20))
+        dense_candidates = self.search_candidates(retrieval_query, top_k=max(top_k * 4, 20))
 
         # Source 2: Sparse Lexical Retrieval from BM25
-        sparse_candidates = bm25_retriever.search(query, top_k=max(top_k * 4, 20))
+        sparse_candidates = bm25_retriever.search(retrieval_query, top_k=max(top_k * 4, 20))
 
         # Source 3: Structured SQL Retrieval
         brand_req = reqs.get("brand")
         sql_candidates = structured_sql_search(
-            query=query,
+            query=retrieval_query,
             brand_req=brand_req,
             target_type=reqs.get("target_type"),
             attributes=reqs,
@@ -1654,7 +1904,7 @@ class RAGService:
                     # If effective_budget is set, price should not exceed the budget by an excessive ratio or amount.
                     is_severely_over_budget = False
                     if effective_budget is not None and effective_budget > 0:
-                        max_allowed_alt_price = min(effective_budget * 2.0, max(effective_budget * 1.5, effective_budget + 500_000))
+                        max_allowed_alt_price = max(effective_budget * 2.5, effective_budget + 400_000)
                         if price > max_allowed_alt_price:
                             is_severely_over_budget = True
 

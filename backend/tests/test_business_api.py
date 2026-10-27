@@ -72,50 +72,72 @@ def test_products_crud_and_filter():
     tokens = get_tokens()
     admin_headers = {"Authorization": f"Bearer {tokens['admin']}"}
     staff_headers = {"Authorization": f"Bearer {tokens['staff']}"}
+    superadmin_headers = {"Authorization": f"Bearer {tokens['superadmin']}"}
 
     unique_sku = f"SP-TEST-{uuid.uuid4().hex[:6].upper()}"
+    prod_id = None
 
-    # 1. Admin tạo sản phẩm mới
-    prod_payload = {
-        "sku": unique_sku,
-        "name": "Chuột Bi Cổ Điển PS2",
-        "cost_price": 50000,
-        "selling_price": 120000,
-        "stock_quantity": 15,
-        "min_stock_alert": 3,
-        "unit": "chiếc",
-        "status": "active",
-        "description": "Chuột bi cơ học dùng cổng PS/2 hoài niệm năm 2000"
-    }
-    create_res = client.post("/api/v1/products", json=prod_payload, headers=admin_headers)
-    assert create_res.status_code == 200
-    created_prod = create_res.json()
-    assert created_prod["sku"] == unique_sku
-    prod_id = created_prod["id"]
+    try:
+        # 1. Admin tạo sản phẩm mới
+        prod_payload = {
+            "sku": unique_sku,
+            "name": "Chuột Bi Cổ Điển PS2",
+            "cost_price": 50000,
+            "selling_price": 120000,
+            "stock_quantity": 15,
+            "min_stock_alert": 3,
+            "unit": "chiếc",
+            "status": "active",
+            "description": "Chuột bi cơ học dùng cổng PS/2 hoài niệm năm 2000"
+        }
+        create_res = client.post("/api/v1/products", json=prod_payload, headers=admin_headers)
+        assert create_res.status_code == 200
+        created_prod = create_res.json()
+        assert created_prod["sku"] == unique_sku
+        prod_id = created_prod["id"]
 
-    # 2. Staff tìm kiếm sản phẩm theo tên / từ khóa
-    search_res = client.get("/api/v1/products?search=Chuột Bi", headers=staff_headers)
-    assert search_res.status_code == 200
-    search_items = search_res.json()
-    assert any(p["sku"] == unique_sku for p in search_items)
+        # 2. Staff tìm kiếm sản phẩm theo tên / từ khóa
+        search_res = client.get("/api/v1/products?search=Chuột Bi", headers=staff_headers)
+        assert search_res.status_code == 200
+        search_items = search_res.json()
+        assert any(p["sku"] == unique_sku for p in search_items)
 
-    # 3. Lọc theo khoảng giá min_price / max_price
-    filter_res = client.get("/api/v1/products?min_price=100000&max_price=150000", headers=staff_headers)
-    assert filter_res.status_code == 200
-    assert all(100000 <= p["selling_price"] <= 150000 for p in filter_res.json())
+        # 3. Lọc theo khoảng giá min_price / max_price
+        filter_res = client.get("/api/v1/products?min_price=100000&max_price=150000", headers=staff_headers)
+        assert filter_res.status_code == 200
+        assert all(100000 <= p["selling_price"] <= 150000 for p in filter_res.json())
 
-    # 4. Staff không thể sửa giá sản phẩm (403)
-    update_res = client.put(
-        f"/api/v1/products/{prod_id}",
-        json={"selling_price": 200000},
-        headers=staff_headers
-    )
-    assert update_res.status_code == 403
+        # 4. Staff không thể sửa giá sản phẩm (403)
+        update_res = client.put(
+            f"/api/v1/products/{prod_id}",
+            json={"selling_price": 200000},
+            headers=staff_headers
+        )
+        assert update_res.status_code == 403
 
-    # 5. Dọn dẹp sản phẩm test (hard delete)
-    superadmin_headers = {"Authorization": f"Bearer {tokens['superadmin']}"}
-    del_res = client.delete(f"/api/v1/products/{prod_id}?hard_delete=true", headers=superadmin_headers)
-    assert del_res.status_code == 200
+        # 5. Dọn dẹp sản phẩm test (hard delete)
+        del_res = client.delete(f"/api/v1/products/{prod_id}?hard_delete=true", headers=superadmin_headers)
+        assert del_res.status_code == 200
+    finally:
+        # Guaranteed cleanup of any residual test SKUs in both SQLite and ChromaDB
+        try:
+            from app.services.rag_service import rag_service
+            from app.services.visual_index_service import visual_index_service
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM products WHERE sku LIKE 'SP-TEST-%' OR name LIKE '%Chuột Bi%'")
+                rows = cursor.fetchall()
+                for r in rows:
+                    tid = r["id"] if isinstance(r, dict) else r[0]
+                    try:
+                        rag_service.delete_single_product(tid)
+                        visual_index_service.delete_single_product_visual(tid)
+                    except Exception:
+                        pass
+                cursor.execute("DELETE FROM products WHERE sku LIKE 'SP-TEST-%' OR name LIKE '%Chuột Bi%'")
+                conn.commit()
+        except Exception:
+            pass
 
 
 # ==================== TEST 3: CUSTOMERS ====================

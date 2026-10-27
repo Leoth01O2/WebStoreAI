@@ -35,6 +35,13 @@ async def lifespan(app: FastAPI):
                 rag_service.reconcile_sync()
     except Exception:
         pass
+    # Pre-warm Local Vision CLIP singleton & embeddings in background/startup
+    try:
+        import threading
+        from app.services.local_vision_service import local_vision_service
+        threading.Thread(target=local_vision_service._ensure_loaded, daemon=True).start()
+    except Exception:
+        pass
     yield
     # Cleanup nếu cần
 

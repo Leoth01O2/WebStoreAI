@@ -62,6 +62,12 @@ export const AiAssistantPage = ({ onNavigate }) => {
   const [recBudget, setRecBudget] = useState('');
   const [recLoading, setRecLoading] = useState(false);
   const [recResult, setRecResult] = useState(null);
+  const handleRecQueryKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleRecommendSubmit(e);
+    }
+  };
 
   // --- TAB 2: IMAGE SEARCH STATE (PHASE R6) ---
   const [selectedFile, setSelectedFile] = useState(null);
@@ -260,22 +266,28 @@ export const AiAssistantPage = ({ onNavigate }) => {
        prod?.price !== undefined)
     );
 
+    const baseStyle = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.75rem',
+      padding: '2px 8px',
+      borderRadius: '3px',
+      fontFamily: 'var(--font-mono)',
+      fontWeight: 700,
+      whiteSpace: 'nowrap',
+      flexShrink: 0,
+    };
+
     switch (norm) {
       case 'MATCH':
         return (
           <span
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '3px',
+              ...baseStyle,
               background: 'rgba(57, 211, 83, 0.15)',
               color: 'var(--accent-green)',
               border: '1px solid rgba(57, 211, 83, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
             }}
           >
             <CheckCircle size={12} /> [ KHỚP SẢN PHẨM ]
@@ -285,17 +297,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
         return (
           <span
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '3px',
+              ...baseStyle,
               background: 'rgba(0, 229, 255, 0.15)',
               color: 'var(--accent-cyan)',
               border: '1px solid rgba(0, 229, 255, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
             }}
           >
             <Layers size={12} /> [ SẢN PHẨM TƯƠNG TỰ ]
@@ -305,20 +310,13 @@ export const AiAssistantPage = ({ onNavigate }) => {
         return (
           <span
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '3px',
+              ...baseStyle,
               background: 'rgba(255, 180, 84, 0.15)',
               color: 'var(--accent-amber)',
               border: '1px solid rgba(255, 180, 84, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
             }}
           >
-            <Info size={12} /> [ SẢN PHẨM LIÊN QUAN ]
+            <Info size={12} /> [ CÙNG NHÓM HÀNG ]
           </span>
         );
       default:
@@ -326,17 +324,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
           return (
             <span
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                fontSize: '0.75rem',
-                padding: '2px 8px',
-                borderRadius: '3px',
+                ...baseStyle,
                 background: 'rgba(57, 211, 83, 0.15)',
                 color: 'var(--accent-green)',
                 border: '1px solid rgba(57, 211, 83, 0.4)',
-                fontFamily: 'var(--font-mono)',
-                fontWeight: 700,
               }}
             >
               <CheckCircle size={12} /> [ ĐÃ ĐỐI CHIẾU ]
@@ -346,17 +337,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
         return (
           <span
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '3px',
+              ...baseStyle,
               background: 'rgba(248, 81, 73, 0.15)',
               color: 'var(--accent-red, #f85149)',
               border: '1px solid rgba(248, 81, 73, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
             }}
           >
             <AlertCircle size={12} /> [ KHÔNG TÌM THẤY ]
@@ -435,17 +419,27 @@ export const AiAssistantPage = ({ onNavigate }) => {
               <span>
                 Active Engine:{' '}
                 <strong style={{
-                  color: providersLoading ? 'var(--text-muted)' :
-                         providersInfo?.active_provider === 'ollama' ? 'var(--accent-cyan)' :
-                         providersInfo?.active_provider === 'gemini' ? 'var(--accent-green)' : 'var(--accent-amber)',
+                  color: activeTab === 'image-search'
+                    ? (visionProvider === 'local' ? 'var(--accent-cyan)' : 'var(--accent-amber)')
+                    : providersLoading ? 'var(--text-muted)' :
+                      (selectedProvider === 'ollama' || (selectedProvider === 'auto' && providersInfo?.active_provider === 'ollama')) ? 'var(--accent-cyan)' :
+                      (selectedProvider === 'gemini' || (selectedProvider === 'auto' && providersInfo?.active_provider === 'gemini')) ? 'var(--accent-green)' : 'var(--accent-amber)',
                   fontFamily: 'var(--font-mono)'
                 }}>
-                  {providersLoading
+                  {activeTab === 'image-search'
+                    ? (visionProvider === 'local' ? 'Local Vision (CLIP Offline)' : 'Gemini Cloud Vision')
+                    : providersLoading
                     ? '⏳ Đang kiểm tra trạng thái engine...'
+                    : selectedProvider === 'ollama'
+                    ? `Ollama Local (${providersInfo?.providers?.ollama?.model || 'qwen2.5:1.5b'})`
+                    : selectedProvider === 'gemini'
+                    ? `Google Gemini (${providersInfo?.providers?.gemini?.model || 'gemini-2.5-flash'})`
+                    : selectedProvider === 'grounded'
+                    ? 'Grounded Direct Lookup (SQLite WAL)'
                     : providersInfo?.active_provider === 'ollama'
                     ? `Ollama Local (${providersInfo.providers?.ollama?.model || 'qwen2.5:1.5b'})`
                     : providersInfo?.active_provider === 'gemini'
-                    ? `Google Gemini (${providersInfo.providers?.gemini?.model || '3.6-flash'})`
+                    ? `Google Gemini (${providersInfo.providers?.gemini?.model || 'gemini-2.5-flash'})`
                     : 'Grounded Direct Lookup (SQLite WAL)'}
                 </strong>
               </span>
@@ -469,13 +463,18 @@ export const AiAssistantPage = ({ onNavigate }) => {
               borderRadius: '4px',
               border: '1px solid var(--border-color)',
               fontSize: '0.8rem',
+              opacity: activeTab === 'image-search' ? 0.45 : 1,
+              pointerEvents: activeTab === 'image-search' ? 'none' : 'auto',
+              transition: 'opacity 0.2s ease',
             }}
+            title={activeTab === 'image-search' ? 'Chế độ AI tìm kiếm ảnh được chọn riêng bên trong tab Tìm kiếm bằng hình ảnh' : 'Chọn AI Provider xử lý (Local Ollama, Cloud Gemini hoặc Grounded Fallback)'}
           >
             <Cpu size={14} style={{ color: 'var(--accent-cyan)' }} />
             <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Provider:</span>
             <select
               value={selectedProvider}
               onChange={(e) => setSelectedProvider(e.target.value)}
+              disabled={activeTab === 'image-search'}
               style={{
                 background: 'var(--panel-bg)',
                 color: 'var(--text-primary)',
@@ -484,9 +483,9 @@ export const AiAssistantPage = ({ onNavigate }) => {
                 padding: '2px 6px',
                 fontSize: '0.78rem',
                 fontFamily: 'var(--font-mono)',
-                cursor: 'pointer',
+                cursor: activeTab === 'image-search' ? 'not-allowed' : 'pointer',
               }}
-              title="Chọn AI Provider xử lý (Local Ollama, Cloud Gemini hoặc Grounded Fallback)"
+              title={activeTab === 'image-search' ? 'Chế độ AI tìm kiếm ảnh được chọn riêng bên trong tab Tìm kiếm bằng hình ảnh' : 'Chọn AI Provider xử lý (Local Ollama, Cloud Gemini hoặc Grounded Fallback)'}
             >
               <option value="auto">
                 Tự động {providersLoading ? '⏳ (Đang kiểm tra...)' : `(${providersInfo?.active_provider ? providersInfo.active_provider.toUpperCase() : 'MẶC ĐỊNH'})`}
@@ -667,33 +666,84 @@ export const AiAssistantPage = ({ onNavigate }) => {
             <form onSubmit={handleRecommendSubmit}>
               <div className="ai-query-grid">
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: '6px',
+                      lineHeight: '20px',
+                      fontSize: '12px',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
                     Yêu cầu / Nhu cầu khách hàng:
                   </label>
                   <div style={{ position: 'relative' }}>
-                    <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input
-                      type="text"
-                      className="input"
+                    <Search
+                      size={16}
+                      style={{
+                        position: 'absolute',
+                        left: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: 'var(--text-muted)',
+                        pointerEvents: 'none',
+                        zIndex: 2,
+                      }}
+                    />
+                    <textarea
+                      rows={1}
+                      className="input form-control"
                       placeholder="Ví dụ: Tìm bàn phím cơ gõ êm cho dân văn phòng, tai nghe bluetooth chống ồn..."
                       value={recQuery}
                       onChange={(e) => setRecQuery(e.target.value)}
-                      style={{ paddingLeft: '32px', width: '100%' }}
+                      onKeyDown={handleRecQueryKeyDown}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        height: '44px',
+                        minHeight: '44px',
+                        maxHeight: '44px',
+                        boxSizing: 'border-box',
+                        margin: 0,
+                        padding: '10px 12px 10px 36px',
+                        lineHeight: '22px',
+                        fontSize: '14px',
+                        resize: 'none',
+                        overflowY: 'auto',
+                      }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: '6px',
+                      lineHeight: '20px',
+                      fontSize: '12px',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
                     Ngân sách tối đa (VND, tùy chọn):
                   </label>
                   <input
                     type="number"
-                    className="input"
+                    className="input form-control"
                     placeholder="Không giới hạn"
                     value={recBudget}
                     onChange={(e) => setRecBudget(e.target.value)}
-                    style={{ width: '100%' }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      height: '44px',
+                      minHeight: '44px',
+                      maxHeight: '44px',
+                      boxSizing: 'border-box',
+                      margin: 0,
+                      padding: '0 12px',
+                      fontSize: '14px',
+                    }}
                   />
                 </div>
 
@@ -702,12 +752,19 @@ export const AiAssistantPage = ({ onNavigate }) => {
                   className="btn btn-primary"
                   disabled={recLoading}
                   style={{
-                    height: '38px',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '44px',
+                    minHeight: '44px',
+                    maxHeight: '44px',
+                    boxSizing: 'border-box',
+                    margin: 0,
                     gap: '0.5rem',
                     padding: '0 1.25rem',
                     whiteSpace: 'nowrap',
+                    fontSize: '14px',
+                    fontWeight: 600,
                   }}
                 >
                   <Sparkles size={16} />

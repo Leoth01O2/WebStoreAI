@@ -170,7 +170,7 @@ class VisualIndexService:
         - If a valid local image file exists on disk, computes visual vector directly from image pixels.
         - Otherwise, computes multimodal text vector from its rich visual description in the same space.
         """
-        img_ref = row.get("image_path") or row.get("image_url")
+        img_ref = row.get("image_url") or row.get("image_path")
         local_file = self._find_local_image_path(img_ref)
 
         if local_file:
@@ -377,6 +377,17 @@ class VisualIndexService:
             return False
 
         meta = dict(row)
+        # Keep image_path aligned with current products.image_url if updated
+        if meta.get("image_url") and meta.get("image_url") != meta.get("image_path"):
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE product_visual_metadata SET image_path = ? WHERE product_id = ?",
+                    (meta["image_url"], product_id)
+                )
+                conn.commit()
+            meta["image_path"] = meta["image_url"]
+
         doc = self._build_visual_document(meta, meta)
         vec = self._compute_product_vector(meta, doc)
 
