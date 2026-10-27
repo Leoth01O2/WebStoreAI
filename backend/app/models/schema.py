@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS products (
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
     image_url TEXT,
     description TEXT,
+    brand TEXT,
+    product_type TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -215,6 +217,146 @@ def init_db():
             cursor.execute("ALTER TABLE products ADD COLUMN image_url TEXT")
             conn.commit()
             print("[DB Migration] Added column 'image_url' to products table.")
+
+        # Migration kiểm tra cột brand và product_type trong bảng products
+        cursor.execute("PRAGMA table_info(products)")
+        product_cols = [row["name"] for row in cursor.fetchall()]
+        if "brand" not in product_cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN brand TEXT")
+            conn.commit()
+            print("[DB Migration] Added column 'brand' to products table.")
+        if "product_type" not in product_cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN product_type TEXT")
+            conn.commit()
+            print("[DB Migration] Added column 'product_type' to products table.")
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type)")
+        conn.commit()
+
+        # Idempotent category check: 'Laptop & Máy tính' (CAT-LAPTOP)
+        cursor.execute("SELECT id FROM categories WHERE code = 'CAT-LAPTOP' OR name = 'Laptop & Máy tính'")
+        laptop_cat_row = cursor.fetchone()
+        if not laptop_cat_row:
+            cursor.execute(
+                "INSERT INTO categories (name, code, description) VALUES (?, ?, ?)",
+                ("Laptop & Máy tính", "CAT-LAPTOP", "Máy tính xách tay, MacBook, Ultrabook và linh kiện máy tính")
+            )
+            conn.commit()
+            cursor.execute("SELECT id FROM categories WHERE code = 'CAT-LAPTOP'")
+            laptop_cat_id = cursor.fetchone()[0]
+            print("[DB Migration] Added category 'Laptop & Máy tính' (CAT-LAPTOP).")
+        else:
+            laptop_cat_id = laptop_cat_row["id"] if isinstance(laptop_cat_row, dict) or hasattr(laptop_cat_row, "keys") else laptop_cat_row[0]
+
+        SEED_MAP = {
+            "SP-AUDIO-01": ("RetroSound", "headphone"),
+            "SP-AUDIO-02": ("RetroSound", "speaker"),
+            "SP-AUDIO-03": ("Monitor Studio", "headphone"),
+            "SP-AUDIO-04": ("M1 Audio", "headphone"),
+            "SP-AUDIO-05": ("RunFree", "headphone"),
+            "SP-OFFICE-01": ("Retro Typewriter", "keyboard"),
+            "SP-OFFICE-02": ("Silent M3", "mouse"),
+            "SP-OFFICE-03": ("Slim Multi-Device", "keyboard"),
+            "SP-OFFICE-04": ("Basic Office", "mouse"),
+            "SP-OFFICE-05": ("PU Leather", "mousepad"),
+            "SP-SMART-01": ("Edison", "lamp"),
+            "SP-SMART-02": ("Ceramic", "diffuser"),
+            "SP-SMART-03": ("Nixie", "clock"),
+            "SP-SMART-04": ("Smart Scale", "smart_scale"),
+            "SP-SMART-05": ("Turbine", "fan"),
+            "SP-ACC-01": ("Retro Robot", "charger"),
+            "SP-ACC-02": ("Anker", "cable"),
+            "SP-ACC-03": ("Orico", "hub_adapter"),
+            "SP-ACC-04": ("Cyberpunk", "powerbank"),
+            "SP-ACC-05": ("Orico", "stand"),
+            "SP-GAME-01": ("G200", "headphone"),
+            "SP-GAME-02": ("Ultralight", "mouse"),
+            "SP-GAME-03": ("Hall Effect", "gamepad"),
+            "SP-GAME-04": ("RGB Pad", "mousepad"),
+            "SP-GAME-05": ("CoolerMaster", "cooler"),
+        }
+
+        # Populate brand & product_type for existing catalog products if NULL or inaccurate
+        cursor.execute("SELECT id, sku, name, description, category_id, brand, product_type FROM products")
+        unlabeled = cursor.fetchall()
+        for p in unlabeled:
+            pid = p["id"] if isinstance(p, dict) or hasattr(p, "keys") else p[0]
+            p_sku = (p["sku"] if isinstance(p, dict) or hasattr(p, "keys") else p[1]) or ""
+            p_name = (p["name"] if isinstance(p, dict) or hasattr(p, "keys") else p[2]) or ""
+            p_desc = (p["description"] if isinstance(p, dict) or hasattr(p, "keys") else p[3]) or ""
+            cur_b = p["brand"] if isinstance(p, dict) or hasattr(p, "keys") else p[5]
+            cur_pt = p["product_type"] if isinstance(p, dict) or hasattr(p, "keys") else p[6]
+            name_desc = f"{p_name} {p_desc}".lower()
+
+            b_val = None
+            pt_val = None
+
+            if p_sku in SEED_MAP:
+                b_val, pt_val = SEED_MAP[p_sku]
+            else:
+                if "apple" in name_desc or "macbook" in name_desc:
+                    b_val = "Apple"
+                elif "sony" in name_desc or "playstation" in name_desc:
+                    b_val = "Sony"
+                elif "logitech" in name_desc or "logi" in name_desc:
+                    b_val = "Logitech"
+                elif "razer" in name_desc:
+                    b_val = "Razer"
+                elif "corsair" in name_desc:
+                    b_val = "Corsair"
+                elif "keychron" in name_desc:
+                    b_val = "Keychron"
+                elif "retrosound" in name_desc:
+                    b_val = "RetroSound"
+                elif "anker" in name_desc:
+                    b_val = "Anker"
+                elif "asus" in name_desc:
+                    b_val = "Asus"
+
+                if any(k in name_desc for k in ["lót chuột", "pad chuột", "bàn di chuột"]):
+                    pt_val = "mousepad"
+                elif any(k in name_desc for k in ["giá đỡ", "stand", "chân đế", "kê laptop"]):
+                    pt_val = "stand"
+                elif any(k in name_desc for k in ["tản nhiệt", "cooler", "đế tản nhiệt"]):
+                    pt_val = "cooler"
+                elif any(k in name_desc for k in ["hub", "chuyển đổi"]):
+                    pt_val = "hub_adapter"
+                elif any(k in name_desc for k in ["củ sạc", "cốc sạc"]):
+                    pt_val = "charger"
+                elif any(k in name_desc for k in ["dây cáp", "cáp sạc"]):
+                    pt_val = "cable"
+                elif any(k in name_desc for k in ["pin dự phòng", "sạc dự phòng", "powerbank"]):
+                    pt_val = "powerbank"
+                elif any(k in name_desc for k in ["macbook", "máy tính xách tay"]) or ("laptop" in p_name.lower()):
+                    pt_val = "laptop"
+                elif any(k in name_desc for k in ["chuột", "mouse"]):
+                    pt_val = "mouse"
+                elif any(k in name_desc for k in ["bàn phím", "keyboard", "phím cơ"]):
+                    pt_val = "keyboard"
+                elif any(k in name_desc for k in ["tai nghe", "headphone", "earbuds", "micro"]):
+                    pt_val = "headphone"
+                elif any(k in name_desc for k in ["loa", "speaker"]):
+                    pt_val = "speaker"
+                elif any(k in name_desc for k in ["tay cầm", "gamepad"]):
+                    pt_val = "gamepad"
+
+            updates = []
+            params = []
+            if b_val and not cur_b:
+                updates.append("brand = ?")
+                params.append(b_val)
+            if pt_val and (not cur_pt or (p_sku == "SP-ACC-01" and cur_pt == "laptop")):
+                updates.append("product_type = ?")
+                params.append(pt_val)
+            if pt_val == "laptop" and laptop_cat_id:
+                updates.append("category_id = ?")
+                params.append(laptop_cat_id)
+
+            if updates:
+                params.append(pid)
+                cursor.execute(f"UPDATE products SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
 
         # Migration kiểm tra cột payment_status trong bảng orders
         cursor.execute("PRAGMA table_info(orders)")

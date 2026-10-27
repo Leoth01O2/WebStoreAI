@@ -50,6 +50,8 @@ export const ProductsPage = () => {
   const [productForm, setProductForm] = useState({
     sku: '',
     name: '',
+    brand: '',
+    product_type: '',
     category_id: '',
     cost_price: 0,
     selling_price: 0,
@@ -102,6 +104,8 @@ export const ProductsPage = () => {
     setProductForm({
       sku: `SKU-${Date.now().toString().slice(-6)}`,
       name: '',
+      brand: '',
+      product_type: '',
       category_id: categories[0]?.id || '',
       cost_price: 0,
       selling_price: 0,
@@ -121,6 +125,8 @@ export const ProductsPage = () => {
     setProductForm({
       sku: prod.sku,
       name: prod.name,
+      brand: prod.brand || '',
+      product_type: prod.product_type || '',
       category_id: prod.category_id || '',
       cost_price: prod.cost_price,
       selling_price: prod.selling_price,
@@ -166,6 +172,8 @@ export const ProductsPage = () => {
     try {
       const payload = {
         ...productForm,
+        brand: productForm.brand ? productForm.brand.trim() : null,
+        product_type: productForm.product_type ? productForm.product_type.trim() : null,
         category_id: productForm.category_id ? Number(productForm.category_id) : null,
         cost_price: Number(productForm.cost_price),
         selling_price: Number(productForm.selling_price),
@@ -395,7 +403,14 @@ export const ProductsPage = () => {
                       )}
                     </td>
                     <td>
-                      <span className="badge badge-muted">{p.category_name || 'Khác'}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-start' }}>
+                        <span className="badge badge-muted">{p.category_name || 'Khác'}</span>
+                        {p.brand && (
+                          <span className="badge badge-primary font-mono" style={{ fontSize: '0.68rem', padding: '0.1rem 0.45rem' }}>
+                            {p.brand}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     {canManage && (
                       <td className="currency" style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
@@ -535,6 +550,29 @@ export const ProductsPage = () => {
               value={productForm.name}
               onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
             />
+          </div>
+
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Thương hiệu (Brand)</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="VD: Apple, Logitech, Sony, v.v."
+                value={productForm.brand}
+                onChange={(e) => setProductForm({ ...productForm, brand: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Loại sản phẩm (Product Type)</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="VD: laptop, mouse, keyboard, stand..."
+                value={productForm.product_type}
+                onChange={(e) => setProductForm({ ...productForm, product_type: e.target.value })}
+              />
+            </div>
           </div>
 
           <div className="form-grid-2">

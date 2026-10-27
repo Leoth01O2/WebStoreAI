@@ -13,6 +13,8 @@ class ProductBase(BaseModel):
     status: str = Field("active", description="Trạng thái: active hoặc inactive")
     image_url: Optional[str] = Field(None, description="Đường dẫn ảnh sản phẩm (upload nội bộ hoặc URL ảnh)")
     description: Optional[str] = Field(None, description="Mô tả chi tiết đặc tính kỹ thuật sản phẩm")
+    brand: Optional[str] = Field(None, max_length=100, description="Thương hiệu sản phẩm")
+    product_type: Optional[str] = Field(None, max_length=100, description="Chủng loại sản phẩm (laptop, keyboard, mouse, headphone,...)")
 
 class ProductCreate(ProductBase):
     pass
@@ -29,6 +31,8 @@ class ProductUpdate(BaseModel):
     status: Optional[str] = None
     image_url: Optional[str] = None
     description: Optional[str] = None
+    brand: Optional[str] = None
+    product_type: Optional[str] = None
 
 class ProductAdminResponse(ProductBase):
     """
@@ -60,6 +64,8 @@ class ProductPublicResponse(BaseModel):
     status: str = "active"
     image_url: Optional[str] = None
     description: Optional[str] = None
+    brand: Optional[str] = None
+    product_type: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

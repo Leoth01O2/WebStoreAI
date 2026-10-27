@@ -48,11 +48,14 @@ Nhiệm vụ: Trích xuất ý định của người dùng thành DUY NHẤT m�
 QUY TẮC BẮT BUỘC:
 1. PHÂN BIỆT THIẾT BỊ NGƯỜI DÙNG ĐANG CÓ (user_device) VÀ SẢN PHẨM CẦN MUA (product_type) — Head Noun vs. Object Noun Disambiguation:
    - user_device: Thiết bị người dùng ĐANG SỞ HỮU (ví dụ: máy tính, laptop, điện thoại, máy tính bảng...).
-   - product_type: Món đồ người dùng CẦN MUA: "chuột" -> "mouse", "bàn phím" -> "keyboard", "tai nghe" -> "headphone", "loa" -> "speaker", "tay cầm" -> "gamepad", "hub chuyển đổi" -> "hub_adapter", "củ sạc" -> "charger", "cáp sạc" -> "cable", "pin dự phòng" -> "powerbank", "giá đỡ" -> "stand", "đế tản nhiệt" -> "cooler", "lót chuột" -> "mousepad".
+   - product_type: Món đồ người dùng CẦN MUA: "laptop" / "máy tính xách tay" -> "laptop", "chuột" -> "mouse", "bàn phím" -> "keyboard", "tai nghe" -> "headphone", "loa" -> "speaker", "tay cầm" -> "gamepad", "hub chuyển đổi" -> "hub_adapter", "củ sạc" -> "charger", "cáp sạc" -> "cable", "pin dự phòng" -> "powerbank", "giá đỡ" -> "stand", "đế tản nhiệt" -> "cooler", "lót chuột" -> "mousepad".
+   - KHI GẶP CÂU HỎI MUA MÁY TÍNH / LAPTOP / MACBOOK:
+     + "mua laptop", "shop có macbook không", "cần laptop mỏng nhẹ", "máy tính xách tay", "macbook air" -> product_type: "laptop", user_device: null.
    - KHI GẶP CỤM TỪ PHỤ KIỆN / TRIỆU CHỨNG CÔNG NĂNG ĐI VỚI THIẾT BỊ (Universal Scenario Ontology):
      + "kê laptop", "nâng laptop", "đỡ laptop", "kê cao màn hình", "đỡ mỏi cổ", "đau vai gáy", "cúi đầu", "ngồi làm việc mỏi cổ", "chân đế", "giá đỡ" -> user_device: "laptop", product_type: "stand" (TUYỆT ĐỐI KHÔNG gán product_type: "laptop").
      + "sạc điện thoại", "sạc laptop", "hết pin", "sập nguồn", "đi công tác/du lịch không có ổ điện", "pin dự phòng" -> product_type: "powerbank" hoặc "charger".
      + "cắm vào laptop/macbook", "thiếu cổng USB/HDMI/Type-C", "chuyển đổi cổng", "xuất màn hình" -> product_type: "hub_adapter" hoặc "cable".
+     + "chuột cho macbook", "bàn phím cho laptop", "chuột cắm máy tính" -> user_device: "laptop", product_type: "mouse" / "keyboard".
      + "di chuột mỏi tay", "đau cổ tay", "bấm không ồn ban đêm" -> product_type: "mouse".
      + "gõ văn bản/code mỏi tay", "gõ êm không ồn" -> product_type: "keyboard".
      + "họp trực tuyến", "phòng ồn", "nghe rõ giọng", "mic thu âm/đàm thoại" -> product_type: "headphone".
@@ -367,15 +370,29 @@ class IntentAnalyzer:
         )
 
         # 2. Grounding check on LLM product_type & Universal Scenario Ontology
-        # First, decouple host device (laptop, phone, macbook, pc) when LLM mistakes host device for product_type
+        # Decouple host device (phone, tablet, pc) or laptop WHEN an accessory is being sought
+        is_accessory_query = any(k in pos_lower for k in [
+            "chuột", "phím", "bàn phím", "tai nghe", "loa", "tay cầm", "hub", "cáp", "sạc", "củ sạc",
+            "pin dự phòng", "giá đỡ", "kê", "đỡ", "tản nhiệt", "lót chuột", "pad chuột", "cắm vào", "cho"
+        ])
         if intent.product_type:
             pt_clean = intent.product_type.lower().strip()
-            if pt_clean in ("laptop", "macbook", "máy tính", "phone", "điện thoại", "pc", "máy bàn", "tablet", "ipad"):
+            if pt_clean in ("phone", "điện thoại", "pc", "máy bàn", "tablet", "ipad"):
                 if not intent.user_device:
-                    intent.user_device = "laptop" if pt_clean in ("laptop", "macbook", "máy tính") else ("phone" if pt_clean in ("phone", "điện thoại") else pt_clean)
+                    intent.user_device = "phone" if pt_clean in ("phone", "điện thoại") else pt_clean
                 intent.product_type = None
+            elif pt_clean in ("laptop", "macbook", "máy tính"):
+                if is_accessory_query:
+                    if not intent.user_device:
+                        intent.user_device = "macbook" if ("macbook" in q_lower or pt_clean == "macbook") else "laptop"
+                    elif intent.user_device == "laptop" and "macbook" in q_lower:
+                        intent.user_device = "macbook"
+                    intent.product_type = None
+                else:
+                    intent.product_type = "laptop"
 
         type_keywords_map = {
+            "laptop": ["laptop", "máy tính xách tay", "macbook", "notebook", "ultrabook"],
             "mouse": ["chuột", "mouse", "con chuột", "di chuột mỏi tay", "đau cổ tay"],
             "keyboard": ["bàn phím", "keyboard", "phím cơ", "phím", "keycap", "switch", "gõ văn bản", "đánh máy", "gõ máy tính", "gõ code", "soạn thảo", "đồ để gõ"],
             "headphone": [
@@ -435,6 +452,15 @@ class IntentAnalyzer:
         if has_cooler_in_neg and intent.product_type == "cooler":
             intent.product_type = "stand" if is_stand_scenario else None
 
+        is_laptop_scenario = (
+            bool(re.search(r"\b(laptop|máy tính xách tay|notebook|ultrabook|mua macbook|bán macbook|có macbook không|cần macbook|tư vấn macbook|macbook air|macbook pro)\b", pos_lower)) and
+            not is_stand_scenario and
+            not (has_cooler_in_neg is False and any(k in pos_lower for k in ["tản nhiệt", "cooler"])) and
+            not is_hub_scenario and
+            not is_mouse_scenario and
+            not any(k in pos_lower for k in ["chuột", "phím", "tai nghe", "củ sạc", "cáp", "lót chuột", "kê", "đỡ"])
+        )
+
         # Override product_type if query explicitly names one with high precision or describes implicit functional scenario
         if re.search(r"\b(lót chuột|tấm lót chuột|bàn di chuột|pad chuột)\b", pos_lower):
             intent.product_type = "mousepad"
@@ -446,6 +472,8 @@ class IntentAnalyzer:
             intent.product_type = "powerbank"
         elif is_hub_scenario:
             intent.product_type = "hub_adapter"
+        elif is_laptop_scenario:
+            intent.product_type = "laptop"
         elif re.search(r"\b(củ sạc|cốc sạc)\b", pos_lower):
             intent.product_type = "charger"
         elif re.search(r"\b(dây cáp|cáp sạc|dây sạc)\b", pos_lower):
@@ -525,8 +553,9 @@ class IntentAnalyzer:
         for comp in reqs.get("device_compatibility", []):
             if comp not in intent.device_compatibility:
                 intent.device_compatibility.append(comp)
-        if reqs.get("user_device") and not intent.user_device:
-            intent.user_device = reqs["user_device"]
+        if reqs.get("user_device"):
+            if not intent.user_device or (intent.user_device == "laptop" and reqs["user_device"] == "macbook"):
+                intent.user_device = reqs["user_device"]
 
         # Override product_type if rule ontology locks onto specific accessory scenario (hub, powerbank, stand)
         rule_target_type = reqs.get("target_type")

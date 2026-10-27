@@ -38,6 +38,9 @@ CATEGORY_KEYWORDS = {
     "Gaming Gear": [
         "gaming", "game", "chơi game", "7.1", "bass", "siêu nhẹ", "tay cầm", "controller",
         "hall effect", "tản nhiệt", "cooler"
+    ],
+    "Laptop & Máy tính": [
+        "laptop", "macbook", "máy tính", "notebook", "ultrabook", "macbook air", "macbook pro", "m5", "m1", "m2", "m3", "m4", "máy tính xách tay"
     ]
 }
 
@@ -259,8 +262,9 @@ BRAND_DICTIONARY: Dict[str, BrandInfo] = {
         "aliases": [
             "sản phẩm hãng táo", "sản phẩm táo", "sản phẩm của táo",
             "sản phẩm apple", "sản phẩm của apple", "hàng apple", "đồ apple", "đồ của apple",
-            "hãng táo", "nhà táo", "táo khuyết", "đồ táo", "hàng táo",
-            "apple", "airpods"
+            "sản phẩm nhà táo", "đồ nhà táo", "hàng nhà táo", "đồ của nhà táo",
+            "hãng táo", "nhà táo", "táo khuyết", "trái táo", "đồ táo", "hàng táo", "hãng quả táo",
+            "apple", "airpods", "macbook", "táo"
         ]
     },
     "sony": {
@@ -376,6 +380,27 @@ def extract_brand_from_query(query: str) -> Optional[Dict[str, Any]]:
                     "canonical_name": extracted.title()
                 }
 
+    # Dynamic catalog brand check (discovers brands present in SQLite catalog even without alias entries)
+    if not found_brand:
+        try:
+            with get_db_connection() as conn:
+                bc = conn.cursor()
+                bc.execute("SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != ''")
+                db_brands = [row[0] for row in bc.fetchall() if row[0]]
+            for db_b in db_brands:
+                db_b_str = str(db_b).strip()
+                if not db_b_str or len(db_b_str) < 2:
+                    continue
+                b_pat = rf"(?:^|\W){re.escape(db_b_str.lower())}(?:$|\W)"
+                if re.search(b_pat, q_lower):
+                    found_brand = {
+                        "brand_key": db_b_str.lower(),
+                        "canonical_name": db_b_str
+                    }
+                    break
+        except Exception:
+            pass
+
     if found_brand:
         # Guard: do not misinterpret user's owned host device (e.g. 'MacBook của tôi mỏng quá', 'cắm vào MacBook') as brand request
         b_name = found_brand["canonical_name"].lower()
@@ -387,10 +412,13 @@ def extract_brand_from_query(query: str) -> Optional[Dict[str, Any]]:
             q_lower
         ))
         is_explicit_brand_demand = bool(re.search(
-            rf"\b(?:hãng|nhà|thương hiệu|đồ của|hàng của|chính hãng)\s+{re.escape(b_name)}\b",
+            rf"\b(?:hãng|nhà|thương hiệu|đồ của|hàng của|chính hãng|sản phẩm của|sản phẩm)\s+{re.escape(b_name)}\b",
             q_lower
         )) or bool(re.search(
             rf"\b{re.escape(b_name)}\s+chính hãng\b",
+            q_lower
+        )) or bool(re.search(
+            r"\b(?:hãng táo|nhà táo|táo khuyết|đồ táo|hàng táo|trái táo|sản phẩm táo)\b",
             q_lower
         ))
         if is_host_device_context and not is_explicit_brand_demand:
@@ -403,10 +431,16 @@ def extract_brand_from_query(query: str) -> Optional[Dict[str, Any]]:
 def match_product_brand(product: Dict[str, Any], brand_info: Dict[str, Any]) -> bool:
     """
     Verifies if a catalog product actually belongs to the given brand.
-    Prioritizes brand name appearing in product name or explicit brand declaration in description.
+    Prioritizes structured product.brand column, brand name in product name, or explicit brand declaration in description.
     """
-    brand_key = brand_info["brand_key"]
+    brand_key = brand_info["brand_key"].lower()
     canonical = brand_info["canonical_name"].lower()
+
+    # 0. Structured brand field (Highest priority)
+    p_brand = (product.get("brand") or "").strip().lower()
+    if p_brand:
+        if p_brand == brand_key or p_brand == canonical or canonical in p_brand or brand_key in p_brand:
+            return True
 
     name_str = (product.get("name") or "").lower()
     desc_str = (product.get("description") or "").lower()
@@ -414,6 +448,17 @@ def match_product_brand(product: Dict[str, Any], brand_info: Dict[str, Any]) -> 
     # 1. Primary check: Brand name appears as distinct word in product name
     for b in [canonical, brand_key]:
         if re.search(r"\b" + re.escape(b) + r"\b", name_str):
+            return True
+
+    # Special brand token checks for major brands (e.g. Apple -> macbook, airpods, ipad, iphone)
+    if brand_key == "apple" or canonical == "apple":
+        if any(re.search(r"\b" + re.escape(k) + r"\b", name_str) for k in ["macbook", "airpods", "ipad", "iphone", "apple"]):
+            return True
+    elif brand_key == "sony" or canonical == "sony":
+        if any(re.search(r"\b" + re.escape(k) + r"\b", name_str) for k in ["playstation", "wh-1000x", "sony"]):
+            return True
+    elif brand_key == "logitech" or canonical == "logitech":
+        if any(re.search(r"\b" + re.escape(k) + r"\b", name_str) for k in ["logitech", "logi"]):
             return True
 
     # 2. Explicit brand declaration in description
@@ -424,6 +469,10 @@ def match_product_brand(product: Dict[str, Any], brand_info: Dict[str, Any]) -> 
             rf"\bchính hãng\s+{re.escape(b)}\b",
         ]
         if any(re.search(p, desc_str) for p in brand_decl_patterns):
+            return True
+
+    if brand_key == "apple" or canonical == "apple":
+        if any(re.search(p, desc_str) for p in [r"\b(?:laptop|máy tính|thiết bị)\s+của\s+apple\b", r"\bchính hãng\s+apple\b", r"\bthương hiệu\s+apple\b"]):
             return True
 
     return False
@@ -555,6 +604,12 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
         any(k in pos_lower for k in ["tản nhiệt", "đế tản nhiệt", "quạt tản nhiệt", "làm mát laptop", "nóng máy", "cooler"]) and
         not has_cooler_in_neg
     )
+    is_laptop_scenario = (
+        bool(re.search(r"\b(laptop|máy tính xách tay|notebook|ultrabook|mua macbook|bán macbook|có macbook không|cần macbook|tư vấn macbook|macbook air|macbook pro)\b", pos_lower)) and
+        not is_stand_scenario and
+        not is_cooler_scenario and
+        not is_hub_scenario
+    )
 
     target_type = None
     if is_mousepad_scenario:
@@ -565,12 +620,14 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
         target_type = "powerbank"
     elif is_hub_scenario:
         target_type = "hub_adapter"
+    elif is_cooler_scenario:
+        target_type = "cooler"
+    elif is_laptop_scenario:
+        target_type = "laptop"
     elif is_charger_scenario:
         target_type = "charger"
     elif is_cable_scenario:
         target_type = "cable"
-    elif is_cooler_scenario:
-        target_type = "cooler"
     elif is_mouse_scenario:
         target_type = "mouse"
     elif is_keyboard_scenario:
@@ -588,6 +645,8 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
     desired_capabilities = []
     if is_stand_scenario:
         desired_capabilities.append("giá đỡ laptop nâng hạ độ cao công thái học")
+    if is_laptop_scenario:
+        desired_capabilities.append("máy tính xách tay laptop")
     if is_powerbank_scenario:
         desired_capabilities.append("pin sạc dự phòng")
     if any(k in pos_lower for k in ["xuất hình", "ra màn", "chiếu màn", "màn hdmi", "màn hình phụ", "cổng hdmi"]):
@@ -702,22 +761,20 @@ def parse_query_requirements(query: str) -> Dict[str, Any]:
 
 def classify_product_type(p: Dict[str, Any]) -> str:
     """Classifies catalog product into device types to prevent accessories from masquerading as devices."""
+    # 0. Structured product_type field (Highest priority)
+    p_type = (p.get("product_type") or "").strip().lower()
+    if p_type:
+        return p_type
+
     name_lower = (p.get("name") or "").lower()
     cat_lower = (p.get("category_name") or "").lower()
 
+    # 1. Accessories that mention devices in their name must be classified as accessories FIRST
     if any(k in name_lower for k in ["lót chuột", "tấm lót chuột", "bàn di chuột", "pad chuột"]):
         return "mousepad"
-    if any(k in name_lower for k in ["chuột", "mouse"]) and not any(k in name_lower for k in ["lót chuột", "bàn di chuột", "pad chuột"]):
-        return "mouse"
-    if any(k in name_lower for k in ["bàn phím", "keyboard", "phím cơ"]):
-        return "keyboard"
-    if any(k in name_lower for k in ["tai nghe", "headphone", "earphone", "earbuds", "tws"]):
-        return "headphone"
-    if any(k in name_lower for k in ["loa", "speaker"]):
-        return "speaker"
-    if any(k in name_lower for k in ["tay cầm", "gamepad", "controller"]):
-        return "gamepad"
-    if any(k in name_lower for k in ["tản nhiệt", "đế tản nhiệt", "cooler"]):
+    if any(k in name_lower for k in ["giá đỡ", "stand", "chân đế", "kê laptop", "nâng laptop"]):
+        return "stand"
+    if any(k in name_lower for k in ["tản nhiệt", "đế tản nhiệt", "cooler", "quạt tản nhiệt"]):
         return "cooler"
     if any(k in name_lower for k in ["hub", "chuyển đổi", "adapter", "dock"]):
         return "hub_adapter"
@@ -727,14 +784,29 @@ def classify_product_type(p: Dict[str, Any]) -> str:
         return "cable"
     if any(k in name_lower for k in ["pin sạc dự phòng", "pin dự phòng", "powerbank"]):
         return "powerbank"
-    if any(k in name_lower for k in ["giá đỡ", "stand", "chân đế"]):
-        return "stand"
+
+    # 2. Main device types
+    if any(k in name_lower for k in ["macbook", "laptop", "notebook", "máy tính xách tay"]):
+        return "laptop"
+    if any(k in name_lower for k in ["chuột", "mouse"]) and not any(k in name_lower for k in ["lót chuột", "bàn di chuột", "pad chuột"]):
+        return "mouse"
+    if any(k in name_lower for k in ["bàn phím", "keyboard", "phím cơ", "typewriter"]):
+        return "keyboard"
+    if any(k in name_lower for k in ["tai nghe", "headphone", "earphone", "earbuds", "tws"]):
+        return "headphone"
+    if any(k in name_lower for k in ["loa", "speaker"]):
+        return "speaker"
+    if any(k in name_lower for k in ["tay cầm", "gamepad", "controller"]):
+        return "gamepad"
     if any(k in name_lower for k in ["đèn", "đồng hồ", "cân", "quạt"]):
         return "smarthome"
 
-    if "chuột" in cat_lower and "phím" not in name_lower:
+    # 3. Tertiary category tie-breaker (only when name doesn't match an entirely different product category)
+    if "laptop" in cat_lower or "máy tính" in cat_lower:
+        return "laptop"
+    if "chuột" in cat_lower and not any(k in name_lower for k in ["macbook", "laptop", "tai nghe", "loa", "phím"]):
         return "mouse"
-    if "bàn phím" in cat_lower and "chuột" not in name_lower:
+    if "bàn phím" in cat_lower and not any(k in name_lower for k in ["macbook", "laptop", "tai nghe", "loa", "chuột"]):
         return "keyboard"
     if "âm thanh" in cat_lower or "tai nghe" in cat_lower:
         return "headphone"
@@ -773,7 +845,7 @@ def check_product_eligibility(
     target_type = reqs.get("target_type")
     prod_type = classify_product_type(product)
     if target_type and target_type not in ("other", "accessory"):
-        primary_devices = {"mouse", "keyboard", "headphone", "speaker", "gamepad", "cooler", "mousepad"}
+        primary_devices = {"laptop", "mouse", "keyboard", "headphone", "speaker", "gamepad", "cooler", "mousepad"}
         if target_type in primary_devices:
             if prod_type != target_type:
                 return False, f"Không đúng loại sản phẩm yêu cầu ({prod_type} khác {target_type})"
@@ -966,7 +1038,8 @@ class BM25Retriever:
             with get_db_connection() as conn:
                 c = conn.cursor()
                 c.execute("""
-                    SELECT p.id, p.sku, p.name, c.name as category_name, p.description
+                    SELECT p.id, p.sku, p.name, c.name as category_name, p.description,
+                           p.brand, p.product_type
                     FROM products p
                     LEFT JOIN categories c ON p.category_id = c.id
                     WHERE p.status = 'active' AND p.stock_quantity > 0
@@ -983,7 +1056,7 @@ class BM25Retriever:
 
             for r in rows:
                 pid = r["id"]
-                doc_text = f"{r.get('sku', '')} {r.get('name', '')} {r.get('category_name', '')} {r.get('description', '')}"
+                doc_text = f"{r.get('sku', '')} {r.get('name', '')} {r.get('brand', '')} {r.get('product_type', '')} {r.get('category_name', '')} {r.get('description', '')}"
                 tokens = self._tokenize(doc_text)
                 doc_tokens_map[pid] = tokens
                 total_dl += len(tokens)
@@ -1040,7 +1113,8 @@ def structured_sql_search(
             c = conn.cursor()
             query_sql = """
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                       p.selling_price, p.stock_quantity, p.status, p.description
+                       p.selling_price, p.stock_quantity, p.status, p.description,
+                       p.brand, p.product_type
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
                 WHERE p.status = 'active' AND p.stock_quantity > 0
@@ -1063,7 +1137,7 @@ def structured_sql_search(
             # Brand evaluation
             if brand_req:
                 if match_product_brand(r, brand_req):
-                    score += 10.0  # Dominant boost for target brand
+                    score += 15.0  # Dominant boost for target brand
                 else:
                     score -= 5.0
 
@@ -1071,10 +1145,10 @@ def structured_sql_search(
             prod_type = classify_product_type(r)
             if target_type:
                 if prod_type == target_type:
-                    score += 5.0
+                    score += 6.0
                 elif prod_type in ("mousepad", "cooler", "charger_cable") and target_type == "mouse":
                     score -= 8.0  # Heavily demote accessories
-                elif target_type in ("headphone", "mouse", "keyboard", "speaker", "gamepad") and prod_type != target_type:
+                elif target_type in ("laptop", "headphone", "mouse", "keyboard", "speaker", "gamepad") and prod_type != target_type:
                     score -= 15.0  # Heavily demote completely mismatched device categories
                 else:
                     score -= 2.0
@@ -1272,8 +1346,13 @@ class RAGService:
         """Constructs a descriptive semantic text chunk for product indexing."""
         price_str = f"{int(p.get('selling_price', 0)):,} VNĐ"
         desc_clean = self._sanitize_text(p.get("description", ""))
+        brand_val = p.get('brand') or ''
+        type_val = p.get('product_type') or ''
+        brand_str = f"Thương hiệu: {brand_val} | " if brand_val else ""
+        type_str = f"Loại sản phẩm: {type_val} | " if type_val else ""
         return (
             f"Mã: {p.get('sku', '')} | Tên sản phẩm: {p.get('name', '')} | "
+            f"{brand_str}{type_str}"
             f"Danh mục: {p.get('category_name', '')} | Giá bán: {price_str} | "
             f"Đơn vị: {p.get('unit', 'cái')} | Mô tả & Đặc tính: {desc_clean}"
         )
@@ -1291,7 +1370,8 @@ class RAGService:
             c = conn.cursor()
             c.execute("""
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description
+                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description,
+                       p.brand, p.product_type
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
             """)
@@ -1311,6 +1391,8 @@ class RAGService:
             meta_item: Metadata = {
                 "product_id": int(p["id"]),
                 "sku": str(p.get("sku") or ""),
+                "brand": str(p.get("brand") or ""),
+                "product_type": str(p.get("product_type") or ""),
                 "category_id": int(p.get("category_id") or 0),
                 "category_name": str(p.get("category_name") or ""),
                 "selling_price": float(p.get("selling_price") or 0.0),
@@ -1331,7 +1413,8 @@ class RAGService:
             c = conn.cursor()
             c.execute("""
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description
+                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description,
+                       p.brand, p.product_type
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
                 WHERE p.id = ?
@@ -1349,6 +1432,8 @@ class RAGService:
             metadatas=[{
                 "product_id": int(p["id"]),
                 "sku": str(p.get("sku") or ""),
+                "brand": str(p.get("brand") or ""),
+                "product_type": str(p.get("product_type") or ""),
                 "category_id": int(p.get("category_id") or 0),
                 "category_name": str(p.get("category_name") or ""),
                 "selling_price": float(p.get("selling_price") or 0.0),
@@ -1376,7 +1461,8 @@ class RAGService:
             c = conn.cursor()
             c.execute("""
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description
+                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description,
+                       p.brand, p.product_type
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
             """)
@@ -1733,7 +1819,7 @@ class RAGService:
             with get_db_connection() as conn:
                 bc = conn.cursor()
                 bc.execute("""
-                    SELECT p.id, p.name, p.description
+                    SELECT p.id, p.name, p.description, p.brand, p.product_type
                     FROM products p
                     WHERE p.status = 'active'
                 """)
@@ -1755,7 +1841,8 @@ class RAGService:
             # Explicitly NEVER select cost_price
             c.execute(f"""
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description, p.image_url
+                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description, p.image_url,
+                       p.brand, p.product_type
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
                 WHERE p.id IN ({placeholders})
@@ -1969,7 +2056,8 @@ class RAGService:
                 bc = conn.cursor()
                 bc.execute("""
                     SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                           p.selling_price, p.stock_quantity, p.unit, p.status, p.description, p.image_url
+                           p.selling_price, p.stock_quantity, p.unit, p.status, p.description, p.image_url,
+                           p.brand, p.product_type
                     FROM products p
                     LEFT JOIN categories c ON p.category_id = c.id
                 """)
@@ -2112,45 +2200,110 @@ class RAGService:
             return {
                 "products": [],
                 "alternative_products": [],
+                "notable_expensive_brand_products": [],
                 "effective_budget": budget_max,
                 "context_text": "Cửa hàng hiện không kinh doanh các mặt hàng này.",
                 "out_of_stock_detected": None,
                 "out_of_stock_excluded": [],
                 "total_verified": 0,
-                "status": "out_of_domain"
+                "status": "out_of_domain",
+                "brand_name": None,
+                "intent": "general",
             }
 
         effective_budget = resolve_effective_budget(query, budget_max)
         parsed_reqs = reqs or parse_query_requirements(query)
+        brand_req = parsed_reqs.get("brand")
+        target_type = parsed_reqs.get("target_type")
 
-        keyword = f"%{query.strip()}%"
+        # 1. Fetch catalog rows from SQLite (including brand and product_type)
         with get_db_connection() as conn:
             c = conn.cursor()
-            params: List[Any] = [keyword, keyword, keyword]
-            budget_clause = ""
-            if effective_budget is not None and effective_budget > 0:
-                budget_clause = " AND p.selling_price <= ? "
-                params.append(effective_budget)
-            params.append(top_k * 3)
-
-            c.execute(f"""
+            c.execute("""
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description, p.image_url
+                       p.selling_price, p.stock_quantity, p.unit, p.status, p.description, p.image_url,
+                       p.brand, p.product_type
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
-                WHERE (p.name LIKE ? OR p.description LIKE ? OR c.name LIKE ?)
-                  AND p.status = 'active'
-                  AND p.stock_quantity > 0
-                  {budget_clause}
-                ORDER BY p.stock_quantity DESC
-                LIMIT ?
-            """, params)
-            rows = [dict(r) for r in c.fetchall()]
+            """)
+            all_rows = [dict(r) for r in c.fetchall()]
 
+        # 2. If brand_req is specified, evaluate brand catalog & in-stock
+        brand_catalog_products = []
+        brand_active_in_stock = []
+        brand_name_display = brand_req["canonical_name"].title() if brand_req else ""
+        brand_status = None
+        notable_expensive_brand_products = []
+
+        if brand_req:
+            for r in all_rows:
+                if match_product_brand(r, brand_req):
+                    brand_catalog_products.append(r)
+                    if r.get("status") == "active" and r.get("stock_quantity", 0) > 0:
+                        brand_active_in_stock.append(r)
+
+            if not brand_catalog_products:
+                brand_status = "brand_not_found"
+            elif not brand_active_in_stock:
+                brand_status = "brand_out_of_stock"
+            else:
+                if effective_budget is not None and effective_budget > 0 and all(float(p.get("selling_price", 0)) > effective_budget for p in brand_active_in_stock):
+                    brand_status = "brand_over_budget"
+                    notable_expensive_brand_products = brand_active_in_stock[:2]
+                elif target_type and all(classify_product_type(p) != target_type for p in brand_active_in_stock):
+                    brand_status = "brand_attribute_mismatch"
+                else:
+                    brand_status = "brand_attribute_mismatch"
+
+        # 3. Find candidates matching query keywords / brand / target_type
+        clean_q = re.sub(r"[^\w\s]", " ", query.lower())
+        stop_words = {
+            "shop", "cửa", "hàng", "có", "sản", "phẩm", "của", "không", "cho", "mình",
+            "hỏi", "tư", "vấn", "tìm", "kiếm", "mua", "cần", "bán", "giúp", "ơi", "ạ",
+            "nào", "các", "những", "loại", "được", "với", "nhé", "nha", "hãng", "nhà"
+        }
+        query_tokens = [w for w in clean_q.split() if len(w) >= 2 and w not in stop_words]
+
+        scored_candidates = []
+        for r in all_rows:
+            if r.get("status") != "active":
+                continue
+            r_name = (r.get("name") or "").lower()
+            r_brand = (r.get("brand") or "").lower()
+            r_type = (r.get("product_type") or "").lower()
+            r_cat = (r.get("category_name") or "").lower()
+            r_desc = (r.get("description") or "").lower()
+            r_text = f"{r_name} {r_brand} {r_type} {r_cat} {r_desc}"
+
+            score = 0
+            if brand_req and match_product_brand(r, brand_req):
+                score += 10
+            if target_type:
+                p_cls = classify_product_type(r)
+                if p_cls == target_type:
+                    score += 5
+                elif target_type in r_type or target_type in r_text:
+                    score += 3
+            for t in query_tokens:
+                if t in r_name:
+                    score += 3
+                elif t in r_brand:
+                    score += 2
+                elif t in r_text:
+                    score += 1
+
+            if score > 0 or (not brand_req and not target_type and not query_tokens):
+                scored_candidates.append((score, r))
+
+        scored_candidates.sort(key=lambda x: (x[0], x[1].get("stock_quantity", 0)), reverse=True)
+        candidate_rows = [x[1] for x in scored_candidates]
+
+        # 4. Verify eligibility
         verified_rows = []
         alt_rows = []
-        brand_req = parsed_reqs.get("brand")
-        for r in rows:
+        for r in candidate_rows:
+            if r.get("stock_quantity", 0) <= 0:
+                continue
             is_el, reason = check_product_eligibility(r, parsed_reqs, effective_budget)
             if is_el:
                 verified_rows.append(r)
@@ -2162,20 +2315,16 @@ class RAGService:
                     r_copy["ineligible_reason"] = reason
                     r_copy["match_reason"] = reason
                     alt_rows.append(r_copy)
-                elif parsed_reqs.get("target_type") and classify_product_type(r) == parsed_reqs["target_type"]:
+                elif target_type and classify_product_type(r) == target_type:
                     r_copy = dict(r)
                     r_copy["ineligible_reason"] = reason
                     r_copy["match_reason"] = reason
                     alt_rows.append(r_copy)
 
-        is_brand_not_found = bool(brand_req and not verified_rows)
-        brand_name_display = brand_req["canonical_name"].title() if brand_req else ""
-        if is_brand_not_found and not parsed_reqs.get("target_type"):
-            alt_rows = []
-
+        # 5. Assemble Context Lines (consistent with hybrid search)
         context_lines = []
         if verified_rows:
-            context_lines.append("DANH SÁCH SẢN PHẨM KHẢ DỤNG TẠI CỬA HÀNG (TRA CỨU TRỰC TIẾP SQL):")
+            context_lines.append("DANH SÁCH SẢN PHẨM PHÙ HỢP ĐỦ ĐIỀU KIỆN (TRA CỨU TRỰC TIẾP SQL):")
             for idx, vp in enumerate(verified_rows, start=1):
                 price_fmt = f"{int(vp['selling_price']):,} đ"
                 clean_desc = self._sanitize_text(vp.get('description', '') or 'Đang cập nhật')
@@ -2183,31 +2332,90 @@ class RAGService:
                     f"{idx}. [ID {vp['id']}] {vp['name']} (Mã SKU: {vp['sku']})\n"
                     f"   - Nhóm hàng: {vp.get('category_name') or 'Công nghệ'}\n"
                     f"   - Giá bán: {price_fmt}\n"
-                    f"   - Tồn kho: {vp['stock_quantity']} {vp['unit']}\n"
-                    f"   - Mô tả: {clean_desc}"
+                    f"   - Tồn kho khả dụng: {vp['stock_quantity']} {vp['unit']} (CÒN HÀNG TRONG KHO)\n"
+                    f"   - Mô tả / Thông số: {clean_desc}"
                 )
-        elif is_brand_not_found:
-            context_lines.append(
-                f"KHÔNG TÌM THẤY SẢN PHẨM: Không tìm thấy sản phẩm {brand_name_display} đang có hàng tại cửa hàng."
-            )
-        else:
-            context_lines.append("KHÔNG CÓ SẢN PHẨM PHÙ HỢP CÒN TỒN KHO TRONG HỆ THỐNG.")
             if alt_rows:
-                context_lines.append("\nCÁC PHƯƠNG ÁN THAY THẾ GẦN NHẤT:")
+                context_lines.append("\nGỢI Ý THAM KHẢO KHÁC (CHƯA ĐÁP ỨNG ĐỦ TẤT CẢ TIÊU CHÍ):")
+                for alt in alt_rows[:2]:
+                    price_fmt = f"{int(alt['selling_price']):,} đ"
+                    context_lines.append(
+                        f"- [ID {alt['id']}] {alt['name']} (Mã SKU: {alt['sku']}, Giá: {price_fmt}, Tồn kho: {alt['stock_quantity']} {alt['unit']})\n"
+                        f"  Lý do chưa khớp hoàn toàn: {alt.get('ineligible_reason', 'Chưa đáp ứng đủ tiêu chí')}"
+                    )
+        elif brand_req:
+            if brand_status == "brand_over_budget" and effective_budget is not None:
+                exp_list = notable_expensive_brand_products or brand_active_in_stock
+                budget_fmt = f"{int(effective_budget):,} đ"
+                for exp_p in exp_list[:1]:
+                    context_lines.append(
+                        f"XÁC NHẬN SẢN PHẨM THƯƠNG HIỆU (VƯỢT NGÂN SÁCH): Cửa hàng CÓ SẢN PHẨM thuộc thương hiệu {brand_name_display} đang CÒN HÀNG trong kho: "
+                        f"'{exp_p['name']}' (Mã SKU: {exp_p['sku']}), giá bán thực tế là {int(exp_p['selling_price']):,} đ (tồn kho: {exp_p['stock_quantity']} {exp_p.get('unit', 'cái')}). "
+                        f"Mức giá này cao hơn mức ngân sách {budget_fmt} của khách hàng. "
+                        f"Hãy giải thích trung thực rằng cửa hàng có sản phẩm {brand_name_display} nhưng vượt ngân sách yêu cầu, "
+                        f"TUYỆT ĐỐI KHÔNG khẳng định cửa hàng không có sản phẩm {brand_name_display} hay hết hàng. "
+                        f"Khách hàng có thể tham khảo một số phương án thay thế cùng loại từ thương hiệu khác dưới đây."
+                    )
+            elif brand_status == "brand_out_of_stock":
+                context_lines.append(
+                    f"SẢN PHẨM THƯƠNG HIỆU TẠM HẾT HÀNG: Cửa hàng có kinh doanh các sản phẩm thuộc thương hiệu {brand_name_display}, "
+                    f"tuy nhiên hiện tại tất cả các sản phẩm này đều tạm thời HẾT HÀNG trong kho (tồn kho: 0). "
+                    f"Hãy thông báo rõ ràng điều này và gợi ý các sản phẩm thay thế cùng loại nếu có."
+                )
+            elif brand_status == "brand_attribute_mismatch":
+                sample_p = brand_active_in_stock[0] if brand_active_in_stock else brand_catalog_products[0]
+                context_lines.append(
+                    f"KHÁC CHỦNG LOẠI THIẾT BỊ: Cửa hàng có kinh doanh sản phẩm thuộc thương hiệu {brand_name_display} (ví dụ: '{sample_p['name']}'), "
+                    f"nhưng hiện chưa có sản phẩm đúng loại hoặc tính năng '{target_type or 'yêu cầu'}' của thương hiệu này."
+                )
+            else:  # brand_not_found
+                context_lines.append(
+                    f"THƯƠNG HIỆU CHƯA CÓ TRONG DANH MỤC: Cửa hàng hiện chưa kinh doanh các sản phẩm thuộc thương hiệu {brand_name_display}.\n"
+                    f"Hãy thông báo rõ ràng cửa hàng chưa có thương hiệu {brand_name_display} và hỏi khách hàng đang tìm loại thiết bị nào để tư vấn phù hợp."
+                )
+            if alt_rows:
+                context_lines.append("\nCÁC PHƯƠNG ÁN THAY THẾ GẦN NHẤT CÓ THỂ THAM KHẢO (THƯƠNG HIỆU KHÁC):")
                 for alt in alt_rows[:3]:
                     price_fmt = f"{int(alt['selling_price']):,} đ"
-                    context_lines.append(f"- {alt['name']} (SKU: {alt['sku']}, Giá: {price_fmt}) — {alt.get('ineligible_reason', '')}")
+                    context_lines.append(
+                        f"- [ID {alt['id']}] {alt['name']} (Mã SKU: {alt['sku']}, Giá: {price_fmt}, Tồn kho: {alt['stock_quantity']} {alt['unit']})\n"
+                        f"  Lý do tham khảo: {alt.get('ineligible_reason', 'Phương án thay thế')}"
+                    )
+        else:
+            context_lines.append("THÔNG BÁO TỒN KHO THỰC TẾ: Kho hàng hiện tại KHÔNG CÓ sản phẩm nào đáp ứng đầy đủ tất cả tiêu chí và ngân sách của khách hàng.")
+            context_lines.append("CHỈ DẪN BẮT BUỘC CHO TRỢ LÝ: Hãy thông báo trung thực, rõ ràng rằng cửa hàng hiện chưa có sản phẩm đáp ứng đầy đủ yêu cầu này. TUYỆT ĐỐI KHÔNG tự sáng tác, bịa đặt tên sản phẩm, mã SKU, giá bán hoặc số lượng tồn kho.")
+            if alt_rows:
+                context_lines.append("\nCÁC PHƯƠNG ÁN THAY THẾ GẦN NHẤT CÓ THỂ THAM KHẢO:")
+                for alt in alt_rows[:3]:
+                    price_fmt = f"{int(alt['selling_price']):,} đ"
+                    context_lines.append(
+                        f"- [ID {alt['id']}] {alt['name']} (Mã SKU: {alt['sku']}, Giá: {price_fmt}, Tồn kho: {alt['stock_quantity']} {alt['unit']})\n"
+                        f"  Lý do: {alt.get('ineligible_reason', 'Phương án thay thế')}"
+                    )
+
+        final_status = "success" if verified_rows else (brand_status if brand_req else "empty")
+
+        verified_pids = {p["id"] for p in verified_rows}
+        deduped_alternatives = []
+        seen_alt_pids = set()
+        for alt in alt_rows:
+            a_pid = alt["id"]
+            if a_pid not in verified_pids and a_pid not in seen_alt_pids:
+                seen_alt_pids.add(a_pid)
+                deduped_alternatives.append(alt)
 
         return {
             "products": verified_rows,
-            "alternative_products": alt_rows[:3],
+            "alternative_products": deduped_alternatives[:3],
+            "notable_expensive_brand_products": notable_expensive_brand_products,
             "effective_budget": effective_budget,
             "context_text": "\n\n".join(context_lines),
             "out_of_stock_detected": None,
             "out_of_stock_excluded": [],
             "total_verified": len(verified_rows),
-            "status": "brand_not_found" if is_brand_not_found else ("success" if verified_rows else "empty"),
-            "brand_name": brand_name_display if is_brand_not_found else None,
+            "status": final_status,
+            "brand_name": brand_name_display if brand_req else None,
+            "intent": "general",
         }
 
     def reverify_products_in_sqlite(self, pids: List[int]) -> Dict[int, Dict[str, Any]]:
@@ -2223,7 +2431,8 @@ class RAGService:
                 c = conn.cursor()
                 c.execute(f"""
                     SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                           p.selling_price, p.stock_quantity, p.unit, p.status, p.description, p.image_url
+                           p.selling_price, p.stock_quantity, p.unit, p.status, p.description, p.image_url,
+                           p.brand, p.product_type
                     FROM products p
                     LEFT JOIN categories c ON p.category_id = c.id
                     WHERE p.id IN ({placeholders})

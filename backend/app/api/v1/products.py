@@ -32,6 +32,8 @@ def get_public_categories():
 def get_public_products(
     search: Optional[str] = Query(None, description="Tìm theo tên hoặc mã SKU"),
     category_id: Optional[int] = Query(None, description="Lọc theo ID nhóm hàng"),
+    brand: Optional[str] = Query(None, description="Lọc theo thương hiệu"),
+    product_type: Optional[str] = Query(None, description="Lọc theo chủng loại sản phẩm"),
     min_price: Optional[float] = Query(None, description="Giá bán tối thiểu"),
     max_price: Optional[float] = Query(None, description="Giá bán tối đa"),
     in_stock_only: bool = Query(False, description="Chỉ lấy sản phẩm còn hàng"),
@@ -46,7 +48,8 @@ def get_public_products(
         query = """
             SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                    p.selling_price, p.stock_quantity,
-                   p.unit, p.status, p.image_url, p.description
+                   p.unit, p.status, p.image_url, p.description,
+                   p.brand, p.product_type
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.id
             WHERE p.status = 'active'
@@ -54,13 +57,22 @@ def get_public_products(
         params = []
 
         if search:
-            query += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ?)"
+            query += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ? OR p.brand LIKE ?)"
             s_param = f"%{search.strip()}%"
-            params.extend([s_param, s_param, s_param])
+            params.extend([s_param, s_param, s_param, s_param])
 
         if category_id is not None:
             query += " AND p.category_id = ?"
             params.append(category_id)
+
+        if brand:
+            query += " AND (p.brand LIKE ? OR p.name LIKE ?)"
+            b_param = f"%{brand.strip()}%"
+            params.extend([b_param, b_param])
+
+        if product_type:
+            query += " AND p.product_type = ?"
+            params.append(product_type.strip())
 
         if min_price is not None:
             query += " AND p.selling_price >= ?"
@@ -91,7 +103,8 @@ def get_public_product_detail(product_id: int):
         cursor.execute(
             """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                       p.selling_price, p.stock_quantity,
-                      p.unit, p.status, p.image_url, p.description
+                      p.unit, p.status, p.image_url, p.description,
+                      p.brand, p.product_type
                FROM products p
                LEFT JOIN categories c ON p.category_id = c.id
                WHERE p.id = ? AND p.status = 'active'""",
@@ -225,6 +238,8 @@ async def upload_product_image(
 def get_products(
     search: Optional[str] = Query(None, description="Tìm theo tên hoặc mã SKU"),
     category_id: Optional[int] = Query(None, description="Lọc theo ID nhóm hàng"),
+    brand: Optional[str] = Query(None, description="Lọc theo thương hiệu"),
+    product_type: Optional[str] = Query(None, description="Lọc theo chủng loại sản phẩm"),
     status: Optional[str] = Query(None, description="Lọc theo trạng thái: active, inactive"),
     min_price: Optional[float] = Query(None, description="Giá bán tối thiểu"),
     max_price: Optional[float] = Query(None, description="Giá bán tối đa"),
@@ -245,7 +260,8 @@ def get_products(
             query = """
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                        p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                       p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                       p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                       p.created_at, p.updated_at
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
                 WHERE 1=1
@@ -255,7 +271,8 @@ def get_products(
             query = """
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                        p.selling_price, p.stock_quantity, p.min_stock_alert,
-                       p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                       p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                       p.created_at, p.updated_at
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
                 WHERE 1=1
@@ -263,13 +280,22 @@ def get_products(
         params = []
 
         if search:
-            query += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ?)"
+            query += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ? OR p.brand LIKE ?)"
             s_param = f"%{search.strip()}%"
-            params.extend([s_param, s_param, s_param])
+            params.extend([s_param, s_param, s_param, s_param])
 
         if category_id is not None:
             query += " AND p.category_id = ?"
             params.append(category_id)
+
+        if brand:
+            query += " AND (p.brand LIKE ? OR p.name LIKE ?)"
+            b_param = f"%{brand.strip()}%"
+            params.extend([b_param, b_param])
+
+        if product_type:
+            query += " AND p.product_type = ?"
+            params.append(product_type.strip())
 
         if status:
             query += " AND p.status = ?"
@@ -320,7 +346,8 @@ def get_product_detail(
             cursor.execute(
                 """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                           p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                          p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                          p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                          p.created_at, p.updated_at
                    FROM products p
                    LEFT JOIN categories c ON p.category_id = c.id
                    WHERE p.id = ?""",
@@ -331,7 +358,8 @@ def get_product_detail(
             cursor.execute(
                 """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                           p.selling_price, p.stock_quantity, p.min_stock_alert,
-                          p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                          p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                          p.created_at, p.updated_at
                    FROM products p
                    LEFT JOIN categories c ON p.category_id = c.id
                    WHERE p.id = ?""",
@@ -365,13 +393,15 @@ def create_product(product_in: ProductCreate, current_user: dict = Depends(get_c
         cursor.execute(
             """INSERT INTO products (
                 sku, name, category_id, cost_price, selling_price,
-                stock_quantity, min_stock_alert, unit, status, image_url, description
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                stock_quantity, min_stock_alert, unit, status, image_url, description,
+                brand, product_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 product_in.sku, product_in.name, product_in.category_id,
                 product_in.cost_price, product_in.selling_price, product_in.stock_quantity,
                 product_in.min_stock_alert, product_in.unit, product_in.status,
-                product_in.image_url, product_in.description
+                product_in.image_url, product_in.description,
+                product_in.brand, product_in.product_type
             )
         )
         new_id = cursor.lastrowid
@@ -379,7 +409,8 @@ def create_product(product_in: ProductCreate, current_user: dict = Depends(get_c
         cursor.execute(
             """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                       p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                      p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                      p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                      p.created_at, p.updated_at
                FROM products p
                LEFT JOIN categories c ON p.category_id = c.id
                WHERE p.id = ?""",
@@ -429,7 +460,8 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
         cursor.execute(
             """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                       p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                      p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                      p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                      p.created_at, p.updated_at
                FROM products p
                LEFT JOIN categories c ON p.category_id = c.id
                WHERE p.id = ?""",
@@ -440,7 +472,10 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
     # Đồng bộ vector sang ChromaDB chỉ sau khi SQLite transaction commit thành công
     try:
         updated_keys = set(product_in.model_dump(exclude_unset=True).keys())
-        semantic_keys = {"name", "sku", "category_id", "description", "status"}
+        semantic_keys = {"name", "sku", "category_id", "description", "status", "brand", "product_type"}
+        visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status"}
+
+        rag_service.upsert_single_product(product_id)
         visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status"}
 
         rag_service.upsert_single_product(product_id)
