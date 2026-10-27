@@ -1619,9 +1619,16 @@ class InventoryService:
                     (final_amount, customer_id)
                 )
 
-            ref_str = refund_ref.strip() if refund_ref and refund_ref.strip() else "Ủy nhiệm chi / Tiền mặt"
-            clean_reason = reason.strip() if reason and reason.strip() else "Admin xác nhận đã hoàn tiền thành công cho khách hàng"
-            audit_reason = f"Xác nhận hoàn tiền thực tế (Ref={ref_str}): {clean_reason}"
+            clean_ref = refund_ref.strip() if refund_ref and refund_ref.strip() else ""
+            if not clean_ref or clean_ref == ".":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Bắt buộc cung cấp mã giao dịch hoặc số ủy nhiệm chi hoàn tiền thực tế"
+                )
+
+            raw_reason = reason.strip() if reason and reason.strip() else ""
+            clean_reason = raw_reason if (raw_reason and raw_reason != ".") else "Xác nhận chuyển khoản / hoàn tiền thực tế thành công"
+            audit_reason = f"Xác nhận hoàn tiền thực tế (Mã GD/Ref: {clean_ref}): {clean_reason}"
 
             cursor.execute(
                 """INSERT INTO order_audit_logs (

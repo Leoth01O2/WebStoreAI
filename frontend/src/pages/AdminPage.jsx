@@ -369,7 +369,8 @@ export const AdminPage = () => {
                     filteredUsers.map((u) => {
                       const isSelf = u.id === user?.id;
                       const isSuper = u.role === 'superadmin';
-                      const canToggle = isSuperAdmin || (!isSuper && isAdmin && !isSelf);
+                      // Tuyệt đối không cho phép tự khóa tài khoản của chính mình (isSelf)
+                      const canToggle = !isSelf && (isSuperAdmin || (!isSuper && isAdmin));
 
                       return (
                         <tr key={u.id}>

@@ -329,6 +329,12 @@ def update_user_status(user_id: int, status_in: UserStatusUpdate, current_user: 
         if not target_user:
             raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
 
+        if current_user.get("id") == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Không thể tự khóa hoặc thay đổi trạng thái của chính tài khoản đang đăng nhập"
+            )
+
         if current_user.get("role") == "admin" and target_user["role"] in ("admin", "superadmin"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

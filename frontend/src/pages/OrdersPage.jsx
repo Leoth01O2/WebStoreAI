@@ -603,12 +603,20 @@ export const OrdersPage = () => {
   const handleConfirmRefund = async (e) => {
     e.preventDefault();
     if (!refundModal) return;
+    const cleanRef = (refundModal.refundRef || '').trim();
+    if (!cleanRef || cleanRef === '.') {
+      addToast('Bắt buộc nhập mã giao dịch hoặc số tham chiếu hoàn tiền thực tế!', 'warning');
+      return;
+    }
+    const rawReason = (refundModal.reason || '').trim();
+    const cleanReason = (rawReason && rawReason !== '.') ? rawReason : 'Đã hoàn tiền cho khách qua chuyển khoản / tiền mặt';
+
     setSubmittingRefund(true);
     try {
       const updated = await ordersAPI.confirmRefund(
         refundModal.order.id,
-        refundModal.refundRef || undefined,
-        refundModal.reason || 'Đã chuyển tiền hoàn cho khách'
+        cleanRef,
+        cleanReason
       );
       addToast(`Đã xác nhận hoàn tiền thực tế cho đơn #${refundModal.order.order_code}! (Không ảnh hưởng đến kho)`, 'success');
       setRefundModal(null);
@@ -851,7 +859,7 @@ export const OrdersPage = () => {
                       </div>
                     ) : (o.status === 'confirmed' || o.status === 'admin_approved') ? (
                       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.2rem' }}>
-                        (Chưa có Staff nhận)
+                        (Chưa phân công)
                       </div>
                     ) : null}
                   </td>
@@ -936,6 +944,10 @@ export const OrdersPage = () => {
                         <Printer size={13} />
                       </button>
                       {canCancel && o.status === 'completed' && (
+                        o.fulfillment_status !== 'delivered' ||
+                        o.payment_status === 'refund_pending' ||
+                        o.payment_status === 'refunded'
+                      ) && (
                         <button
                           onClick={() => setCancellingOrder(o)}
                           className="btn btn-outline btn-icon btn-sm"
@@ -1082,6 +1094,10 @@ export const OrdersPage = () => {
                 </button>
 
                 {canCancel && o.status === 'completed' && (
+                  o.fulfillment_status !== 'delivered' ||
+                  o.payment_status === 'refund_pending' ||
+                  o.payment_status === 'refunded'
+                ) && (
                   <button
                     onClick={() => setCancellingOrder(o)}
                     className="btn btn-outline btn-sm"
@@ -1165,6 +1181,10 @@ export const OrdersPage = () => {
               )}
 
               {canCancel && viewingOrder?.status === 'completed' && (
+                viewingOrder.fulfillment_status !== 'delivered' ||
+                viewingOrder.payment_status === 'refund_pending' ||
+                viewingOrder.payment_status === 'refunded'
+              ) && (
                 <button
                   onClick={() => setCancellingOrder(viewingOrder)}
                   className="btn btn-danger btn-sm"
@@ -1202,7 +1222,7 @@ export const OrdersPage = () => {
               <div><strong>Khách hàng:</strong> {viewingOrder.customer_name || 'Khách vãng lai'}</div>
               <div><strong>Người tạo:</strong> {viewingOrder.user_name || '—'}</div>
               <div>
-                <strong>Staff phụ trách:</strong>{' '}
+                <strong>Người phụ trách:</strong>{' '}
                 {viewingOrder.assigned_name ? (
                   <span style={{ color: 'var(--amber-primary)', fontWeight: 600 }}>{viewingOrder.assigned_name}</span>
                 ) : (
@@ -1648,11 +1668,14 @@ export const OrdersPage = () => {
           </div>
           {refundModal?.mode === 'confirm' && (
             <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-              <label className="form-label">Mã giao dịch hoàn tiền (Ủy nhiệm chi / Bill chuyển khoản)</label>
+              <label className="form-label" style={{ fontWeight: 600 }}>
+                Mã giao dịch hoàn tiền (Ủy nhiệm chi / Bill chuyển khoản) <span style={{ color: 'var(--red-light)' }}>*</span>
+              </label>
               <input
                 type="text"
                 className="form-control font-mono"
-                placeholder="VD: REFUND-TX-88392..."
+                required
+                placeholder="VD: REFUND-TX-88392, FT26102799..."
                 value={refundModal?.refundRef || ''}
                 onChange={(e) => setRefundModal({ ...refundModal, refundRef: e.target.value })}
               />
