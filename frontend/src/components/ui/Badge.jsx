@@ -65,9 +65,13 @@ export const PAYMENT_STATUS_CONFIG = {
   completed: { label: 'Đã thanh toán', variant: 'green' },
 };
 
-export const PaymentStatusBadge = ({ status }) => {
-  const config = PAYMENT_STATUS_CONFIG[status] || {
-    label: status || 'Chưa xác định',
+export const PaymentStatusBadge = ({ status, orderStatus }) => {
+  let effectiveStatus = status;
+  if (orderStatus === 'completed' && (!status || status === 'unverified_legacy' || status === 'unpaid' || status === 'pending')) {
+    effectiveStatus = 'paid';
+  }
+  const config = PAYMENT_STATUS_CONFIG[effectiveStatus] || {
+    label: effectiveStatus || 'Chưa xác định',
     variant: 'muted',
   };
   return <Badge variant={config.variant}>{config.label}</Badge>;
@@ -83,9 +87,13 @@ export const FULFILLMENT_STATUS_CONFIG = {
   legacy_unknown: { label: 'Lịch sử chưa rõ', variant: 'muted' },
 };
 
-export const FulfillmentStatusBadge = ({ status }) => {
-  const config = FULFILLMENT_STATUS_CONFIG[status] || {
-    label: status || 'Chưa xác định',
+export const FulfillmentStatusBadge = ({ status, orderStatus }) => {
+  let effectiveStatus = status;
+  if (orderStatus === 'completed' && (!status || status === 'legacy_unknown' || status === 'unfulfilled')) {
+    effectiveStatus = 'delivered';
+  }
+  const config = FULFILLMENT_STATUS_CONFIG[effectiveStatus] || {
+    label: effectiveStatus || 'Chưa xác định',
     variant: 'muted',
   };
   return <Badge variant={config.variant}>{config.label}</Badge>;

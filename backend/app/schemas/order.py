@@ -173,6 +173,7 @@ class OrderAuditLogResponse(BaseModel):
     resulting_status: str
     performed_by: Optional[int] = None
     performer_name: Optional[str] = None
+    performer_role: Optional[str] = None
     reason: str
     created_at: Optional[str] = None
 

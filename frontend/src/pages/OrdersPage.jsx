@@ -20,7 +20,7 @@ import {
 import { ordersAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Badge, OrderStatusBadge, PaymentStatusBadge, FulfillmentStatusBadge } from '../components/ui/Badge';
+import { Badge, OrderStatusBadge, PaymentStatusBadge, FulfillmentStatusBadge, RoleBadge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { ReceiptModal } from '../components/ui/ReceiptModal';
 
@@ -238,9 +238,6 @@ export const OrdersPage = () => {
   const [claimingOrderId, setClaimingOrderId] = useState(null);
   const [reassignModal, setReassignModal] = useState(null);
   const [submittingReassign, setSubmittingReassign] = useState(false);
-
-  const [transferModal, setTransferModal] = useState(null);
-  const [submittingTransfer, setSubmittingTransfer] = useState(false);
 
   const [verifyPaymentModal, setVerifyPaymentModal] = useState(null);
   const [submittingVerifyPayment, setSubmittingVerifyPayment] = useState(false);
@@ -508,30 +505,6 @@ export const OrdersPage = () => {
     }
   };
 
-  const handleNotifyTransfer = async (e) => {
-    e.preventDefault();
-    if (!transferModal) return;
-    setSubmittingTransfer(true);
-    try {
-      const updated = await ordersAPI.notifyTransfer(transferModal.order.id, {
-        transfer_reference: transferModal.transferRef || undefined,
-        bank_name: transferModal.bankName || undefined,
-        note: transferModal.note || undefined,
-      });
-      addToast(`Đã gửi thông báo chuyển khoản đơn #${transferModal.order.order_code}. Đang chờ Admin xác minh!`, 'success');
-      setTransferModal(null);
-      window.dispatchEvent(new CustomEvent('workflow-updated'));
-      loadOrders();
-      if (viewingOrder?.id === transferModal.order.id) {
-        setViewingOrder(updated);
-      }
-    } catch (err) {
-      addToast(err.message || 'Lỗi khi thông báo chuyển khoản', 'error');
-    } finally {
-      setSubmittingTransfer(false);
-    }
-  };
-
   const handleVerifyPayment = async (e) => {
     e.preventDefault();
     if (!verifyPaymentModal) return;
@@ -665,38 +638,31 @@ export const OrdersPage = () => {
   const getTabs = () => {
     let pendingCount = 0;
     let approvedCount = 0;
-    let processingCount = 0;
 
     if (isCustomer) {
       pendingCount = workflowCounts?.my_pending_count || 0;
-      processingCount = workflowCounts?.my_processing_count || 0;
       return [
         { id: '', label: 'Tất cả' },
         { id: 'pending', label: 'Chờ duyệt', count: pendingCount, color: 'var(--amber-primary)' },
-        { id: 'processing', label: 'Đang xử lý', count: processingCount, color: 'var(--blue-light)' },
-        { id: 'completed', label: 'Hoàn thành' },
-        { id: 'cancelled', label: 'Đã hủy' },
+        { id: 'completed', label: 'Đã hoàn tất' },
+        { id: 'cancelled,rejected', label: 'Đã hủy' },
       ];
     } else if (user?.role === 'staff') {
       approvedCount = workflowCounts?.approved_count || 0;
-      processingCount = workflowCounts?.processing_count || 0;
       return [
         { id: '', label: 'Tất cả hóa đơn' },
-        { id: 'confirmed,admin_approved', label: 'Đã duyệt (Chờ xuất bill/thu tiền)', count: approvedCount, color: 'var(--green-terminal)' },
-        { id: 'processing', label: 'Đang xử lý', count: processingCount, color: 'var(--blue-light)' },
+        { id: 'confirmed,admin_approved,processing', label: 'Đã duyệt (Chờ xuất bill/thu tiền)', count: approvedCount, color: 'var(--green-terminal)' },
         { id: 'completed', label: 'Đã hoàn tất' },
       ];
     } else {
       // superadmin (Chủ shop)
       pendingCount = workflowCounts?.pending_count || 0;
       approvedCount = workflowCounts?.approved_count || 0;
-      processingCount = workflowCounts?.processing_count || 0;
       return [
-        { id: '', label: 'Tất cả' },
-        { id: 'pending', label: 'Chờ Chủ shop duyệt', count: pendingCount, color: 'var(--amber-primary)' },
-        { id: 'confirmed,admin_approved', label: 'Đã duyệt (Chuyển Thu ngân)', count: approvedCount, color: 'var(--green-terminal)' },
-        { id: 'processing', label: 'Đang xử lý', count: processingCount, color: 'var(--blue-light)' },
-        { id: 'completed', label: 'Hoàn thành' },
+        { id: '', label: 'Tất cả hóa đơn' },
+        { id: 'pending', label: 'Chờ duyệt', count: pendingCount, color: 'var(--amber-primary)' },
+        { id: 'confirmed,admin_approved,processing', label: 'Đã duyệt (Chờ thu tiền)', count: approvedCount, color: 'var(--green-terminal)' },
+        { id: 'completed', label: 'Đã hoàn tất' },
         { id: 'cancelled,rejected', label: 'Đã hủy / Từ chối' },
       ];
     }
@@ -896,12 +862,12 @@ export const OrdersPage = () => {
                       </span>
                       {o.payment_status && (
                         <div>
-                          <PaymentStatusBadge status={o.payment_status} />
+                          <PaymentStatusBadge status={o.payment_status} orderStatus={o.status} />
                         </div>
                       )}
                       {o.fulfillment_status && (
                         <div>
-                          <FulfillmentStatusBadge status={o.fulfillment_status} />
+                          <FulfillmentStatusBadge status={o.fulfillment_status} orderStatus={o.status} />
                         </div>
                       )}
                     </div>
@@ -936,37 +902,13 @@ export const OrdersPage = () => {
                         </>
                       )}
 
-                      {/* Staff/SuperAdmin Thu tiền & Hoàn tất hóa đơn confirmed/admin_approved */}
-                      {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved') && (
-                        <>
-                          <button
-                            onClick={() => handleCompleteOrder(o)}
-                            className="btn btn-outline btn-icon btn-sm"
-                            style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
-                            title="Thu tiền / Hoàn tất hóa đơn"
-                          >
-                            <CheckCircle2 size={13} />
-                          </button>
-                          {!o.assigned_to && (
-                            <button
-                              onClick={() => handleClaimOrder(o)}
-                              disabled={claimingOrderId === o.id}
-                              className="btn btn-outline btn-icon btn-sm"
-                              style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)' }}
-                              title="Nhận đơn (Atomic Claim Lock)"
-                            >
-                              <PackageCheck size={13} />
-                            </button>
-                          )}
-                        </>
-                      )}
-
-                      {(user?.role === 'staff' || isSuperAdmin) && o.status === 'processing' && (
+                      {/* Staff/SuperAdmin Thu tiền & Hoàn tất hóa đơn (1-click) */}
+                      {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved' || o.status === 'processing') && (
                         <button
                           onClick={() => handleCompleteOrder(o)}
                           className="btn btn-outline btn-icon btn-sm"
                           style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
-                          title="Hoàn tất đơn hàng"
+                          title="Thu tiền / Hoàn tất hóa đơn"
                         >
                           <CheckCircle2 size={13} />
                         </button>
@@ -1074,8 +1016,8 @@ export const OrdersPage = () => {
                   <span className="badge badge-muted">
                     {o.payment_method === 'cash' ? 'Tiền mặt' : o.payment_method === 'transfer' ? 'C.Khoản' : 'Thẻ'}
                   </span>
-                  {o.payment_status && <PaymentStatusBadge status={o.payment_status} />}
-                  {o.fulfillment_status && <FulfillmentStatusBadge status={o.fulfillment_status} />}
+                  {o.payment_status && <PaymentStatusBadge status={o.payment_status} orderStatus={o.status} />}
+                  {o.fulfillment_status && <FulfillmentStatusBadge status={o.fulfillment_status} orderStatus={o.status} />}
                 </div>
               </div>
 
@@ -1095,7 +1037,7 @@ export const OrdersPage = () => {
                       className="btn btn-outline btn-sm"
                       style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
                     >
-                      <Check size={14} /> Duyệt đơn (Thu ngân)
+                      <Check size={14} /> {o.payment_method === 'transfer' || o.payment_status === 'pending_verification' ? 'Đối soát & Duyệt đơn' : 'Duyệt đơn'}
                     </button>
                     <button
                       onClick={() => setRejectingOrder(o)}
@@ -1107,35 +1049,14 @@ export const OrdersPage = () => {
                   </>
                 )}
 
-                {/* Staff/SuperAdmin Thu tiền & Hoàn tất đơn confirmed/admin_approved */}
-                {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved') && (
+                {/* Staff/SuperAdmin Thu tiền & Hoàn tất đơn (1-click) */}
+                {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved' || o.status === 'processing') && (
                   <button
                     onClick={() => handleCompleteOrder(o)}
                     className="btn btn-outline btn-sm"
                     style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)', width: '100%', flex: '1 1 100%' }}
                   >
                     <CheckCircle2 size={15} /> Thu tiền & Hoàn tất hóa đơn
-                  </button>
-                )}
-
-                {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved') && !o.assigned_to && (
-                  <button
-                    onClick={() => handleClaimOrder(o)}
-                    disabled={claimingOrderId === o.id}
-                    className="btn btn-outline btn-sm"
-                    style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)', width: '100%', flex: '1 1 100%' }}
-                  >
-                    <PackageCheck size={15} /> Nhận đơn (Claim Lock)
-                  </button>
-                )}
-
-                {(user?.role === 'staff' || isSuperAdmin) && o.status === 'processing' && (
-                  <button
-                    onClick={() => handleCompleteOrder(o)}
-                    className="btn btn-outline btn-sm"
-                    style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)', width: '100%', flex: '1 1 100%' }}
-                  >
-                    <CheckCircle2 size={15} /> Hoàn tất đơn
                   </button>
                 )}
 
@@ -1192,74 +1113,80 @@ export const OrdersPage = () => {
         title={`CHI TIẾT HÓA ĐƠN #${viewingOrder?.order_code}`}
         maxWidth="600px"
         footer={
-          <>
-            {/* Quick Actions in Detail Modal */}
-            {(isAdmin || isSuperAdmin) && viewingOrder?.status === 'pending' && (
-              <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '0.5rem' }}>
+            {/* Trái: Lịch sử Audit Log & In ấn */}
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => handleOpenAuditLogs(viewingOrder)}
+                className="btn btn-outline btn-sm"
+              >
+                <History size={14} /> Xem Lịch Sử / Audit Log
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceiptOrder(viewingOrder)}
+                className="btn btn-outline btn-sm"
+              >
+                <Printer size={14} /> In Hóa Đơn
+              </button>
+            </div>
+
+            {/* Phải: Các thao tác chính theo phân quyền */}
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* SuperAdmin Duyệt / Từ chối đơn pending */}
+              {(isAdmin || isSuperAdmin) && viewingOrder?.status === 'pending' && (
+                <>
+                  <button
+                    onClick={() => handleApproveOrder(viewingOrder)}
+                    className="btn btn-primary btn-sm"
+                    style={{ background: 'var(--green-terminal)', color: '#000' }}
+                  >
+                    <Check size={14} /> {viewingOrder.payment_method === 'transfer' || viewingOrder.payment_status === 'pending_verification' ? 'Đối Soát & Duyệt Đơn' : 'Duyệt Đơn'}
+                  </button>
+                  <button
+                    onClick={() => setRejectingOrder(viewingOrder)}
+                    className="btn btn-danger btn-sm"
+                  >
+                    <X size={14} /> Từ Chối Đơn
+                  </button>
+                </>
+              )}
+
+              {/* Staff / SuperAdmin Thu tiền & Hoàn tất hóa đơn (1-click) */}
+              {(user?.role === 'staff' || isAdmin || isSuperAdmin) && (viewingOrder?.status === 'confirmed' || viewingOrder?.status === 'admin_approved' || viewingOrder?.status === 'processing') && (
                 <button
-                  onClick={() => handleApproveOrder(viewingOrder)}
-                  className="btn btn-primary"
+                  onClick={() => handleCompleteOrder(viewingOrder)}
+                  className="btn btn-primary btn-sm"
                   style={{ background: 'var(--green-terminal)', color: '#000' }}
                 >
-                  <Check size={15} /> Duyệt Đơn
+                  <CheckCircle2 size={14} /> Thu Tiền / Hoàn Tất Hóa Đơn
                 </button>
+              )}
+
+              {canCancel && viewingOrder?.status === 'completed' && (
                 <button
-                  onClick={() => setRejectingOrder(viewingOrder)}
-                  className="btn btn-danger"
+                  onClick={() => setCancellingOrder(viewingOrder)}
+                  className="btn btn-danger btn-sm"
                 >
-                  <X size={15} /> Từ Chối Đơn
+                  <XCircle size={14} /> Hủy Đơn & Hoàn Tồn Kho
                 </button>
-              </>
-            )}
+              )}
 
-            {(user?.role === 'staff' || isAdmin || isSuperAdmin) && viewingOrder?.status === 'admin_approved' && (
-              <button
-                onClick={() => handleProcessOrder(viewingOrder)}
-                className="btn btn-primary"
-                style={{ background: 'var(--amber-primary)', color: '#000' }}
-              >
-                <PackageCheck size={15} /> Nhận Xử Lý Đơn
-              </button>
-            )}
+              {isCustomer && viewingOrder?.status === 'pending' && (
+                <button
+                  onClick={() => setCustomerCancellingOrder(viewingOrder)}
+                  className="btn btn-danger btn-sm"
+                >
+                  <XCircle size={14} /> Hủy Đơn Hàng
+                </button>
+              )}
 
-            {(user?.role === 'staff' || isAdmin || isSuperAdmin) && viewingOrder?.status === 'processing' && (
-              <button
-                onClick={() => handleCompleteOrder(viewingOrder)}
-                className="btn btn-primary"
-                style={{ background: 'var(--green-terminal)', color: '#000' }}
-              >
-                <CheckCircle2 size={15} /> Hoàn Tất Đơn Hàng
+              <button onClick={() => setViewingOrder(null)} className="btn btn-outline btn-sm">
+                Đóng
               </button>
-            )}
-
-            <button
-              onClick={() => {
-                setReceiptOrder(viewingOrder);
-              }}
-              className="btn btn-outline"
-            >
-              <Printer size={15} /> In Hóa Đơn
-            </button>
-            {canCancel && viewingOrder?.status === 'completed' && (
-              <button
-                onClick={() => setCancellingOrder(viewingOrder)}
-                className="btn btn-danger"
-              >
-                <XCircle size={15} /> Hủy Đơn & Hoàn Tồn Kho
-              </button>
-            )}
-            {isCustomer && viewingOrder?.status === 'pending' && (
-              <button
-                onClick={() => setCustomerCancellingOrder(viewingOrder)}
-                className="btn btn-danger"
-              >
-                <XCircle size={15} /> Hủy Đơn Hàng
-              </button>
-            )}
-            <button onClick={() => setViewingOrder(null)} className="btn btn-primary">
-              Đóng
-            </button>
-          </>
+            </div>
+          </div>
         }
       >
         {viewingOrder && (
@@ -1285,11 +1212,11 @@ export const OrdersPage = () => {
               <div><strong>Hình thức:</strong> {viewingOrder.payment_method.toUpperCase()}</div>
               <div>
                 <strong>Thanh toán:</strong>{' '}
-                <PaymentStatusBadge status={viewingOrder.payment_status} />
+                <PaymentStatusBadge status={viewingOrder.payment_status} orderStatus={viewingOrder.status} />
               </div>
               <div>
                 <strong>Giao vận:</strong>{' '}
-                <FulfillmentStatusBadge status={viewingOrder.fulfillment_status} />
+                <FulfillmentStatusBadge status={viewingOrder.fulfillment_status} orderStatus={viewingOrder.status} />
               </div>
               <div>
                 <strong>Trạng thái đơn:</strong>{' '}
@@ -1351,223 +1278,41 @@ export const OrdersPage = () => {
               </div>
             </div>
 
-            {/* PHASE R3 WORKFLOW PANELS */}
-            <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {/* 1. Xử lý & Phân công */}
-              <div style={{ padding: '0.75rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <PackageCheck size={14} style={{ color: 'var(--amber-primary)' }} />
-                  <span>PHÂN CÔNG & XỬ LÝ (CLAIM & REASSIGN)</span>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                  {viewingOrder.status === 'admin_approved' && !viewingOrder.assigned_to && (user?.role === 'staff' || isAdmin || isSuperAdmin) && (
-                    <button
-                      type="button"
-                      onClick={() => handleClaimOrder(viewingOrder)}
-                      disabled={claimingOrderId === viewingOrder.id}
-                      className="btn btn-primary btn-sm"
-                      style={{ background: 'var(--amber-primary)', color: '#000' }}
-                    >
-                      <PackageCheck size={14} /> Nhận đơn xử lý (Claim Lock)
-                    </button>
-                  )}
-                  {viewingOrder.assigned_to && (isAdmin || isSuperAdmin) && (
-                    <button
-                      type="button"
-                      onClick={() => setReassignModal({ order: viewingOrder, newStaffId: '', reason: '' })}
-                      className="btn btn-outline btn-sm"
-                    >
-                      <UserCheck size={14} /> Điều chuyển Staff khác
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAuditLogs(viewingOrder)}
-                    className="btn btn-outline btn-sm"
-                  >
-                    <History size={14} /> Xem Lịch Sử / Audit Log
-                  </button>
-                </div>
-              </div>
-
-              {/* 2. Thanh toán & Đối soát */}
-              <div style={{ padding: '0.75rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <CreditCard size={14} style={{ color: 'var(--blue-light)' }} />
-                  <span>XÁC MINH THANH TOÁN (PAYMENT VERIFICATION)</span>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                  {viewingOrder.payment_method === 'transfer' && viewingOrder.payment_status === 'unpaid' && (
-                    <button
-                      type="button"
-                      onClick={() => setTransferModal({ order: viewingOrder, transferRef: '', bankName: '', note: '' })}
-                      className="btn btn-outline btn-sm"
-                      style={{ borderColor: 'var(--blue-light)', color: 'var(--blue-light)' }}
-                    >
-                      <CreditCard size={14} /> Thông báo đã chuyển khoản
-                    </button>
-                  )}
-                  {viewingOrder.payment_status === 'pending_verification' && (isAdmin || isSuperAdmin) && (
-                    <button
-                      type="button"
-                      onClick={() => setVerifyPaymentModal({ order: viewingOrder, verifiedRef: '', note: '' })}
-                      className="btn btn-primary btn-sm"
-                      style={{ background: 'var(--green-terminal)', color: '#000' }}
-                    >
-                      <Check size={14} /> Đối soát & Xác nhận Paid
-                    </button>
-                  )}
-                  {viewingOrder.payment_method === 'cash' && viewingOrder.payment_status === 'unpaid' && (user?.role === 'staff' || isAdmin || isSuperAdmin) && (
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmCodPayment(viewingOrder)}
-                      className="btn btn-outline btn-sm"
-                      style={{ borderColor: 'var(--green-terminal)', color: 'var(--green-terminal)' }}
-                    >
-                      <DollarSign size={14} /> Xác nhận đã thu tiền COD
-                    </button>
-                  )}
-                  {/* Hoàn tiền */}
-                  {viewingOrder.payment_status === 'paid' && (
-                    <button
-                      type="button"
-                      onClick={() => setRefundModal({ order: viewingOrder, mode: 'request', refundRef: '', reason: '' })}
-                      className="btn btn-outline btn-sm"
-                      style={{ borderColor: 'var(--amber-primary)', color: 'var(--amber-primary)' }}
-                    >
-                      <RotateCcw size={14} /> Yêu cầu hoàn tiền (Refund)
-                    </button>
-                  )}
-                  {viewingOrder.payment_status === 'refund_pending' && (isAdmin || isSuperAdmin) && (
-                    <button
-                      type="button"
-                      onClick={() => setRefundModal({ order: viewingOrder, mode: 'confirm', refundRef: '', reason: '' })}
-                      className="btn btn-danger btn-sm"
-                    >
-                      <Check size={14} /> Xác nhận đã hoàn tiền thực tế
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* 3. Giao vận & Trả hàng */}
-              {(user?.role === 'staff' || isAdmin || isSuperAdmin) && (
-                <div style={{ padding: '0.75rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}>
+            {/* THAO TÁC HOÀN TIỀN (CHỈ HIỆN KHI CÓ QUYỀN VÀ ĐỦ ĐIỀU KIỆN) */}
+            {(() => {
+              const canCustomerRefund = isCustomer && viewingOrder.status === 'completed' && viewingOrder.payment_status === 'paid';
+              const canSuperAdminConfirmRefund = isSuperAdmin && viewingOrder.payment_status === 'refund_pending';
+              if (!canCustomerRefund && !canSuperAdminConfirmRefund) return null;
+              return (
+                <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}>
                   <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <Truck size={14} style={{ color: 'var(--green-terminal)' }} />
-                    <span>GIAO VẬN & HOÀN HÀNG (FULFILLMENT & RETURN)</span>
+                    <CreditCard size={14} style={{ color: 'var(--amber-primary)' }} />
+                    <span>HOÀN TIỀN & ĐỐI SOÁT (REFUND)</span>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                    {(viewingOrder.fulfillment_status === 'unfulfilled' || !viewingOrder.fulfillment_status) && viewingOrder.status !== 'cancelled' && viewingOrder.status !== 'rejected' && (
+                    {canCustomerRefund && (
                       <button
                         type="button"
-                        onClick={() => handleUpdateFulfillment(viewingOrder, 'packing')}
+                        onClick={() => setRefundModal({ order: viewingOrder, mode: 'request', refundRef: '', reason: '' })}
                         className="btn btn-outline btn-sm"
+                        style={{ borderColor: 'var(--amber-primary)', color: 'var(--amber-primary)' }}
                       >
-                        <PackageCheck size={14} /> Bắt đầu đóng gói (Packing)
+                        <RotateCcw size={14} /> Yêu cầu hoàn tiền (Refund)
                       </button>
                     )}
-                    {viewingOrder.fulfillment_status === 'packing' && (
+                    {canSuperAdminConfirmRefund && (
                       <button
                         type="button"
-                        onClick={() => handleUpdateFulfillment(viewingOrder, 'shipping')}
-                        className="btn btn-outline btn-sm"
-                        style={{ borderColor: 'var(--blue-light)', color: 'var(--blue-light)' }}
-                      >
-                        <Truck size={14} /> Bắt đầu vận chuyển (Shipping)
-                      </button>
-                    )}
-                    {viewingOrder.fulfillment_status === 'shipping' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateFulfillment(viewingOrder, 'delivered')}
-                          className="btn btn-primary btn-sm"
-                          style={{ background: 'var(--green-terminal)', color: '#000' }}
-                        >
-                          <CheckCircle2 size={14} /> Giao thành công (Delivered)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateFulfillment(viewingOrder, 'delivery_failed', 'Giao hàng không thành công')}
-                          className="btn btn-outline btn-sm"
-                          style={{ borderColor: 'var(--red-light)', color: 'var(--red-light)' }}
-                        >
-                          <XCircle size={14} /> Giao thất bại (Chưa nhập kho)
-                        </button>
-                      </>
-                    )}
-                    {(viewingOrder.fulfillment_status === 'delivery_failed' || viewingOrder.status === 'cancelled') && viewingOrder.fulfillment_status !== 'returned_to_inventory' && (
-                      <button
-                        type="button"
-                        onClick={() => setReturnModal({ order: viewingOrder, reason: 'Hàng hoàn về kho an toàn', note: '' })}
+                        onClick={() => setRefundModal({ order: viewingOrder, mode: 'confirm', refundRef: '', reason: '' })}
                         className="btn btn-danger btn-sm"
                       >
-                        <RotateCcw size={14} /> Xác nhận hàng đã về kho (Nhập lại tồn)
+                        <Check size={14} /> Xác nhận đã hoàn tiền (Approve Refund)
                       </button>
                     )}
                   </div>
                 </div>
-              )}
-            </div>
-
-            {isSuperAdmin && (
-              <div
-                style={{
-                  marginTop: '1.25rem',
-                  padding: '0.85rem 1rem',
-                  background: 'rgba(245, 158, 11, 0.05)',
-                  border: '1px dashed var(--amber-primary)',
-                  borderRadius: 'var(--radius-xs)',
-                }}
-              >
-                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--amber-primary)', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span>⚡ THAO TÁC NGOẠI LỆ (CHỦ CỬA HÀNG - SUPERADMIN)</span>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {viewingOrder.status !== 'cancelled' && viewingOrder.status !== 'rejected' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setForceActionModal({ order: viewingOrder, action: 'force_cancel' });
-                        setForceActionReason('');
-                      }}
-                      className="btn btn-outline btn-sm"
-                      style={{ color: 'var(--red-light)', borderColor: 'var(--red-light)' }}
-                    >
-                      Hủy Khẩn Cấp (Force Cancel)
-                    </button>
-                  )}
-                  {viewingOrder.status === 'rejected' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setForceActionModal({ order: viewingOrder, action: 'reopen_rejected' });
-                        setForceActionReason('Mở lại đơn bị từ chối');
-                      }}
-                      className="btn btn-outline btn-sm"
-                      style={{ color: 'var(--green-light)', borderColor: 'var(--green-terminal)' }}
-                    >
-                      Mở Lại Đơn (Reopen)
-                    </button>
-                  )}
-                  {viewingOrder.status !== 'cancelled' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setForceActionModal({ order: viewingOrder, action: 'override_status' });
-                        setForceActionReason('');
-                        setForceActionTargetStatus('processing');
-                      }}
-                      className="btn btn-outline btn-sm"
-                      style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)' }}
-                    >
-                      Chuyển Trạng Thái (Override)
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
       </Modal>
@@ -1803,57 +1548,7 @@ export const OrdersPage = () => {
         </form>
       </Modal>
 
-      {/* PHASE R3: NOTIFY TRANSFER MODAL */}
-      <Modal
-        isOpen={!!transferModal}
-        onClose={() => setTransferModal(null)}
-        title={`THÔNG BÁO CHUYỂN KHOẢN #${transferModal?.order?.order_code}`}
-        maxWidth="480px"
-      >
-        <form onSubmit={handleNotifyTransfer}>
-          <div style={{ padding: '0.6rem', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid var(--blue-light)', borderRadius: 'var(--radius-xs)', marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--blue-light)' }}>
-            ℹ️ Sau khi thông báo, đơn hàng chuyển sang trạng thái <strong>Chờ Xác Minh (pending_verification)</strong>. Admin sẽ kiểm tra đối soát trước khi duyệt hoàn tất.
-          </div>
-          <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-            <label className="form-label" style={{ fontWeight: 600 }}>Mã giao dịch / Mã chuyển khoản</label>
-            <input
-              type="text"
-              className="form-control font-mono"
-              placeholder="VD: FT2409188828, MB98234..."
-              value={transferModal?.transferRef || ''}
-              onChange={(e) => setTransferModal({ ...transferModal, transferRef: e.target.value })}
-            />
-          </div>
-          <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-            <label className="form-label">Tên ngân hàng chuyển</label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder="VD: Vietcombank, Techcombank, MB..."
-              value={transferModal?.bankName || ''}
-              onChange={(e) => setTransferModal({ ...transferModal, bankName: e.target.value })}
-            />
-          </div>
-          <div className="form-group" style={{ marginBottom: '1rem' }}>
-            <label className="form-label">Ghi chú thêm</label>
-            <textarea
-              className="form-control"
-              rows={2}
-              placeholder="Ghi chú thêm cho người đối soát..."
-              value={transferModal?.note || ''}
-              onChange={(e) => setTransferModal({ ...transferModal, note: e.target.value })}
-            />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
-            <button type="button" onClick={() => setTransferModal(null)} className="btn btn-outline">
-              Hủy
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={submittingTransfer}>
-              {submittingTransfer ? 'Đang gửi...' : 'Gửi Thông Báo'}
-            </button>
-          </div>
-        </form>
-      </Modal>
+
 
       {/* PHASE R3: VERIFY PAYMENT MODAL */}
       <Modal
@@ -2028,10 +1723,10 @@ export const OrdersPage = () => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <Badge variant="blue">{log.action?.toUpperCase()}</Badge>
                         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                          {log.user_name || `User #${log.user_id || 'System'}`}
+                          {log.performer_name || log.user_name || (log.performed_by ? `User #${log.performed_by}` : 'Hệ thống')}
                         </span>
-                        {log.user_role && (
-                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>({log.user_role})</span>
+                        {(log.performer_role || log.user_role) && (
+                          <RoleBadge role={log.performer_role || log.user_role} short />
                         )}
                       </div>
                       <span className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
@@ -2039,27 +1734,15 @@ export const OrdersPage = () => {
                       </span>
                     </div>
 
-                    {(log.old_status || log.new_status) && (
+                    {(log.previous_status || log.resulting_status || log.old_status || log.new_status) && (
                       <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                        Trạng thái đơn: <span className="font-mono">{log.old_status || '—'}</span> ➔ <strong className="font-mono" style={{ color: 'var(--amber-primary)' }}>{log.new_status}</strong>
+                        Trạng thái: <span className="font-mono">{log.previous_status || log.old_status || '—'}</span> ➔ <strong className="font-mono" style={{ color: 'var(--amber-primary)' }}>{log.resulting_status || log.new_status}</strong>
                       </div>
                     )}
 
-                    {(log.old_payment_status || log.new_payment_status) && (
-                      <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                        Thanh toán: <span className="font-mono">{log.old_payment_status || '—'}</span> ➔ <strong className="font-mono" style={{ color: 'var(--green-terminal)' }}>{log.new_payment_status}</strong>
-                      </div>
-                    )}
-
-                    {(log.old_fulfillment_status || log.new_fulfillment_status) && (
-                      <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                        Giao vận: <span className="font-mono">{log.old_fulfillment_status || '—'}</span> ➔ <strong className="font-mono" style={{ color: 'var(--blue-light)' }}>{log.new_fulfillment_status}</strong>
-                      </div>
-                    )}
-
-                    {log.note && (
+                    {(log.reason || log.note) && (
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-primary)', marginTop: '0.35rem', fontStyle: 'italic', background: 'var(--bg-surface)', padding: '0.35rem 0.5rem', borderRadius: '4px' }}>
-                        "{log.note}"
+                        "{log.reason || log.note}"
                       </div>
                     )}
                   </div>
