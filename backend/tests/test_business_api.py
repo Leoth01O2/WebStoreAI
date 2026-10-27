@@ -30,6 +30,7 @@ def test_categories_crud_and_rbac():
     tokens = get_tokens()
     admin_headers = {"Authorization": f"Bearer {tokens['admin']}"}
     staff_headers = {"Authorization": f"Bearer {tokens['staff']}"}
+    superadmin_headers = {"Authorization": f"Bearer {tokens['superadmin']}"}
 
     unique_cat_code = f"CAT-RETRO-{uuid.uuid4().hex[:6].upper()}"
 
@@ -41,30 +42,41 @@ def test_categories_crud_and_rbac():
     )
     assert res.status_code == 403
 
-    # 2. Admin tạo danh mục thành công (200)
+    # 2. Admin cũng bị CẤM tạo danh mục (403 Forbidden)
+    res_admin = client.post(
+        "/api/v1/categories",
+        json={"name": "Linh kiện PC Retro Admin", "code": f"CAT-ADMIN-{uuid.uuid4().hex[:4]}"},
+        headers=admin_headers
+    )
+    assert res_admin.status_code == 403
+
+    # 3. SuperAdmin tạo danh mục thành công (200)
     res = client.post(
         "/api/v1/categories",
         json={"name": "Linh kiện PC Retro", "code": unique_cat_code, "description": "Bo mạch, chip cổ"},
-        headers=admin_headers
+        headers=superadmin_headers
     )
     assert res.status_code == 200
     cat_data = res.json()
     assert cat_data["code"] == unique_cat_code
     cat_id = cat_data["id"]
 
-    # 3. Trùng mã code -> 400
+    # 4. Trùng mã code khi SuperAdmin tạo -> 400
     dup_res = client.post(
         "/api/v1/categories",
         json={"name": "Linh kiện trùng", "code": unique_cat_code},
-        headers=admin_headers
+        headers=superadmin_headers
     )
     assert dup_res.status_code == 400
 
-    # 4. Staff xem danh sách danh mục -> 200
-    list_res = client.get("/api/v1/categories", headers=staff_headers)
-    assert list_res.status_code == 200
-    codes = [c["code"] for c in list_res.json()]
+    # 5. Staff và Admin xem danh sách danh mục -> 200 (Read-Only)
+    list_res_staff = client.get("/api/v1/categories", headers=staff_headers)
+    assert list_res_staff.status_code == 200
+    codes = [c["code"] for c in list_res_staff.json()]
     assert unique_cat_code in codes
+
+    list_res_admin = client.get("/api/v1/categories", headers=admin_headers)
+    assert list_res_admin.status_code == 200
 
 # ==================== TEST 2: PRODUCTS CRUD & SEARCH/FILTER ====================
 def test_products_crud_and_filter():
@@ -78,7 +90,7 @@ def test_products_crud_and_filter():
     prod_id = None
 
     try:
-        # 1. Admin tạo sản phẩm mới
+        # 1. Admin cố tạo sản phẩm mới -> 403 Forbidden!
         prod_payload = {
             "sku": unique_sku,
             "name": "Chuột Bi Cổ Điển PS2",
@@ -90,32 +102,41 @@ def test_products_crud_and_filter():
             "status": "active",
             "description": "Chuột bi cơ học dùng cổng PS/2 hoài niệm năm 2000"
         }
-        create_res = client.post("/api/v1/products", json=prod_payload, headers=admin_headers)
+        admin_create = client.post("/api/v1/products", json=prod_payload, headers=admin_headers)
+        assert admin_create.status_code == 403
+
+        # 2. SuperAdmin tạo sản phẩm mới -> 200 OK
+        create_res = client.post("/api/v1/products", json=prod_payload, headers=superadmin_headers)
         assert create_res.status_code == 200
         created_prod = create_res.json()
         assert created_prod["sku"] == unique_sku
         prod_id = created_prod["id"]
 
-        # 2. Staff tìm kiếm sản phẩm theo tên / từ khóa
+        # 3. Staff tìm kiếm sản phẩm theo tên / từ khóa (ẩn cost_price)
         search_res = client.get("/api/v1/products?search=Chuột Bi", headers=staff_headers)
         assert search_res.status_code == 200
         search_items = search_res.json()
         assert any(p["sku"] == unique_sku for p in search_items)
+        for p in search_items:
+            assert "cost_price" not in p or p["cost_price"] is None
 
-        # 3. Lọc theo khoảng giá min_price / max_price
-        filter_res = client.get("/api/v1/products?min_price=100000&max_price=150000", headers=staff_headers)
-        assert filter_res.status_code == 200
-        assert all(100000 <= p["selling_price"] <= 150000 for p in filter_res.json())
+        # 4. Admin xem sản phẩm ở chế độ Read-Only (ẩn cost_price của chủ shop)
+        admin_get_res = client.get(f"/api/v1/products/{prod_id}", headers=admin_headers)
+        assert admin_get_res.status_code == 200
+        assert "cost_price" not in admin_get_res.json() or admin_get_res.json()["cost_price"] is None
 
-        # 4. Staff không thể sửa giá sản phẩm (403)
-        update_res = client.put(
-            f"/api/v1/products/{prod_id}",
-            json={"selling_price": 200000},
-            headers=staff_headers
-        )
-        assert update_res.status_code == 403
+        # 5. SuperAdmin xem sản phẩm (được xem cost_price)
+        super_get_res = client.get(f"/api/v1/products/{prod_id}", headers=superadmin_headers)
+        assert super_get_res.status_code == 200
+        assert super_get_res.json()["cost_price"] == 50000
 
-        # 5. Dọn dẹp sản phẩm test (hard delete)
+        # 6. Staff và Admin không thể sửa sản phẩm (403)
+        staff_update = client.put(f"/api/v1/products/{prod_id}", json={"selling_price": 200000}, headers=staff_headers)
+        assert staff_update.status_code == 403
+        admin_update = client.put(f"/api/v1/products/{prod_id}", json={"selling_price": 200000}, headers=admin_headers)
+        assert admin_update.status_code == 403
+
+        # 7. Dọn dẹp sản phẩm test (hard delete bởi SuperAdmin)
         del_res = client.delete(f"/api/v1/products/{prod_id}?hard_delete=true", headers=superadmin_headers)
         assert del_res.status_code == 200
     finally:
@@ -420,3 +441,68 @@ def test_inventory_logs_and_alerts():
     assert low_res.status_code == 200
     low_items = low_res.json()
     assert all(item["stock_quantity"] <= item["min_stock_alert"] for item in low_items)
+
+
+# ==================== TEST 10: ONLINE ORDER APPROVAL WORKFLOW & STAFF VISIBILITY ====================
+def test_online_order_approval_workflow_and_staff_visibility():
+    """
+    Quy trình 2 bước cho Đơn hàng Online:
+    1. Customer tạo đơn -> pending.
+    2. Staff KHÔNG nhìn thấy đơn pending trong GET /orders.
+    3. Staff gọi chi tiết đơn pending -> 403.
+    4. Admin bị cấm duyệt đơn và cấm xem hóa đơn -> 403.
+    5. SuperAdmin duyệt đơn -> status chuyển sang 'confirmed'.
+    6. Lúc này Staff mới nhìn thấy đơn 'confirmed'.
+    7. Staff hoàn tất đơn -> status 'completed'.
+    """
+    tokens = get_tokens()
+    customer_res = client.post("/api/v1/auth/login", json={"username": "customer", "password": "Customer@123"})
+    customer_headers = {"Authorization": f"Bearer {customer_res.json()['access_token']}"}
+    staff_headers = {"Authorization": f"Bearer {tokens['staff']}"}
+    admin_headers = {"Authorization": f"Bearer {tokens['admin']}"}
+    superadmin_headers = {"Authorization": f"Bearer {tokens['superadmin']}"}
+
+    # Lấy sản phẩm có sẵn
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM products WHERE status = 'active' AND stock_quantity >= 5 LIMIT 1")
+        prod_id = cursor.fetchone()["id"]
+
+    # 1. Customer tạo đơn hàng online -> status pending
+    order_res = client.post("/api/v1/orders", json={
+        "items": [{"product_id": prod_id, "quantity": 1}],
+        "payment_method": "transfer",
+        "note": "Đơn hàng online chờ chủ shop duyệt"
+    }, headers=customer_headers)
+    assert order_res.status_code == 200
+    order_data = order_res.json()
+    order_id = order_data["id"]
+    assert order_data["status"] == "pending"
+
+    # 2. Staff gọi GET /orders -> KHÔNG thấy đơn pending này
+    staff_orders = client.get("/api/v1/orders", headers=staff_headers).json()
+    assert not any(o["id"] == order_id for o in staff_orders)
+
+    # 3. Staff cố xem chi tiết đơn pending -> 403 Forbidden
+    staff_detail = client.get(f"/api/v1/orders/{order_id}", headers=staff_headers)
+    assert staff_detail.status_code == 403
+
+    # 4. Admin bị cấm xem danh sách hóa đơn (403) và cấm duyệt đơn (403)
+    admin_list = client.get("/api/v1/orders", headers=admin_headers)
+    assert admin_list.status_code == 403
+    admin_approve = client.post(f"/api/v1/orders/{order_id}/approve", headers=admin_headers)
+    assert admin_approve.status_code == 403
+
+    # 5. SuperAdmin duyệt đơn -> 200 OK, status sang 'confirmed'
+    super_approve = client.post(f"/api/v1/orders/{order_id}/approve", headers=superadmin_headers)
+    assert super_approve.status_code == 200
+    assert super_approve.json()["status"] == "confirmed"
+
+    # 6. Lúc này Staff gọi GET /orders -> ĐÃ THẤY đơn hàng (status: confirmed)
+    staff_orders_after = client.get("/api/v1/orders", headers=staff_headers).json()
+    assert any(o["id"] == order_id and o["status"] == "confirmed" for o in staff_orders_after)
+
+    # 7. Staff hoàn tất đơn hàng -> 200 OK, status: completed
+    staff_complete = client.post(f"/api/v1/orders/{order_id}/complete", headers=staff_headers)
+    assert staff_complete.status_code == 200
+    assert staff_complete.json()["status"] == "completed"

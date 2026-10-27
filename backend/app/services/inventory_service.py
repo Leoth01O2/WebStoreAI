@@ -326,7 +326,7 @@ class InventoryService:
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute(
                 """UPDATE orders
-                   SET status = 'admin_approved',
+                   SET status = 'confirmed',
                        approved_by = ?,
                        approved_at = ?
                    WHERE id = ?""",
@@ -395,7 +395,7 @@ class InventoryService:
             # Cập nhật trạng thái và thông tin từ chối
             cursor.execute(
                 """UPDATE orders
-                   SET status = 'rejected',
+                   SET status = 'cancelled',
                        rejected_by = ?,
                        rejected_at = ?,
                        rejection_reason = ?
@@ -425,10 +425,10 @@ class InventoryService:
             if order["status"] == "pending":
                 raise HTTPException(status_code=400, detail="Đơn hàng chưa được Admin duyệt")
 
-            if order["status"] != "admin_approved":
+            if order["status"] not in ("confirmed", "admin_approved"):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Chỉ có thể xử lý đơn hàng đã được Admin duyệt (trạng thái hiện tại: '{order['status']}')"
+                    detail=f"Chỉ có thể xử lý đơn hàng đã được duyệt (trạng thái hiện tại: '{order['status']}')"
                 )
 
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -467,10 +467,10 @@ class InventoryService:
                     detail="Đơn hàng chưa được Admin duyệt, không thể hoàn tất"
                 )
 
-            if order["status"] not in ("processing", "admin_approved"):
+            if order["status"] not in ("confirmed", "processing", "admin_approved"):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Chỉ có thể hoàn tất đơn hàng đang ở trạng thái 'processing' hoặc 'admin_approved' (trạng thái hiện tại: '{order['status']}')"
+                    detail=f"Chỉ có thể hoàn tất đơn hàng đang ở trạng thái 'confirmed', 'processing' hoặc 'admin_approved' (trạng thái hiện tại: '{order['status']}')"
                 )
 
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -617,7 +617,7 @@ class InventoryService:
                 raise HTTPException(status_code=400, detail="Đơn hàng này đã được hủy trước đó")
             if current_status == "rejected":
                 raise HTTPException(status_code=400, detail="Đơn hàng đã bị từ chối trước đó, không thể hủy")
-            if current_status in ("admin_approved", "processing", "completed"):
+            if current_status in ("confirmed", "admin_approved", "processing", "completed"):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Đơn hàng đang ở trạng thái '{current_status}' và đã được tiếp nhận xử lý. Vui lòng liên hệ cửa hàng để được hỗ trợ."
@@ -781,10 +781,10 @@ class InventoryService:
             # ACTION 2: reopen_rejected
             # -------------------------------------------------------------
             elif action == "reopen_rejected":
-                if current_status != "rejected":
+                if current_status not in ("rejected", "cancelled"):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Chỉ có thể reopen đơn hàng đang ở trạng thái 'rejected' (trạng thái hiện tại: '{current_status}')"
+                        detail=f"Chỉ có thể reopen đơn hàng đang ở trạng thái 'rejected' hoặc 'cancelled' (trạng thái hiện tại: '{current_status}')"
                     )
 
                 cursor.execute("SELECT product_id, quantity FROM order_items WHERE order_id = ?", (order_id,))
@@ -852,7 +852,7 @@ class InventoryService:
             # ACTION 3: override_status
             # -------------------------------------------------------------
             elif action == "override_status":
-                VALID_OVERRIDE_TARGETS = ("pending", "admin_approved", "processing", "completed")
+                VALID_OVERRIDE_TARGETS = ("pending", "confirmed", "admin_approved", "processing", "completed")
                 if not target_status:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -933,7 +933,7 @@ class InventoryService:
         - SQLite BEGIN IMMEDIATE khóa ghi chống Race Condition.
         - UPDATE có điều kiện nguyên tử:
           UPDATE orders SET assigned_to = ?, processed_by = ?, processed_at = ?, status = 'processing'
-          WHERE id = ? AND status = 'admin_approved' AND assigned_to IS NULL
+          WHERE id = ? AND status IN ('confirmed', 'admin_approved') AND assigned_to IS NULL
         - Nếu 2 Staff cạnh tranh nhận cùng lúc: người đến sau gặp rowcount == 0 -> trả về HTTP 409 Conflict.
         - Tuyệt đối không trừ tồn kho lần 2 (tồn kho đã giữ chỗ từ khi tạo đơn).
         - Không làm biến đổi payment_status.
@@ -951,7 +951,7 @@ class InventoryService:
                        processed_by = COALESCE(processed_by, ?),
                        processed_at = COALESCE(processed_at, ?),
                        status = 'processing'
-                   WHERE id = ? AND status = 'admin_approved' AND assigned_to IS NULL""",
+                   WHERE id = ? AND status IN ('confirmed', 'admin_approved') AND assigned_to IS NULL""",
                 (user_id, user_id, now_str, order_id)
             )
 
@@ -981,7 +981,7 @@ class InventoryService:
                             detail=f"Đơn hàng {order['order_code']} đã được nhân viên khác ({assigned_name}) tiếp nhận xử lý trước đó (Claim Conflict)"
                         )
 
-                if order["status"] != "admin_approved":
+                if order["status"] not in ("confirmed", "admin_approved"):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Chỉ có thể tiếp nhận đơn hàng đã được Admin duyệt (trạng thái hiện tại: '{order['status']}')"
@@ -993,7 +993,7 @@ class InventoryService:
                 """INSERT INTO order_audit_logs (
                     order_id, action, previous_status, resulting_status,
                     performed_by, reason, created_at
-                ) VALUES (?, 'claim_order', 'admin_approved', 'processing', ?, ?, ?)""",
+                ) VALUES (?, 'claim_order', order['status'], 'processing', ?, ?, ?)""",
                 (order_id, user_id, claim_reason, now_str)
             )
 

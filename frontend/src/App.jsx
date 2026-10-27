@@ -12,6 +12,7 @@ import { PurchasesPage } from './pages/PurchasesPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { AiAssistantPage } from './pages/AiAssistantPage';
+import { AdminPage } from './pages/AdminPage';
 
 function AppContent() {
   const { isAuthenticated, loading, user, isAdmin, isSuperAdmin } = useAuth();
@@ -25,16 +26,23 @@ function AppContent() {
       }
     } else {
       if (activeTab === 'login') {
-        setActiveTab('pos');
+        setActiveTab(user?.role === 'admin' ? 'admin' : 'pos');
       }
-      if (user?.role === 'admin' && activeTab === 'dashboard') {
-        setActiveTab('pos');
-      }
-      if (user?.role === 'staff' && (activeTab === 'purchases' || activeTab === 'dashboard' || activeTab === 'products')) {
-        setActiveTab('pos');
-      }
-      if (user?.role === 'customer' && (activeTab === 'products' || activeTab === 'purchases' || activeTab === 'dashboard' || activeTab === 'customers')) {
-        setActiveTab('pos');
+      if (user?.role === 'admin') {
+        const forbiddenForAdmin = ['pos', 'orders', 'customers', 'purchases', 'dashboard'];
+        if (forbiddenForAdmin.includes(activeTab)) {
+          setActiveTab('admin');
+        }
+      } else if (user?.role === 'staff') {
+        const forbiddenForStaff = ['products', 'purchases', 'dashboard', 'admin'];
+        if (forbiddenForStaff.includes(activeTab)) {
+          setActiveTab('pos');
+        }
+      } else if (user?.role === 'customer') {
+        const forbiddenForCustomer = ['products', 'purchases', 'dashboard', 'customers', 'admin'];
+        if (forbiddenForCustomer.includes(activeTab)) {
+          setActiveTab('pos');
+        }
       }
     }
   }, [isAuthenticated, user, activeTab]);
@@ -77,25 +85,30 @@ function AppContent() {
 
     switch (activeTab) {
       case 'pos':
+        if (user?.role === 'admin') return <AdminPage />;
         return <PosPage onNavigate={setActiveTab} />;
       case 'products':
         if (user?.role === 'customer' || user?.role === 'staff') return <PosPage onNavigate={setActiveTab} />;
         return <ProductsPage />;
       case 'orders':
+        if (user?.role === 'admin') return <AdminPage />;
         return <OrdersPage />;
       case 'customers':
-        if (user?.role === 'customer') return <PosPage onNavigate={setActiveTab} />;
+        if (user?.role === 'customer' || user?.role === 'admin') return <PosPage onNavigate={setActiveTab} />;
         return <CustomersPage />;
       case 'purchases':
-        if (!isAdmin && !isSuperAdmin) return <PosPage onNavigate={setActiveTab} />;
+        if (!isSuperAdmin) return <PosPage onNavigate={setActiveTab} />;
         return <PurchasesPage />;
       case 'dashboard':
         if (!isSuperAdmin) return <PosPage onNavigate={setActiveTab} />;
         return <DashboardPage onNavigate={setActiveTab} />;
+      case 'admin':
+        if (!isAdmin && !isSuperAdmin) return <PosPage onNavigate={setActiveTab} />;
+        return <AdminPage />;
       case 'ai':
         return <AiAssistantPage onNavigate={setActiveTab} />;
       default:
-        return <PosPage onNavigate={setActiveTab} />;
+        return user?.role === 'admin' ? <AdminPage /> : <PosPage onNavigate={setActiveTab} />;
     }
   };
 

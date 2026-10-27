@@ -21,16 +21,16 @@ export const StockBadge = ({ stock, minAlert = 5, status = 'active' }) => {
   return <Badge variant="green">Còn {stock}</Badge>;
 };
 
-export const RoleBadge = ({ role }) => {
+export const RoleBadge = ({ role, short = false }) => {
   switch (role) {
     case 'superadmin':
-      return <Badge variant="blue">Chủ Cửa Hàng (SuperAdmin)</Badge>;
+      return <Badge variant="purple">{short ? 'Chủ Shop' : 'Chủ Cửa Hàng (SuperAdmin)'}</Badge>;
     case 'admin':
-      return <Badge variant="amber">Quản Trị Viên (Admin)</Badge>;
+      return <Badge variant="blue">{short ? 'Admin Dev' : 'Quản Trị Viên (Admin)'}</Badge>;
     case 'staff':
-      return <Badge variant="green">Thu Ngân / Nhân Viên</Badge>;
+      return <Badge variant="green">{short ? 'Thu Ngân' : 'Thu Ngân (Staff)'}</Badge>;
     case 'customer':
-      return <Badge variant="muted">Khách Hàng</Badge>;
+      return <Badge variant="amber">{short ? 'Khách Hàng' : 'Khách Hàng (Customer)'}</Badge>;
     default:
       return <Badge variant="muted">{role}</Badge>;
   }
@@ -38,6 +38,7 @@ export const RoleBadge = ({ role }) => {
 
 export const ORDER_STATUS_CONFIG = {
   pending: { label: 'Chờ duyệt', variant: 'amber' },
+  confirmed: { label: 'Đã duyệt (Chờ thu tiền)', variant: 'blue' },
   admin_approved: { label: 'Đã duyệt', variant: 'blue' },
   processing: { label: 'Đang xử lý', variant: 'amber' },
   completed: { label: 'Hoàn thành', variant: 'green' },

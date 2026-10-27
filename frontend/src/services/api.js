@@ -98,6 +98,12 @@ export const authAPI = {
       method: 'POST',
       body: JSON.stringify(userData),
     }),
+  getUsers: () => request('/auth/users'),
+  updateUserStatus: (id, isActive) =>
+    request(`/auth/users/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: isActive }),
+    }),
 };
 
 export const productsAPI = {
@@ -196,6 +202,10 @@ export const customersAPI = {
     request(`/customers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(customerData),
+    }),
+  deleteCustomer: (id) =>
+    request(`/customers/${id}`, {
+      method: 'DELETE',
     }),
 };
 

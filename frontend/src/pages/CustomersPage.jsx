@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Plus, Edit2, Phone, Mail, MapPin, ShieldCheck } from 'lucide-react';
+import { Users, Search, Plus, Edit2, Trash2, Phone, Mail, MapPin, ShieldCheck } from 'lucide-react';
 import { customersAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -8,8 +8,11 @@ import { Modal } from '../components/ui/Modal';
 
 export const CustomersPage = () => {
   const { user, isAdmin, isSuperAdmin } = useAuth();
-  const canManage = isAdmin || isSuperAdmin;
+  // Chỉ SuperAdmin (Chủ shop) mới được sửa hoặc xóa khách hàng
+  const canManage = isSuperAdmin;
   const isStaff = user?.role === 'staff';
+  // Staff và SuperAdmin đều được thêm khách hàng mới
+  const canAdd = isSuperAdmin || isStaff;
   const { addToast } = useToast();
 
   const [customers, setCustomers] = useState([]);
@@ -93,6 +96,17 @@ export const CustomersPage = () => {
     }
   };
 
+  const handleDeleteCustomer = async (id, name) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa khách hàng "${name}"?`)) return;
+    try {
+      await customersAPI.deleteCustomer(id);
+      addToast(`Đã xóa khách hàng "${name}" thành công!`, 'success');
+      loadCustomers();
+    } catch (err) {
+      addToast(err.message, 'error');
+    }
+  };
+
   const formatVND = (val) => Number(val || 0).toLocaleString('vi-VN') + ' đ';
 
   return (
@@ -121,7 +135,7 @@ export const CustomersPage = () => {
             )}
           </div>
 
-          {canManage && (
+          {canAdd && (
             <button onClick={handleOpenAdd} className="btn btn-primary btn-sm">
               <Plus size={15} /> Thêm Khách Hàng
             </button>
@@ -242,13 +256,23 @@ export const CustomersPage = () => {
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     {canManage ? (
-                      <button
-                        onClick={() => handleOpenEdit(c)}
-                        className="btn btn-outline btn-icon btn-sm"
-                        title="Sửa thông tin khách hàng"
-                      >
-                        <Edit2 size={13} />
-                      </button>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '0.35rem' }}>
+                        <button
+                          onClick={() => handleOpenEdit(c)}
+                          className="btn btn-outline btn-icon btn-sm"
+                          title="Sửa thông tin khách hàng"
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCustomer(c.id, c.name)}
+                          className="btn btn-outline btn-icon btn-sm"
+                          style={{ color: 'var(--red-light)' }}
+                          title="Xóa khách hàng"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     ) : (
                       <span className="badge badge-muted" style={{ fontSize: '0.68rem' }}>
                         Chỉ xem

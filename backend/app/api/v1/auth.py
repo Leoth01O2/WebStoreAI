@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 import re
 import uuid
 from typing import List
@@ -309,3 +310,39 @@ def create_user_by_admin(user_in: UserCreate, current_user: dict = Depends(get_c
         role=role_val,
         is_active=True
     )
+
+
+class UserStatusUpdate(BaseModel):
+    is_active: bool
+
+@router.patch("/users/{user_id}/status", response_model=UserResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+def update_user_status(user_id: int, status_in: UserStatusUpdate, current_user: dict = Depends(get_current_user)):
+    """
+    Cập nhật trạng thái kích hoạt tài khoản:
+    - SuperAdmin: Có thể bật/tắt mọi tài khoản.
+    - Admin: Chỉ có thể bật/tắt tài khoản staff hoặc customer. Không được sửa trạng thái của admin/superadmin (403).
+    """
+    with get_db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, full_name, role, is_active FROM users WHERE id = ?", (user_id,))
+        target_user = cursor.fetchone()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+
+        if current_user.get("role") == "admin" and target_user["role"] in ("admin", "superadmin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin không có quyền thay đổi trạng thái của tài khoản Admin hoặc SuperAdmin"
+            )
+
+        new_status = 1 if status_in.is_active else 0
+        cursor.execute("UPDATE users SET is_active = ? WHERE id = ?", (new_status, user_id))
+        cursor.execute("SELECT id, username, full_name, role, is_active FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        return UserResponse(
+            id=row["id"],
+            username=row["username"],
+            full_name=row["full_name"],
+            role=row["role"],
+            is_active=bool(row["is_active"])
+        )

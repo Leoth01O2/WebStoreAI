@@ -24,7 +24,8 @@ import ProductImage from '../components/common/ProductImage';
 export const ProductsPage = () => {
   const { isAdmin, isSuperAdmin } = useAuth();
   const { addToast } = useToast();
-  const canManage = isAdmin || isSuperAdmin;
+  // Chỉ SuperAdmin (Chủ shop) mới có quyền Thêm/Sửa/Xóa và xem Giá vốn
+  const canManage = isSuperAdmin;
 
   const [activeTab, setActiveTab] = useState('products'); // 'products' | 'categories'
 
@@ -281,6 +282,14 @@ export const ProductsPage = () => {
             )}
           </div>
         </div>
+
+        {/* Read-Only Notice for Tech Admin */}
+        {isAdmin && !isSuperAdmin && (
+          <div style={{ padding: '0.65rem 1.25rem', background: '#eff6ff', borderBottom: '1px solid #bfdbfe', color: '#1e40af', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <AlertTriangle size={15} className="text-blue-600" />
+            <span><strong>Chế độ xem kỹ thuật (Read-Only):</strong> Bạn đang đăng nhập vai trò Admin (Kỹ thuật/Dev). Chỉ Chủ shop (SuperAdmin) mới có quyền thêm/sửa/xóa sản phẩm và xem giá vốn.</span>
+          </div>
+        )}
 
         {/* Filters for Products */}
         {activeTab === 'products' && (

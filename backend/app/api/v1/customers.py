@@ -34,7 +34,7 @@ def _serialize_customer_for_role(d: dict, role: str) -> Union[CustomerAdminRespo
     else:
         return CustomerResponse.model_validate(d)
 
-@router.get("", response_model=List[Union[CustomerAdminResponse, CustomerStaffResponse]], dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+@router.get("", response_model=List[Union[CustomerAdminResponse, CustomerStaffResponse]], dependencies=[Depends(require_roles("staff", "superadmin"))])
 def get_customers(
     search: Optional[str] = Query(None, description="Tìm theo tên hoặc số điện thoại"),
     group_name: Optional[str] = Query(None, description="Lọc theo nhóm khách hàng: retail, vip, wholesale"),
@@ -125,7 +125,7 @@ def get_customer_detail(customer_id: int, current_user: dict = Depends(get_curre
             raise HTTPException(status_code=404, detail="Không tìm thấy khách hàng")
         return _serialize_customer_for_role(dict(row), role)
 
-@router.post("", response_model=Union[CustomerAdminResponse, CustomerStaffResponse], dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+@router.post("", response_model=Union[CustomerAdminResponse, CustomerStaffResponse], dependencies=[Depends(require_roles("staff", "superadmin"))])
 def create_customer(customer_in: CustomerCreate, current_user: dict = Depends(get_current_user)):
     """Tạo khách hàng mới (Chỉ dành cho Staff, Admin, SuperAdmin)"""
     role = current_user.get("role", "staff")
@@ -162,6 +162,13 @@ def update_customer(customer_id: int, customer_in: CustomerUpdate, current_user:
     role = current_user.get("role", "customer")
     with get_db_transaction() as conn:
         cursor = conn.cursor()
+
+        # RBAC: Staff và Admin tuyệt đối không được sửa thông tin khách hàng
+        if role in ("admin", "staff"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chỉ SuperAdmin (Chủ cửa hàng) mới có quyền chỉnh sửa thông tin khách hàng"
+            )
 
         # Kiểm tra IDOR nếu role là Customer
         if role == "customer":
@@ -204,3 +211,15 @@ def update_customer(customer_id: int, customer_in: CustomerUpdate, current_user:
         d = dict(cursor.fetchone())
         return _serialize_customer_for_role(d, role)
 
+
+
+@router.delete("/{customer_id}", dependencies=[Depends(require_roles("superadmin"))])
+def delete_customer(customer_id: int, current_user: dict = Depends(get_current_user)):
+    """Xóa khách hàng (Chỉ dành riêng cho SuperAdmin - Chủ cửa hàng)"""
+    with get_db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM customers WHERE id = ?", (customer_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Không tìm thấy khách hàng")
+        cursor.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        return {"message": "Đã xóa khách hàng thành công"}

@@ -27,7 +27,7 @@ import { ReceiptModal } from '../components/ui/ReceiptModal';
 const OrderLifecycleStepper = ({ status, rejectionReason }) => {
   const steps = [
     { key: 'pending', label: '1. Chờ duyệt', num: 1 },
-    { key: 'admin_approved', label: '2. Đã duyệt', num: 2 },
+    { key: 'confirmed', label: '2. Đã duyệt', num: 2 },
     { key: 'processing', label: '3. Đang xử lý', num: 3 },
     { key: 'completed', label: '4. Hoàn thành', num: 4 },
   ];
@@ -47,7 +47,7 @@ const OrderLifecycleStepper = ({ status, rejectionReason }) => {
           <span>❌ ĐƠN HÀNG ĐÃ BỊ TỪ CHỐI</span>
         </div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-          <strong>Lý do từ chối:</strong> {rejectionReason || 'Đơn hàng không được duyệt bởi Quản trị viên'}
+          <strong>Lý do từ chối:</strong> {rejectionReason || 'Đơn hàng không được duyệt bởi Chủ cửa hàng'}
         </div>
       </div>
     );
@@ -78,6 +78,7 @@ const OrderLifecycleStepper = ({ status, rejectionReason }) => {
     switch (st) {
       case 'pending':
         return 0;
+      case 'confirmed':
       case 'admin_approved':
         return 1;
       case 'processing':
@@ -331,12 +332,12 @@ export const OrdersPage = () => {
   const handleApproveOrder = async (order) => {
     try {
       await ordersAPI.approveOrder(order.id);
-      addToast(`Đã duyệt đơn hàng #${order.order_code} thành công!`, 'success');
+      addToast(`Đã duyệt đơn hàng #${order.order_code} (Chuyển Thu ngân) thành công!`, 'success');
       window.dispatchEvent(new CustomEvent('workflow-updated'));
       loadOrders();
       fetchWorkflowCounts();
       if (viewingOrder?.id === order.id) {
-        setViewingOrder((prev) => ({ ...prev, status: 'admin_approved' }));
+        setViewingOrder((prev) => ({ ...prev, status: 'confirmed' }));
       }
     } catch (err) {
       addToast(err.message || 'Lỗi khi duyệt đơn hàng', 'error');
@@ -669,24 +670,36 @@ export const OrdersPage = () => {
     if (isCustomer) {
       pendingCount = workflowCounts?.my_pending_count || 0;
       processingCount = workflowCounts?.my_processing_count || 0;
+      return [
+        { id: '', label: 'Tất cả' },
+        { id: 'pending', label: 'Chờ duyệt', count: pendingCount, color: 'var(--amber-primary)' },
+        { id: 'processing', label: 'Đang xử lý', count: processingCount, color: 'var(--blue-light)' },
+        { id: 'completed', label: 'Hoàn thành' },
+        { id: 'cancelled', label: 'Đã hủy' },
+      ];
     } else if (user?.role === 'staff') {
       approvedCount = workflowCounts?.approved_count || 0;
       processingCount = workflowCounts?.processing_count || 0;
+      return [
+        { id: '', label: 'Tất cả hóa đơn' },
+        { id: 'confirmed,admin_approved', label: 'Đã duyệt (Chờ xuất bill/thu tiền)', count: approvedCount, color: 'var(--green-terminal)' },
+        { id: 'processing', label: 'Đang xử lý', count: processingCount, color: 'var(--blue-light)' },
+        { id: 'completed', label: 'Đã hoàn tất' },
+      ];
     } else {
-      // admin, superadmin, manager
+      // superadmin (Chủ shop)
       pendingCount = workflowCounts?.pending_count || 0;
       approvedCount = workflowCounts?.approved_count || 0;
       processingCount = workflowCounts?.processing_count || 0;
+      return [
+        { id: '', label: 'Tất cả' },
+        { id: 'pending', label: 'Chờ Chủ shop duyệt', count: pendingCount, color: 'var(--amber-primary)' },
+        { id: 'confirmed,admin_approved', label: 'Đã duyệt (Chuyển Thu ngân)', count: approvedCount, color: 'var(--green-terminal)' },
+        { id: 'processing', label: 'Đang xử lý', count: processingCount, color: 'var(--blue-light)' },
+        { id: 'completed', label: 'Hoàn thành' },
+        { id: 'cancelled,rejected', label: 'Đã hủy / Từ chối' },
+      ];
     }
-
-    return [
-      { id: '', label: 'Tất cả' },
-      { id: 'pending', label: 'Chờ duyệt', count: pendingCount, color: 'var(--amber-primary)' },
-      { id: 'admin_approved', label: 'Đã duyệt', count: approvedCount, color: 'var(--green-terminal)' },
-      { id: 'processing', label: 'Đang xử lý', count: processingCount, color: 'var(--blue-light)' },
-      { id: 'completed', label: 'Hoàn thành' },
-      { id: 'cancelled,rejected', label: 'Đã hủy / Từ chối' },
-    ];
   };
 
   const formatVND = (val) => Number(val || 0).toLocaleString('vi-VN') + ' đ';
@@ -870,7 +883,7 @@ export const OrdersPage = () => {
                       <div style={{ fontSize: '0.72rem', color: 'var(--amber-primary)', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                         <UserCheck size={11} /> <span>{o.assigned_name}</span>
                       </div>
-                    ) : o.status === 'admin_approved' ? (
+                    ) : (o.status === 'confirmed' || o.status === 'admin_approved') ? (
                       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.2rem' }}>
                         (Chưa có Staff nhận)
                       </div>
@@ -901,14 +914,14 @@ export const OrdersPage = () => {
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                      {/* Admin/SuperAdmin Quick Actions */}
-                      {(isAdmin || isSuperAdmin) && o.status === 'pending' && (
+                      {/* SuperAdmin Duyệt / Từ chối đơn Online (pending) */}
+                      {isSuperAdmin && o.status === 'pending' && (
                         <>
                           <button
                             onClick={() => handleApproveOrder(o)}
                             className="btn btn-outline btn-icon btn-sm"
                             style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
-                            title="Duyệt đơn hàng"
+                            title="Duyệt đơn (Chuyển Thu ngân)"
                           >
                             <Check size={13} />
                           </button>
@@ -916,27 +929,39 @@ export const OrdersPage = () => {
                             onClick={() => setRejectingOrder(o)}
                             className="btn btn-outline btn-icon btn-sm"
                             style={{ color: 'var(--red-light)', borderColor: 'var(--red-light)' }}
-                            title="Từ chối đơn hàng"
+                            title="Từ chối / Hủy đơn"
                           >
                             <X size={13} />
                           </button>
                         </>
                       )}
 
-                      {/* Staff/Admin Atomic Claim Lock */}
-                      {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'admin_approved' && !o.assigned_to && (
-                        <button
-                          onClick={() => handleClaimOrder(o)}
-                          disabled={claimingOrderId === o.id}
-                          className="btn btn-outline btn-icon btn-sm"
-                          style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)' }}
-                          title="Nhận đơn (Atomic Claim Lock)"
-                        >
-                          <PackageCheck size={13} />
-                        </button>
+                      {/* Staff/SuperAdmin Thu tiền & Hoàn tất hóa đơn confirmed/admin_approved */}
+                      {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved') && (
+                        <>
+                          <button
+                            onClick={() => handleCompleteOrder(o)}
+                            className="btn btn-outline btn-icon btn-sm"
+                            style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
+                            title="Thu tiền / Hoàn tất hóa đơn"
+                          >
+                            <CheckCircle2 size={13} />
+                          </button>
+                          {!o.assigned_to && (
+                            <button
+                              onClick={() => handleClaimOrder(o)}
+                              disabled={claimingOrderId === o.id}
+                              className="btn btn-outline btn-icon btn-sm"
+                              style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)' }}
+                              title="Nhận đơn (Atomic Claim Lock)"
+                            >
+                              <PackageCheck size={13} />
+                            </button>
+                          )}
+                        </>
                       )}
 
-                      {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'processing' && (
+                      {(user?.role === 'staff' || isSuperAdmin) && o.status === 'processing' && (
                         <button
                           onClick={() => handleCompleteOrder(o)}
                           className="btn btn-outline btn-icon btn-sm"
@@ -1063,27 +1088,37 @@ export const OrdersPage = () => {
 
               {/* Action buttons with minimum 40px touch targets */}
               <div className="order-card-actions">
-                {(isAdmin || isSuperAdmin) && o.status === 'pending' && (
+                {isSuperAdmin && o.status === 'pending' && (
                   <>
                     <button
                       onClick={() => handleApproveOrder(o)}
                       className="btn btn-outline btn-sm"
                       style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
                     >
-                      <Check size={14} /> Duyệt đơn
+                      <Check size={14} /> Duyệt đơn (Thu ngân)
                     </button>
                     <button
                       onClick={() => setRejectingOrder(o)}
                       className="btn btn-outline btn-sm"
                       style={{ color: 'var(--red-light)', borderColor: 'var(--red-light)' }}
                     >
-                      <X size={14} /> Từ chối
+                      <X size={14} /> Từ chối đơn
                     </button>
                   </>
                 )}
 
-                {/* Staff/Admin Atomic Claim Lock */}
-                {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'admin_approved' && !o.assigned_to && (
+                {/* Staff/SuperAdmin Thu tiền & Hoàn tất đơn confirmed/admin_approved */}
+                {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved') && (
+                  <button
+                    onClick={() => handleCompleteOrder(o)}
+                    className="btn btn-outline btn-sm"
+                    style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)', width: '100%', flex: '1 1 100%' }}
+                  >
+                    <CheckCircle2 size={15} /> Thu tiền & Hoàn tất hóa đơn
+                  </button>
+                )}
+
+                {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved') && !o.assigned_to && (
                   <button
                     onClick={() => handleClaimOrder(o)}
                     disabled={claimingOrderId === o.id}
@@ -1094,7 +1129,7 @@ export const OrdersPage = () => {
                   </button>
                 )}
 
-                {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'processing' && (
+                {(user?.role === 'staff' || isSuperAdmin) && o.status === 'processing' && (
                   <button
                     onClick={() => handleCompleteOrder(o)}
                     className="btn btn-outline btn-sm"

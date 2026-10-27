@@ -3,6 +3,7 @@ from typing import List, Optional, Literal
 
 ORDER_STATUSES = (
     "pending",
+    "confirmed",
     "admin_approved",
     "processing",
     "completed",
@@ -12,6 +13,7 @@ ORDER_STATUSES = (
 
 OrderStatus = Literal[
     "pending",
+    "confirmed",
     "admin_approved",
     "processing",
     "completed",
@@ -173,3 +175,4 @@ class OrderAuditLogResponse(BaseModel):
     performer_name: Optional[str] = None
     reason: str
     created_at: Optional[str] = None
+

@@ -116,7 +116,7 @@ def get_categories(current_user: dict = Depends(get_current_user)):
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
-@router.post("/categories", response_model=CategoryResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/categories", response_model=CategoryResponse, dependencies=[Depends(require_roles("superadmin"))])
 def create_category(category_in: CategoryCreate, current_user: dict = Depends(get_current_user)):
     """Tạo mới danh mục (Admin, Manager)"""
     with get_db_transaction() as conn:
@@ -134,7 +134,7 @@ def create_category(category_in: CategoryCreate, current_user: dict = Depends(ge
         cursor.execute("SELECT id, name, code, description, created_at FROM categories WHERE id = ?", (new_id,))
         return dict(cursor.fetchone())
 
-@router.put("/categories/{category_id}", response_model=CategoryResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.put("/categories/{category_id}", response_model=CategoryResponse, dependencies=[Depends(require_roles("superadmin"))])
 def update_category(category_id: int, category_in: CategoryUpdate, current_user: dict = Depends(get_current_user)):
     """Cập nhật danh mục (Admin, Manager)"""
     with get_db_transaction() as conn:
@@ -167,7 +167,7 @@ def update_category(category_id: int, category_in: CategoryUpdate, current_user:
         cursor.execute("SELECT id, name, code, description, created_at FROM categories WHERE id = ?", (category_id,))
         return dict(cursor.fetchone())
 
-@router.delete("/categories/{category_id}", dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.delete("/categories/{category_id}", dependencies=[Depends(require_roles("superadmin"))])
 def delete_category(category_id: int, current_user: dict = Depends(get_current_user)):
     """Xóa danh mục (Admin, Manager)"""
     with get_db_transaction() as conn:
@@ -189,7 +189,7 @@ def delete_category(category_id: int, current_user: dict = Depends(get_current_u
 
 # ==================== PRODUCTS ====================
 
-@router.post("/products/upload-image", dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/products/upload-image", dependencies=[Depends(require_roles("superadmin"))])
 async def upload_product_image(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user)
@@ -237,11 +237,11 @@ def get_products(
     - Admin & SuperAdmin: Xem đầy đủ thông tin kể cả giá vốn (cost_price) phục vụ kế toán/nhập hàng.
     - Staff, Customer & Guest: Xem thông tin bán lẻ an toàn (ProductPublicResponse), TUYỆT ĐỐI KHÔNG nhận cost_price.
     """
-    is_admin = bool(current_user and current_user.get("role") in ("admin", "superadmin"))
+    is_superadmin = bool(current_user and current_user.get("role") == "superadmin")
 
     with get_db() as conn:
         cursor = conn.cursor()
-        if is_admin:
+        if is_superadmin:
             query = """
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                        p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
@@ -296,7 +296,7 @@ def get_products(
         for r in rows:
             d = dict(r)
             d["in_stock"] = d.get("stock_quantity", 0) > 0
-            if is_admin:
+            if is_superadmin:
                 results.append(ProductAdminResponse.model_validate(d))
             else:
                 results.append(ProductPublicResponse.model_validate(d))
@@ -312,11 +312,11 @@ def get_product_detail(
     - Admin & SuperAdmin: Xem đầy đủ thông tin kể cả giá vốn (cost_price).
     - Staff, Customer & Guest: Xem thông tin bán lẻ an toàn (ProductPublicResponse), TUYỆT ĐỐI KHÔNG nhận cost_price.
     """
-    is_admin = bool(current_user and current_user.get("role") in ("admin", "superadmin"))
+    is_superadmin = bool(current_user and current_user.get("role") == "superadmin")
 
     with get_db() as conn:
         cursor = conn.cursor()
-        if is_admin:
+        if is_superadmin:
             cursor.execute(
                 """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                           p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
@@ -342,11 +342,11 @@ def get_product_detail(
             raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
         d = dict(row)
         d["in_stock"] = d.get("stock_quantity", 0) > 0
-        if is_admin:
+        if is_superadmin:
             return ProductAdminResponse.model_validate(d)
         return ProductPublicResponse.model_validate(d)
 
-@router.post("/products", response_model=ProductResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/products", response_model=ProductResponse, dependencies=[Depends(require_roles("superadmin"))])
 def create_product(product_in: ProductCreate, current_user: dict = Depends(get_current_user)):
     """Tạo sản phẩm mới (Admin, Manager)"""
     with get_db_transaction() as conn:
@@ -398,7 +398,7 @@ def create_product(product_in: ProductCreate, current_user: dict = Depends(get_c
 
     return result
 
-@router.put("/products/{product_id}", response_model=ProductResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.put("/products/{product_id}", response_model=ProductResponse, dependencies=[Depends(require_roles("superadmin"))])
 def update_product(product_id: int, product_in: ProductUpdate, current_user: dict = Depends(get_current_user)):
     """Cập nhật thông tin sản phẩm (Admin, Manager)"""
     with get_db_transaction() as conn:
@@ -456,7 +456,7 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
 
     return result
 
-@router.delete("/products/{product_id}", dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.delete("/products/{product_id}", dependencies=[Depends(require_roles("superadmin"))])
 def delete_product(
     product_id: int,
     hard_delete: bool = Query(False, description="Xóa cứng (bỏ qua lịch sử hóa đơn)"),

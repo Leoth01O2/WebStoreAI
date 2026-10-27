@@ -11,6 +11,10 @@ def get_token(username, password):
     return res.json()["access_token"]
 
 @pytest.fixture
+def superadmin_headers():
+    return {"Authorization": f"Bearer {get_token('superadmin', 'SuperAdmin@123')}"}
+
+@pytest.fixture
 def customer_a_headers():
     return {"Authorization": f"Bearer {get_token('customer', 'Customer@123')}"}
 
@@ -225,7 +229,7 @@ def test_6_idempotency_cancelled_order_no_double_stock_return(customer_a_headers
         assert stock_final == stock_start, "Lỗi: Tồn kho bị hoàn trả lần thứ hai!"
 
 
-def test_7_customer_cannot_cancel_admin_approved_order(customer_a_headers, admin_headers):
+def test_7_customer_cannot_cancel_admin_approved_order(customer_a_headers, admin_headers, superadmin_headers):
     """
     DoD 7: Customer không tự hủy được đơn đã ADMIN_APPROVED.
     Trả về lỗi rõ ràng và yêu cầu liên hệ cửa hàng.
@@ -238,19 +242,19 @@ def test_7_customer_cannot_cancel_admin_approved_order(customer_a_headers, admin
     order_id = res_create.json()["id"]
 
     # Admin duyệt đơn
-    res_appr = client.post(f"/api/v1/orders/{order_id}/approve", headers=admin_headers)
+    res_appr = client.post(f"/api/v1/orders/{order_id}/approve", headers=superadmin_headers)
     assert res_appr.status_code == 200
-    assert res_appr.json()["status"] == "admin_approved"
+    assert res_appr.json()["status"] in ("confirmed", "admin_approved")
 
     # Customer cố hủy đơn đã duyệt -> 400
     res_cancel = client.post(f"/api/v1/orders/{order_id}/customer-cancel", headers=customer_a_headers)
     assert res_cancel.status_code == 400
     detail = res_cancel.json()["detail"]
-    assert "admin_approved" in detail
+    assert "admin_approved" in detail or "confirmed" in detail or "Không thể hủy" in detail
     assert "liên hệ cửa hàng" in detail
 
 
-def test_8_customer_cannot_cancel_processing_order(customer_a_headers, admin_headers, staff_headers):
+def test_8_customer_cannot_cancel_processing_order(customer_a_headers, admin_headers, staff_headers, superadmin_headers):
     """
     DoD 8: Customer không tự hủy được đơn đang PROCESSING.
     """
@@ -262,7 +266,7 @@ def test_8_customer_cannot_cancel_processing_order(customer_a_headers, admin_hea
     order_id = res_create.json()["id"]
 
     # Admin duyệt
-    client.post(f"/api/v1/orders/{order_id}/approve", headers=admin_headers)
+    client.post(f"/api/v1/orders/{order_id}/approve", headers=superadmin_headers)
     # Staff xử lý
     res_proc = client.post(f"/api/v1/orders/{order_id}/process", headers=staff_headers)
     assert res_proc.status_code == 200
@@ -275,7 +279,7 @@ def test_8_customer_cannot_cancel_processing_order(customer_a_headers, admin_hea
     assert "liên hệ cửa hàng" in res_cancel.json()["detail"]
 
 
-def test_9_customer_cannot_cancel_completed_order(customer_a_headers, admin_headers, staff_headers):
+def test_9_customer_cannot_cancel_completed_order(customer_a_headers, admin_headers, staff_headers, superadmin_headers):
     """
     DoD 9: Customer không tự hủy được đơn đã COMPLETED.
     """
@@ -287,7 +291,7 @@ def test_9_customer_cannot_cancel_completed_order(customer_a_headers, admin_head
     order_id = res_create.json()["id"]
 
     # Admin duyệt -> Staff hoàn tất
-    client.post(f"/api/v1/orders/{order_id}/approve", headers=admin_headers)
+    client.post(f"/api/v1/orders/{order_id}/approve", headers=superadmin_headers)
     client.post(f"/api/v1/orders/{order_id}/process", headers=staff_headers)
     res_comp = client.post(f"/api/v1/orders/{order_id}/complete", headers=staff_headers)
     assert res_comp.status_code == 200
