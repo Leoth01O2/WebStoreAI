@@ -139,12 +139,15 @@ class AIAuditLogResponse(BaseModel):
 # Image Search Schemas (Phase 12D)
 # ---------------------------------------------------------------------------
 class ImageSearchQueryFeatures(BaseModel):
-    product_type: str = Field(..., description="Chủng loại sản phẩm nhận diện được (headphone, keyboard, mouse...)")
+    product_type: Optional[str] = Field(None, description="Chủng loại sản phẩm nhận diện được (headphone, keyboard, mouse...)")
     dominant_color: Optional[str] = Field(None, description="Màu sắc chủ đạo nhận diện được")
     shape_form: Optional[str] = Field(None, description="Kiểu dáng hình học hoặc form factor")
     material: Optional[str] = Field(None, description="Chất liệu nhận diện được")
     visible_features: Optional[List[str]] = Field(default_factory=list, description="Các đặc tính nhìn thấy rõ ràng")
     description: Optional[str] = Field(None, description="Mô tả trực quan của ảnh tìm kiếm")
+    confidence: Optional[float] = Field(None, description="Độ tin cậy của phân loại chủng loại")
+    is_uncertain: bool = Field(False, description="True khi phân loại chủng loại không đạt ngưỡng tin cậy")
+    is_non_product: bool = Field(False, description="True khi ảnh được xác định là phi sản phẩm")
 
 
 class ImageSearchResultItem(BaseModel):
@@ -174,6 +177,8 @@ class ImageSearchResponse(BaseModel):
     is_fallback: bool = False
     is_non_product: bool = Field(False, description="True khi ảnh không chứa sản phẩm công nghệ/văn phòng")
     non_product_reason: Optional[str] = Field(None, description="Lý do xác định ảnh không phải sản phẩm")
+    is_uncertain: bool = Field(False, description="True khi mức độ chắc chắn nhận diện loại thiết bị thấp")
+    uncertainty_reason: Optional[str] = Field(None, description="Lý do mức độ chắc chắn thấp hoặc không chắc chắn")
     is_quota_exceeded: bool = Field(False, description="True khi gặp lỗi 429 Quota Exceeded từ AI Provider")
     error_message: Optional[str] = Field(None, description="Thông báo lỗi chi tiết khi AI gặp sự cố")
     provider_used: Optional[str] = Field("local", description="AI Provider thực tế được sử dụng: 'local' hoặc 'gemini'")

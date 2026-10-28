@@ -316,7 +316,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
               border: '1px solid rgba(255, 180, 84, 0.4)',
             }}
           >
-            <Info size={12} /> [ CÙNG NHÓM HÀNG ]
+            <Info size={12} /> [ SẢN PHẨM LIÊN QUAN ]
           </span>
         );
       default:
@@ -1390,14 +1390,20 @@ export const AiAssistantPage = ({ onNavigate }) => {
                       </div>
 
                       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                        <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)', color: 'var(--accent-cyan)' }}>
-                          Loại thiết bị: <strong>{imgSearchResult.query_features.product_type || 'N/A'}</strong>
-                        </span>
+                        {imgSearchResult.query_features.is_uncertain ? (
+                          <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(255, 180, 84, 0.1)', border: '1px solid rgba(255, 180, 84, 0.3)', color: 'var(--accent-amber)' }}>
+                            Loại thiết bị: <strong>Chưa xác định chắc chắn (Độ tin cậy thấp)</strong>
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)', color: 'var(--accent-cyan)' }}>
+                            Loại thiết bị: <strong>{imgSearchResult.query_features.product_type || 'Chưa rõ'}</strong>
+                          </span>
+                        )}
                         <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(255, 180, 84, 0.1)', border: '1px solid rgba(255, 180, 84, 0.3)', color: 'var(--accent-amber)' }}>
-                          Màu sắc chủ đạo: <strong>{imgSearchResult.query_features.dominant_color || 'N/A'}</strong>
+                          Màu sắc chủ đạo: <strong>{imgSearchResult.query_features.dominant_color || 'Chưa rõ'}</strong>
                         </span>
                         <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(57, 211, 83, 0.1)', border: '1px solid rgba(57, 211, 83, 0.3)', color: 'var(--accent-green)' }}>
-                          Kiểu dáng: <strong>{imgSearchResult.query_features.shape_form || 'N/A'}</strong>
+                          Kiểu dáng: <strong>{imgSearchResult.query_features.shape_form || 'Chưa rõ'}</strong>
                         </span>
                       </div>
 
@@ -1458,10 +1464,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
                         color: 'var(--text-muted)',
                       }}
                     >
-                      <AlertCircle size={32} style={{ opacity: 0.5, marginBottom: '0.5rem' }} />
-                      <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>Không tìm thấy sản phẩm nào phù hợp</div>
-                      <div style={{ fontSize: '0.82rem', marginTop: '0.25rem' }}>
-                        Hãy thử tải lên một hình ảnh khác rõ ràng hơn hoặc chọn ảnh mẫu phía trên.
+                      <AlertCircle size={32} style={{ opacity: 0.7, marginBottom: '0.5rem', color: 'var(--accent-amber)' }} />
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>Không tìm thấy sản phẩm nào phù hợp</div>
+                      <div style={{ fontSize: '0.82rem', marginTop: '0.25rem', color: 'var(--text-muted)' }}>
+                        {imgSearchResult.uncertainty_reason || 'Hãy thử tải lên một hình ảnh khác rõ ràng hơn hoặc chụp cận cảnh sản phẩm.'}
                       </div>
                     </div>
                   ) : (

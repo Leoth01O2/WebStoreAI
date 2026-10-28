@@ -77,9 +77,12 @@ class TestLocalVisionEmbedding:
     def test_extract_visual_features_and_guard(self):
         img = Image.new("RGB", (64, 64), color=(0, 200, 0))
         features, is_non_product, reason = local_vision_service.extract_query_visual_features_local(img)
-        assert features.product_type is not None
-        assert features.dominant_color is not None
         assert isinstance(is_non_product, bool)
+        if is_non_product:
+            assert features.is_non_product is True
+            assert len(reason) > 0
+        else:
+            assert features.product_type is not None
 
 
 class TestSQLiteGroundingAndSecurity:
@@ -121,7 +124,7 @@ class TestVisualIndexCRUD:
     """Requirement 5: Synchronization & efficiency on product updates."""
 
     def test_price_stock_only_update_skips_visual_reindex(self):
-        visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status"}
+        visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status", "brand", "product_type"}
         price_stock_update = {"price": 199000, "stock": 15}
         has_visual_change = any(k in price_stock_update for k in visual_sensitive_keys)
         assert not has_visual_change

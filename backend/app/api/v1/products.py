@@ -473,10 +473,7 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
     try:
         updated_keys = set(product_in.model_dump(exclude_unset=True).keys())
         semantic_keys = {"name", "sku", "category_id", "description", "status", "brand", "product_type"}
-        visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status"}
-
-        rag_service.upsert_single_product(product_id)
-        visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status"}
+        visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status", "brand", "product_type"}
 
         rag_service.upsert_single_product(product_id)
 

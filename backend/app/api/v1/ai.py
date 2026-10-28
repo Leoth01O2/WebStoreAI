@@ -202,6 +202,16 @@ def sync_visual_index(
     Đồng bộ dữ liệu hình ảnh sản phẩm từ SQLite vào ChromaDB visual collections (Phase R6).
     """
     reconciled = visual_index_service.reconcile_missing_visual_metadata()
+    if reconcile_only:
+        count = visual_index_service.vector_collection.count()
+        if reconciled > 0:
+            count = visual_index_service.sync_all_visuals()
+        return {
+            "status": "success",
+            "message": f"Đã đối soát metadata hình ảnh: bổ sung {reconciled} bản ghi mới.",
+            "total_indexed": count,
+            "reconciled_metadata_count": reconciled
+        }
     count = visual_index_service.sync_all_visuals()
     return {
         "status": "success",

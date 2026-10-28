@@ -52,6 +52,21 @@ DEVICE_PARENT_CATEGORIES = {
     "game_controller": "Gaming Gear"
 }
 
+# Strict Complementary Ecosystem Accessories (only genuine accessory pairs)
+COMPATIBLE_ACCESSORIES = {
+    "mouse": {"mousepad"},
+    "keyboard": {"mousepad"},
+    "mousepad": {"mouse", "keyboard"},
+    "laptop": {"laptop_stand", "cooling_pad", "hub_adapter", "charger"},
+    "laptop_stand": {"cooling_pad"},
+    "cooling_pad": {"laptop_stand"},
+    "charger": {"cable", "power_bank"},
+    "cable": {"charger", "power_bank"},
+    "power_bank": {"cable", "charger"},
+    "headphone": {"headphone_stand"},
+    "microphone": {"audio_interface", "arm_stand"},
+}
+
 
 class ImageSearchService:
     """
@@ -161,8 +176,11 @@ class ImageSearchService:
     ) -> Tuple[bool, str]:
         """
         Returns (True, reason) if the image is detected as non-product
-        (e.g. human face, food, landscape, or unknown object).
+        (e.g. gameplay screenshot, pixel art, digital graphics, document, person, food, animal, landscape).
         """
+        if query_features.is_non_product:
+            return True, query_features.description or "Ảnh không chứa sản phẩm công nghệ hoặc văn phòng hợp lệ."
+
         desc = (query_features.description or "").lower()
         ptype = (query_features.product_type or "").lower().strip()
         shape = (query_features.shape_form or "").lower()
@@ -206,7 +224,6 @@ class ImageSearchService:
         """
         is_quota_exceeded = False
         api_error_detail: Optional[str] = None
-        fn_lower = (filename or "").lower()
 
         # Always extract 512-dim visual vector locally (fast, deterministic, offline)
         query_vector: Optional[List[float]] = None
@@ -215,37 +232,21 @@ class ImageSearchService:
         except Exception as e:
             logger.warning(f"[IMAGE_SEARCH] Failed to extract local visual vector: {e}")
 
-        # Check if filename corresponds to a known test preset (for offline unit tests)
-        is_test_preset = any(k in fn_lower for k in [
-            "headphone", "tai_nghe", "earphone", "audio-01", "audio-03", "headset",
-            "speaker", "loa", "vintage", "audio-02", "mic", "micro", "audio-04",
-            "keyboard", "ban_phim", "phim", "office-01", "typewriter",
-            "mouse", "chuot", "office-02", "silent", "game-02",
-            "lamp", "den", "smart-01", "charger", "sac", "acc-01", "gan",
-            "gamepad", "tay_cam", "controller", "game-03"
-        ])
-
         # -------------------------------------------------------------------
         # 1. LOCAL MODE (Default): 100% Offline, Zero Cloud API Calls
         # -------------------------------------------------------------------
         if provider == "local" or not settings.GEMINI_API_KEY:
-            # If it's a test preset with explicit keyword, give preference to test keyword attributes
-            if is_test_preset:
-                try:
-                    query_vector = local_vision_service.extract_image_embedding(image_bytes)
-                except Exception:
-                    pass
-                features = self._extract_test_preset_features(fn_lower)
-                return features, False, False, None, query_vector, "local"
-
             try:
-                features, is_np, np_reason, q_vec = local_vision_service.extract_query_visual_features_local(image_bytes, filename, return_vector=True)
+                features, is_np, np_reason, q_vec = local_vision_service.extract_query_visual_features_local(
+                    image_bytes, filename, return_vector=True
+                )
                 query_vector = q_vec
                 return features, False, False, None, query_vector, "local"
             except Exception as e:
                 logger.error(f"[IMAGE_SEARCH] Local vision feature extraction failed: {e}")
                 features = ImageSearchQueryFeatures(
-                    product_type="unknown",
+                    product_type=None,
+                    is_uncertain=True,
                     description=f"Lỗi phân tích hình ảnh: {str(e)[:100]}"
                 )
                 return features, True, False, str(e), query_vector, "local"
@@ -294,7 +295,10 @@ class ImageSearchService:
                 shape_form=parsed.get("shape_form"),
                 material=parsed.get("material"),
                 visible_features=parsed.get("visible_features") or [],
-                description=parsed.get("description")
+                description=parsed.get("description"),
+                confidence=0.85,
+                is_uncertain=False,
+                is_non_product=False
             )
             logger.info(f"[IMAGE_SEARCH] Extracted query features via Gemini: {features.product_type}, {features.dominant_color}")
             return features, False, False, None, query_vector, "gemini"
@@ -314,86 +318,18 @@ class ImageSearchService:
 
             # Gracefully fallback to Local Vision Engine
             try:
-                local_feat, _, _, q_vec = local_vision_service.extract_query_visual_features_local(image_bytes, filename, return_vector=True)
+                local_feat, _, _, q_vec = local_vision_service.extract_query_visual_features_local(
+                    image_bytes, filename, return_vector=True
+                )
                 return local_feat, True, is_quota, api_error_detail, q_vec, "local"
-            except Exception:
-                fallback_feat = self._extract_test_preset_features(fn_lower)
-                return fallback_feat, True, is_quota, api_error_detail, query_vector, "local"
-
-    def _extract_test_preset_features(self, fn_lower: str) -> ImageSearchQueryFeatures:
-        """Heuristic extractor for known test presets and keyword matching."""
-        inferred_type = "unknown"
-        inferred_color = None
-        inferred_shape = None
-        inferred_material = None
-        inferred_features: List[str] = []
-        inferred_desc = "Không tìm thấy đặc trưng sản phẩm công nghệ từ hình ảnh."
-
-        if any(k in fn_lower for k in ["headphone", "tai_nghe", "earphone", "audio-01", "audio-03", "headset"]):
-            inferred_type = "headphone"
-            inferred_color = "black"
-            inferred_shape = "over-ear"
-            inferred_material = "plastic"
-            inferred_features = ["over-ear cushions", "adjustable headband"]
-            inferred_desc = "Tai nghe chụp tai over-ear phong cách cổ điển màu đen"
-        elif any(k in fn_lower for k in ["speaker", "loa", "vintage", "audio-02"]):
-            inferred_type = "speaker"
-            inferred_color = "brown_wood"
-            inferred_shape = "rectangular box"
-            inferred_material = "wood"
-            inferred_features = ["wooden casing", "rotary knobs"]
-            inferred_desc = "Loa Bluetooth vỏ gỗ retro vintage dạng hộp chữ nhật"
-        elif any(k in fn_lower for k in ["mic", "micro", "audio-04"]):
-            inferred_type = "microphone"
-            inferred_color = "black"
-            inferred_shape = "cylindrical desk mic"
-            inferred_material = "metal"
-            inferred_features = ["metal mesh", "desktop stand"]
-            inferred_desc = "Micro thu âm condenser để bàn cắm cổng USB"
-        elif any(k in fn_lower for k in ["keyboard", "ban_phim", "phim", "office-01", "typewriter"]):
-            inferred_type = "keyboard"
-            inferred_color = "white"
-            inferred_shape = "compact tenkeyless 84 keys"
-            inferred_material = "aluminum"
-            inferred_features = ["round keycaps", "steampunk frame"]
-            inferred_desc = "Bàn phím cơ thiết kế phím tròn máy đánh chữ cổ điển"
-        elif any(k in fn_lower for k in ["mouse", "chuot", "office-02", "silent", "game-02"]):
-            inferred_type = "mouse"
-            inferred_color = "dark gray"
-            inferred_shape = "vertical ergonomic"
-            inferred_material = "plastic"
-            inferred_features = ["ergonomic vertical angle", "thumb rest"]
-            inferred_desc = "Chuột không dây công thái học cầm dọc chống mỏi cổ tay"
-        elif any(k in fn_lower for k in ["lamp", "den", "smart-01"]):
-            inferred_type = "lamp"
-            inferred_color = "bronze"
-            inferred_shape = "gooseneck desk lamp"
-            inferred_material = "brass"
-            inferred_features = ["Edison filament bulb", "metal base"]
-            inferred_desc = "Đèn bàn làm việc cổ điển bóng Edison chống cận"
-        elif any(k in fn_lower for k in ["charger", "sac", "acc-01", "gan"]):
-            inferred_type = "charger"
-            inferred_color = "matte gray"
-            inferred_shape = "cube robot figurine"
-            inferred_material = "plastic"
-            inferred_features = ["robot face led", "usb type c ports"]
-            inferred_desc = "Củ sạc nhanh GaN hình robot mini tí hon"
-        elif any(k in fn_lower for k in ["gamepad", "tay_cam", "controller", "game-03"]):
-            inferred_type = "game_controller"
-            inferred_color = "black"
-            inferred_shape = "ergonomic console gamepad"
-            inferred_material = "plastic"
-            inferred_features = ["dual analog sticks", "d-pad"]
-            inferred_desc = "Tay cầm chơi game không dây cần Hall Effect"
-
-        return ImageSearchQueryFeatures(
-            product_type=inferred_type,
-            dominant_color=inferred_color,
-            shape_form=inferred_shape,
-            material=inferred_material,
-            visible_features=inferred_features,
-            description=inferred_desc
-        )
+            except Exception as fb_err:
+                logger.error(f"[IMAGE_SEARCH] Local vision fallback failed: {fb_err}")
+                features = ImageSearchQueryFeatures(
+                    product_type=None,
+                    is_uncertain=True,
+                    description=f"Không thể phân tích ảnh: {str(fb_err)[:100]}"
+                )
+                return features, True, is_quota, api_error_detail, query_vector, "local"
 
     def classify_relationship(
         self,
@@ -405,18 +341,17 @@ class ImageSearchService:
     ) -> Tuple[str, str]:
         """
         Classifies the relationship between candidate product and query image into 4 strict tiers:
-        - MATCH: Exact device category match AND highest visual match score (>= 0.45).
-        - SIMILAR: Same device category, but different color, variant, or styling.
-        - RELATED: Different device category in the complementary accessory/ecosystem.
-        - NONE: Score < 0.25 or completely unrelated device.
+        - MATCH: Confirmed category match AND high visual match score (>= 0.65), or very high visual similarity (>= 0.78).
+        - SIMILAR: Same/compatible category with moderate visual score (>= 0.45).
+        - RELATED: Different category or ecosystem accessory with score >= 0.35.
+        - NONE: Score < 0.35 or completely unrelated device.
         """
-        q_type_raw = (query_features.product_type or "").lower().strip()
+        q_type_raw = (query_features.product_type or "").lower().strip() if not query_features.is_uncertain else ""
         m_type_raw = str(candidate_meta.get("product_type") or "").lower().strip()
 
-        norm_q = normalize_device_type(q_type_raw)
-        norm_m = normalize_device_type(m_type_raw)
+        norm_q = normalize_device_type(q_type_raw) if q_type_raw else ""
+        norm_m = normalize_device_type(m_type_raw) if m_type_raw else ""
 
-        # Strict Category Equality Check (Zero false positives like 'mouse' in 'mousepad')
         is_same_category = bool(norm_q and norm_m and (norm_q == norm_m))
 
         q_color = (query_features.dominant_color or "").lower().strip()
@@ -424,31 +359,35 @@ class ImageSearchService:
         q_color_tokens = [c.strip() for c in q_color.replace(",", " ").split() if len(c.strip()) > 2]
         color_match = bool(q_color and m_color and any(qc in m_color for qc in q_color_tokens))
 
-        display_type = candidate_meta.get("product_type") or m_type_raw
+        display_type = candidate_meta.get("product_type") or m_type_raw or "thiết bị"
 
-        # --- TIER 1: SAME CATEGORY (e.g. Both are mice) ---
+        # --- TIER 1: SAME CATEGORY ---
         if is_same_category:
-            if is_best_category_match and score >= 0.45:
+            if score >= 0.60 and (is_best_category_match or color_match):
                 relationship = "match"
                 if color_match:
-                    reason = f"Khớp chính xác chủng loại '{display_type}', kiểu dáng và màu sắc chủ đạo của sản phẩm."
+                    reason = f"Khớp chính xác chủng loại '{display_type}', kiểu dáng và màu sắc chủ đạo ({int(score * 100)}%)."
                 else:
                     reason = f"Khớp chính xác chủng loại '{display_type}' và có độ tương đồng hình ảnh/thiết kế cao nhất ({int(score * 100)}%)."
-            elif score >= 0.68 and color_match:
-                relationship = "match"
-                reason = f"Khớp chính xác chủng loại '{display_type}' và màu sắc/kiểu dáng nhận diện của sản phẩm."
-            else:
+            elif score >= 0.35 or (score >= 0.25 and is_best_category_match):
                 relationship = "similar"
-                reason = f"Sản phẩm tương tự cùng chủng loại '{display_type}', khác biệt về biến thể màu sắc hoặc chi tiết hoàn thiện."
+                reason = f"Sản phẩm tương tự cùng chủng loại '{display_type}', khác biệt về biến thể màu sắc hoặc chi tiết hoàn thiện ({int(score * 100)}%)."
+            elif score >= 0.20:
+                relationship = "related"
+                reason = f"Sản phẩm cùng chủng loại '{display_type}' trong cửa hàng ({int(score * 100)}%)."
+            else:
+                relationship = "none"
+                reason = f"Độ tương đồng trực quan dưới ngưỡng phù hợp ({int(score * 100)}%)."
 
-        # --- TIER 2: DIFFERENT CATEGORY (e.g. mouse vs mousepad, headphone, controller) ---
+        # --- TIER 2: DIFFERENT CATEGORY / UNCERTAIN CATEGORY ---
         else:
-            if score >= 0.25:
+            # Different device categories (e.g. mouse vs mousepad, headphone vs speaker) can NEVER be MATCH or SIMILAR
+            if score >= 0.35:
                 relationship = "related"
                 reason = f"Sản phẩm liên quan hoặc phụ kiện bổ trợ trong cùng hệ sinh thái thiết bị ('{display_type}')."
             else:
                 relationship = "none"
-                reason = "Sản phẩm thuộc danh mục khác và độ tương đồng trực quan dưới ngưỡng phù hợp."
+                reason = f"Sản phẩm thuộc danh mục khác ('{display_type}') và độ tương đồng trực quan dưới ngưỡng phù hợp (< 35%)."
 
         return relationship, reason
 
@@ -465,12 +404,12 @@ class ImageSearchService:
         Full Image Search Pipeline (Phase R6):
         1. Validate uploaded image (size, MIME, pixel count, binary integrity).
         2. Extract query visual features and 512-dim visual query vector.
-        3. Check Non-Product guard (early exit if photo is person, food, animal, landscape).
-        4. Retrieve candidates from ChromaDB direct visual vector index.
+        3. Check Non-Product guard (early exit if photo is gameplay, pixel art, person, food, animal, landscape).
+        4. Retrieve candidates from ChromaDB direct visual vector index across active catalog.
         5. Ground with SQLite: read authoritative product data (price, stock, status).
            Filter out inactive/discontinued products. Zero cost_price leakage.
-        6. Classify relationship (MATCH, SIMILAR, RELATED, NONE).
-        7. Return standardized response with provider_used indicator.
+        6. Classify relationship (MATCH, SIMILAR, RELATED, NONE) with grounded explanations.
+        7. Return standardized response with provider_used, uncertainty, and accuracy guarantees.
         """
         start_time = time.perf_counter()
 
@@ -513,26 +452,30 @@ class ImageSearchService:
                 is_fallback=is_fallback,
                 is_non_product=True,
                 non_product_reason=np_reason,
+                is_uncertain=False,
                 is_quota_exceeded=False,
                 error_message=error_msg,
                 provider_used=actual_provider
             )
 
+        is_uncertain = bool(query_features.is_uncertain)
+
         # 3. Query candidate products using direct visual vector or textual representation
         query_text = (
-            f"Chủng loại: {query_features.product_type} | "
-            f"Màu sắc: {query_features.dominant_color} | "
-            f"Kiểu dáng: {query_features.shape_form} | "
+            f"Chủng loại: {query_features.product_type or ''} | "
+            f"Màu sắc: {query_features.dominant_color or ''} | "
+            f"Kiểu dáng: {query_features.shape_form or ''} | "
             f"Mô tả: {query_features.description or ''}"
         )
 
         query_attributes = {
             "product_type": query_features.product_type,
             "dominant_color": query_features.dominant_color,
-            "shape_form": query_features.shape_form
+            "shape_form": query_features.shape_form,
+            "is_uncertain": is_uncertain
         }
 
-        fetch_limit = max(limit * 2, 8)
+        fetch_limit = max(limit * 3, 12)
         raw_candidates = visual_index_service.search_visual_candidates(
             query_vector=query_vector,
             query_text=query_text,
@@ -548,6 +491,8 @@ class ImageSearchService:
                 total_candidates_found=0,
                 execution_time_ms=elapsed_ms,
                 is_fallback=is_fallback,
+                is_uncertain=is_uncertain,
+                uncertainty_reason="Không tìm thấy sản phẩm nào trong kho hàng có đặc trưng thị giác tương đồng." if is_uncertain else None,
                 provider_used=actual_provider
             )
 
@@ -560,7 +505,8 @@ class ImageSearchService:
             cursor.execute(f"""
                 SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                        p.selling_price, p.stock_quantity, p.unit, p.status, p.image_url, p.description,
-                       v.product_type as v_product_type
+                       p.brand, p.product_type as p_product_type,
+                       v.product_type as v_product_type, v.dominant_color, v.shape_form
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
                 LEFT JOIN product_visual_metadata v ON p.id = v.product_id
@@ -568,49 +514,24 @@ class ImageSearchService:
             """, candidate_ids)
             db_products = {row["id"]: dict(row) for row in cursor.fetchall()}
 
-            # Check all active products in warehouse to verify if this device type exists in inventory
-            cursor.execute("""
-                SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                       v.product_type as v_product_type
-                FROM products p
-                LEFT JOIN categories c ON p.category_id = c.id
-                LEFT JOIN product_visual_metadata v ON p.id = v.product_id
-                WHERE p.status = 'active'
-            """)
-            all_warehouse_products = [dict(r) for r in cursor.fetchall()]
+        norm_q_type = normalize_device_type(query_features.product_type or "") if not is_uncertain else ""
 
-        norm_q_type = normalize_device_type(query_features.product_type or "")
+        # Determine if the catalog contains active products matching the query category
+        has_same_category = False
+        if norm_q_type:
+            for cand in raw_candidates:
+                pid = cand["product_id"]
+                if pid in db_products and db_products[pid].get("status") == "active":
+                    cand_type = normalize_device_type(
+                        cand.get("product_type") or db_products[pid].get("v_product_type") or db_products[pid].get("p_product_type")
+                    )
+                    if cand_type == norm_q_type:
+                        has_same_category = True
+                        break
 
-        # Check warehouse inventory for this specific device type
-        matching_warehouse_products = []
-        if norm_q_type and norm_q_type not in ["accessory", "unknown"]:
-            matching_warehouse_products = [
-                p for p in all_warehouse_products
-                if normalize_device_type(p.get("v_product_type")) == norm_q_type
-            ]
-
-        # Requirement 2.2: If uploaded image is a device not in store (or 0 items match), show clear notice
-        if norm_q_type and norm_q_type not in ["accessory", "unknown"] and len(matching_warehouse_products) == 0:
-            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-            msg = "Hiện tại trong kho chưa có sản phẩm nào thuộc loại thiết bị này."
-            query_features.description = msg
-            return ImageSearchResponse(
-                query_features=query_features,
-                results=[],
-                total_candidates_found=0,
-                execution_time_ms=elapsed_ms,
-                is_fallback=is_fallback,
-                error_message=msg,
-                provider_used=actual_provider
-            )
-
-        # 5. Assemble results & Strict Relevance Grouping
-        target_parent_category = DEVICE_PARENT_CATEGORIES.get(norm_q_type)
-        if not target_parent_category and matching_warehouse_products:
-            target_parent_category = matching_warehouse_products[0].get("category_name")
-
-        primary_candidates: List[Tuple[float, Dict[str, Any], Dict[str, Any], str]] = []
-        secondary_candidates: List[Tuple[float, Dict[str, Any], Dict[str, Any], str]] = []
+        # 5. Assemble results using strict multi-tier classification
+        final_items: List[ImageSearchResultItem] = []
+        is_best_cand = True
 
         for cand in raw_candidates:
             pid = cand["product_id"]
@@ -622,33 +543,39 @@ class ImageSearchService:
                 continue
 
             score = cand["combined_score"]
-            cand_type = normalize_device_type(cand.get("product_type") or prod.get("v_product_type") or "")
-            cand_cat_name = prod.get("category_name") or ""
-            display_type = cand.get("product_type") or prod.get("v_product_type") or cand_type
+            display_type = cand.get("product_type") or prod.get("v_product_type") or prod.get("p_product_type") or "thiết bị"
 
-            is_same_type = bool(norm_q_type and cand_type and norm_q_type == cand_type)
-            is_same_parent = bool(target_parent_category and cand_cat_name == target_parent_category)
+            candidate_meta = {
+                "product_type": cand.get("product_type") or prod.get("v_product_type") or prod.get("p_product_type"),
+                "dominant_color": cand.get("dominant_color") or prod.get("dominant_color"),
+                "shape_form": cand.get("shape_form") or prod.get("shape_form"),
+            }
 
-            # NHÓM CHÍNH: CHỈ các sản phẩm đúng loại thiết bị
-            if is_same_type:
-                primary_candidates.append((score, prod, cand, display_type))
-            # NHÓM PHỤ: Cùng nhóm danh mục cha (tối đa 2 sản phẩm tham khảo)
-            elif is_same_parent and score >= 0.25:
-                secondary_candidates.append((score, prod, cand, display_type))
-            # TUYỆT ĐỐI LOẠI BỎ sản phẩm khác danh mục (không hiển thị Chuột, Củ sạc, Hub khi tìm Loa)
+            cand_norm = normalize_device_type(candidate_meta["product_type"])
 
-        final_items: List[ImageSearchResultItem] = []
+            # Category Guard: when the shop HAS products of the requested category,
+            # do not pollute search results with completely unrelated categories (e.g. power_bank for speaker).
+            # Only exact category matches or genuine complementary accessories (e.g. mousepad for mouse) are admitted.
+            if has_same_category:
+                compat_set = COMPATIBLE_ACCESSORIES.get(norm_q_type, set())
+                if cand_norm != norm_q_type:
+                    if cand_norm not in compat_set or score < 0.50:
+                        continue
+            is_best_category_match = is_best_cand and bool(norm_q_type and cand_norm == norm_q_type)
 
-        # Process Primary Group (MATCH / SIMILAR)
-        primary_candidates.sort(key=lambda x: x[0], reverse=True)
-        for idx, (score, prod, cand, display_type) in enumerate(primary_candidates):
-            if idx == 0 and score >= 0.40:
-                rel = "match"
-                reason = f"Khớp chính xác chủng loại '{display_type}' và có độ tương đồng thiết kế cao nhất trong kho hàng."
-            else:
-                rel = "similar"
-                reason = f"Sản phẩm tương tự cùng chủng loại '{display_type}' trong kho hàng."
+            rel, reason = self.classify_relationship(
+                candidate_meta=candidate_meta,
+                query_features=query_features,
+                score=score,
+                product_name=prod.get("name", ""),
+                is_best_category_match=is_best_category_match
+            )
 
+            # Skip candidates with relationship 'none'
+            if rel == "none":
+                continue
+
+            is_best_cand = False
             final_items.append(ImageSearchResultItem(
                 product_id=prod["id"],
                 sku=prod["sku"],
@@ -667,69 +594,16 @@ class ImageSearchService:
                 attr_matches=cand.get("attr_matches") or []
             ))
 
-        # Process Secondary Group (RELATED: tối đa 2 sản phẩm cùng danh mục cha)
-        secondary_candidates.sort(key=lambda x: x[0], reverse=True)
-        for score, prod, cand, display_type in secondary_candidates[:2]:
-            parent_label = target_parent_category or "hệ sinh thái"
-            reason = f"Sản phẩm cùng nhóm {parent_label} ({display_type}) để bạn tham khảo thêm."
-            final_items.append(ImageSearchResultItem(
-                product_id=prod["id"],
-                sku=prod["sku"],
-                name=prod["name"],
-                category_id=prod["category_id"],
-                category_name=prod["category_name"],
-                selling_price=float(prod["selling_price"]),
-                stock_quantity=int(prod["stock_quantity"]),
-                in_stock=(prod["stock_quantity"] > 0),
-                status=prod["status"],
-                image_url=prod["image_url"],
-                description=prod["description"],
-                relationship="related",
-                reason=reason,
-                score=score,
-                attr_matches=cand.get("attr_matches") or []
-            ))
-
-        # Fallback only when query device type was completely generic ('accessory' or 'unknown')
-        if not final_items and (not norm_q_type or norm_q_type in ["accessory", "unknown"]):
-            for cand in raw_candidates:
-                pid = cand["product_id"]
-                if pid not in db_products:
-                    continue
-                prod = db_products[pid]
-                if prod.get("status") == "inactive":
-                    continue
-                score = cand["combined_score"]
-                display_type = cand.get("product_type") or prod.get("v_product_type") or "thiết bị"
-                if score >= 0.40:
-                    rel = "similar"
-                    reason = f"Sản phẩm có độ tương đồng kiểu dáng thị giác ({int(score * 100)}%)."
-                elif score >= 0.25:
-                    rel = "related"
-                    reason = f"Thiết bị tham khảo trong hệ sinh thái sản phẩm."
-                else:
-                    continue
-
-                final_items.append(ImageSearchResultItem(
-                    product_id=prod["id"],
-                    sku=prod["sku"],
-                    name=prod["name"],
-                    category_id=prod["category_id"],
-                    category_name=prod["category_name"],
-                    selling_price=float(prod["selling_price"]),
-                    stock_quantity=int(prod["stock_quantity"]),
-                    in_stock=(prod["stock_quantity"] > 0),
-                    status=prod["status"],
-                    image_url=prod["image_url"],
-                    description=prod["description"],
-                    relationship=rel,
-                    reason=reason,
-                    score=score,
-                    attr_matches=cand.get("attr_matches") or []
-                ))
+        # Check uncertainty / no match reason
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        uncertainty_reason = None
+        if not final_items:
+            if is_uncertain:
+                uncertainty_reason = "Hình ảnh có độ tương đồng thấp với toàn bộ sản phẩm trong cửa hàng hoặc không rõ nét."
+            else:
+                uncertainty_reason = "Không tìm thấy sản phẩm nào trong kho hàng có độ tương đồng thị giác phù hợp (ngưỡng >= 35%)."
 
         final_results = final_items[:limit]
-        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
 
         # 6. Audit Logging in SQLite
         try:
@@ -749,6 +623,8 @@ class ImageSearchService:
             total_candidates_found=len(final_results),
             execution_time_ms=elapsed_ms,
             is_fallback=is_fallback,
+            is_uncertain=is_uncertain,
+            uncertainty_reason=uncertainty_reason,
             provider_used=actual_provider
         )
 
