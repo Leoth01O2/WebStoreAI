@@ -145,6 +145,8 @@ class ReportService:
                     "product_id": r["product_id"],
                     "sku": r["sku"],
                     "name": r["name"],
+                    "product_sku": r["sku"],
+                    "product_name": r["name"],
                     "category_name": r["category_name"],
                     "total_quantity_sold": r["total_quantity_sold"],
                     "total_revenue": float(r["total_revenue"])

@@ -297,9 +297,9 @@ export const DashboardPage = ({ onNavigate }) => {
                             #{idx + 1}
                           </span>
                           <div>
-                            <div style={{ fontWeight: 600 }}>{p.product_name}</div>
+                            <div style={{ fontWeight: 600 }}>{p.name || p.product_name}</div>
                             <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                              {p.product_sku} | {p.category_name}
+                              {(p.sku || p.product_sku) ? `${p.sku || p.product_sku}` : ''}{p.category_name ? ` | ${p.category_name}` : ''}
                             </div>
                           </div>
                         </div>

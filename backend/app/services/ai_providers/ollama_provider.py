@@ -132,7 +132,21 @@ class OllamaProvider(BaseAIProvider):
         options = {
             "temperature": temperature,
             "num_predict": max_tokens,
-            "repeat_penalty": 1.18,
+            "repeat_penalty": 1.22,
+            "stop": [
+                "<|im_end|>",
+                "<|endoftext|>",
+                "[HẾT BÁO CÁO]",
+                "--- HẾT BÁO CÁO ---",
+                "[HẾT]",
+                "--- HẾT ---",
+                "Phong cách giao tiếp:",
+                "**Phong cách giao tiếp:**",
+                "Quyết định:\n",
+                "**Quyết định:**",
+                "[QUY TẮC",
+                "[HỆ THỐNG",
+            ]
         }
         payload = {
             "model": self.model,

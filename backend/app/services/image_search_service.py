@@ -261,7 +261,7 @@ class ImageSearchService:
                 "Hãy trích xuất các đặc trưng trực quan của vật thể chính và trả về DUY NHẤT một chuỗi JSON "
                 "với cấu trúc chính xác như sau, không thêm markdown hay bất kỳ giải thích nào:\n"
                 "{\n"
-                '  "product_type": "headphone | speaker | microphone | keyboard | mouse | desk_mat | lamp | diffuser | clock | smart_scale | fan | charger | cable | hub_adapter | power_bank | laptop_stand | game_controller | mousepad | cooling_pad | accessory",\n'
+                '  "product_type": "headphone | speaker | microphone | keyboard | mouse | desk_mat | lamp | diffuser | clock | smart_scale | fan | charger | cable | hub_adapter | power_bank | laptop_stand | game_controller | mousepad | cooling_pad | camera | smartwatch | laptop | tablet | phone | monitor | accessory",\n'
                 '  "dominant_color": "màu sắc chủ đạo (vd: black, white, silver, brown_wood, dark_green...)",\n'
                 '  "shape_form": "kiểu dáng hình học (vd: over-ear, vertical, compact tenkeyless, rectangular box...)",\n'
                 '  "material": "chất liệu nhận diện (vd: plastic, metal, wood, leather, fabric...)",\n'
@@ -270,17 +270,23 @@ class ImageSearchService:
                 "}"
             )
 
-            response = client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=[
-                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                    prompt
-                ],
-                config=types.GenerateContentConfig(
-                    temperature=0.2,
-                    max_output_tokens=1024
+            import concurrent.futures
+            def _call_gemini_vision():
+                return client.models.generate_content(
+                    model=settings.GEMINI_MODEL,
+                    contents=[
+                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                        prompt
+                    ],
+                    config=types.GenerateContentConfig(
+                        temperature=0.2,
+                        max_output_tokens=1024
+                    )
                 )
-            )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_call_gemini_vision)
+                response = future.result(timeout=7.5)
 
             raw_text = (response.text or "").strip()
             if "```json" in raw_text:
@@ -306,12 +312,19 @@ class ImageSearchService:
         except Exception as e:
             err_str = str(e)
             is_quota = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower()
+            is_timeout = isinstance(e, concurrent.futures.TimeoutError) or "timeout" in err_str.lower()
             if is_quota:
                 api_error_detail = (
-                    "Hạn ngạch AI Gemini Vision (429 Quota Exceeded) đã vượt mức. "
-                    "Hệ thống tự động chuyển sang mô hình Local Vision để hoàn tất tìm kiếm."
+                    "Hạn ngạch Google Gemini Vision (429 Quota Exceeded) đã vượt mức. "
+                    "Hệ thống đã tự động chuyển sang mô hình Local Vision (CLIP Offline)."
                 )
                 logger.warning(f"[IMAGE_SEARCH] Gemini Quota 429 Exceeded: {e}. Falling back to Local Vision.")
+            elif is_timeout:
+                api_error_detail = (
+                    "Kết nối Google Gemini Cloud Vision quá thời gian chờ (timeout > 7s). "
+                    "Hệ thống đã tự động chuyển sang mô hình Local Vision (CLIP Offline)."
+                )
+                logger.warning(f"[IMAGE_SEARCH] Gemini call timed out. Falling back to Local Vision.")
             else:
                 api_error_detail = f"Không thể kết nối Gemini Vision ({err_str[:100]}). Đã chuyển sang Local Vision."
                 logger.warning(f"[IMAGE_SEARCH] Gemini Vision call failed ({e}). Falling back to Local Vision.")
@@ -382,9 +395,19 @@ class ImageSearchService:
         # --- TIER 2: DIFFERENT CATEGORY / UNCERTAIN CATEGORY ---
         else:
             # Different device categories (e.g. mouse vs mousepad, headphone vs speaker) can NEVER be MATCH or SIMILAR
-            if score >= 0.35:
+            # Only genuine ecosystem accessories or products sharing parent category or very high visual similarity qualify
+            compat_set = COMPATIBLE_ACCESSORIES.get(norm_q, set()) if norm_q else set()
+            parent_q = DEVICE_PARENT_CATEGORIES.get(norm_q, "")
+            parent_m = DEVICE_PARENT_CATEGORIES.get(norm_m, "")
+            is_same_parent = bool(parent_q and parent_m and parent_q == parent_m)
+            is_compatible = bool(norm_m and norm_m in compat_set)
+
+            if (is_compatible or is_same_parent) and score >= 0.35:
                 relationship = "related"
-                reason = f"Sản phẩm liên quan hoặc phụ kiện bổ trợ trong cùng hệ sinh thái thiết bị ('{display_type}')."
+                reason = f"Sản phẩm liên quan hoặc phụ kiện bổ trợ trong cùng hệ sinh thái thiết bị ('{display_type}') ({int(score * 100)}%)."
+            elif score >= 0.65:
+                relationship = "related"
+                reason = f"Sản phẩm có độ tương đồng thiết kế và hình thức cao ({int(score * 100)}%)."
             else:
                 relationship = "none"
                 reason = f"Sản phẩm thuộc danh mục khác ('{display_type}') và độ tương đồng trực quan dưới ngưỡng phù hợp (< 35%)."
@@ -553,6 +576,10 @@ class ImageSearchService:
 
             cand_norm = normalize_device_type(candidate_meta["product_type"])
 
+            # When query has low confidence / uncertain device type, reject candidates with low similarity (< 0.55)
+            if is_uncertain and score < 0.55:
+                continue
+
             # Category Guard: when the shop HAS products of the requested category,
             # do not pollute search results with completely unrelated categories (e.g. power_bank for speaker).
             # Only exact category matches or genuine complementary accessories (e.g. mousepad for mouse) are admitted.
@@ -598,10 +625,37 @@ class ImageSearchService:
         elapsed_ms = int((time.perf_counter() - start_time) * 1000)
         uncertainty_reason = None
         if not final_items:
-            if is_uncertain:
-                uncertainty_reason = "Hình ảnh có độ tương đồng thấp với toàn bộ sản phẩm trong cửa hàng hoặc không rõ nét."
+            display_q = (query_features.product_type or "").strip()
+            vi_type_map = {
+                "camera": "máy ảnh (camera)",
+                "smartwatch": "đồng hồ thông minh (smartwatch)",
+                "phone": "điện thoại thông minh (smartphone)",
+                "tablet": "máy tính bảng (tablet)",
+                "monitor": "màn hình máy tính (monitor)",
+                "webcam": "webcam máy tính",
+                "drone": "thiết bị bay (drone)",
+                "headphone": "tai nghe chụp tai (headphone)",
+                "earbuds": "tai nghe nhét tai (earbuds)",
+                "speaker": "loa âm thanh (speaker)",
+                "microphone": "micro thu âm (microphone)",
+                "keyboard": "bàn phím (keyboard)",
+                "mouse": "chuột (mouse)",
+                "mousepad": "lót chuột / bàn di (mousepad)",
+                "game_controller": "tay cầm chơi game (gamepad)",
+                "laptop": "máy tính xách tay (laptop)",
+            }
+            vi_name = vi_type_map.get(display_q.lower(), display_q)
+
+            if is_uncertain or not display_q:
+                uncertainty_reason = (
+                    "AI chưa xác định được rõ chủng loại hoặc không tìm thấy sản phẩm nào trong kho hàng có độ tương đồng phù hợp. "
+                    "Gợi ý: Cửa hàng hiện chuyên về Bàn phím, Chuột, Tai nghe, Loa, Phụ kiện & Dây cáp, Gia dụng thông minh."
+                )
             else:
-                uncertainty_reason = "Không tìm thấy sản phẩm nào trong kho hàng có độ tương đồng thị giác phù hợp (ngưỡng >= 35%)."
+                uncertainty_reason = (
+                    f"AI nhận diện hình ảnh là '{vi_name}'. Tuy nhiên hiện tại kho hàng của shop chưa có sản phẩm phù hợp trong danh mục kinh doanh. "
+                    "Bạn có thể tham khảo các danh mục hiện có: Bàn phím, Chuột, Tai nghe, Loa, Phụ kiện & Dây cáp, Gia dụng thông minh."
+                )
 
         final_results = final_items[:limit]
 
@@ -625,6 +679,8 @@ class ImageSearchService:
             is_fallback=is_fallback,
             is_uncertain=is_uncertain,
             uncertainty_reason=uncertainty_reason,
+            is_quota_exceeded=is_quota_exceeded,
+            error_message=error_msg,
             provider_used=actual_provider
         )
 

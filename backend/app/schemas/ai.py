@@ -81,6 +81,8 @@ class SalesReportResponse(BaseModel):
     period: str
     total_revenue: float
     total_orders: int
+    completed_orders: int = 0
+    cancelled_orders: int = 0
     low_stock_count: int
     top_selling_products: List[Dict[str, Any]]
     is_fallback: bool = False

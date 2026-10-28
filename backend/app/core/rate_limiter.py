@@ -134,9 +134,13 @@ class AIRateLimiter:
     def sanitize_output(self, text: str) -> str:
         """
         Redacts sensitive tokens, API keys, password hashes, and internal secrets from AI output.
+        Also strips thinking blocks and prompt meta-instruction leakage.
         """
         if not text:
             return text
+
+        # Strip internal thinking tags if any model emitted them
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
 
         # Redact Gemini API Key if matched
         if settings.GEMINI_API_KEY and len(settings.GEMINI_API_KEY) > 8:
@@ -152,6 +156,24 @@ class AIRateLimiter:
         # Redact common API key patterns (e.g. AIzaSy... or AQ.Ab...)
         text = re.sub(r'AIzaSy[A-Za-z0-9_-]{20,60}', '[REDACTED_API_KEY]', text)
         text = re.sub(r'AQ\.Ab[A-Za-z0-9_-]{20,60}', '[REDACTED_API_KEY]', text)
+
+        # Strip explicit end markers
+        for marker in ["[HẾT BÁO CÁO]", "--- HẾT BÁO CÁO ---", "[HẾT]", "--- HẾT ---"]:
+            if marker in text:
+                text = text.split(marker)[0].rstrip()
+
+        # Cut off prompt meta-instruction leaks (system prompt echoes / meta rules)
+        meta_leakage_patterns = [
+            r'\n(?:\*\*|\#\#)?\s*Phong\s*cách\s*giao\s*tiếp\s*:\s*.*',
+            r'\n(?:\*\*|\#\#)?\s*Quyết\s*định\s*:\s*(?:\*\*|\#\#)?\s*.*(?:không\s*tự\s*bịa|context).*',
+            r'\n(?:\*\*|\#\#)?\s*Lưu\s*[Ýý]\s*:\s*(?:\*\*|\#\#)?\s*.*(?:không\s*tự\s*bịa|context).*',
+            r'\n\[QUY TẮC.*',
+            r'\n\[HỆ THỐNG\].*',
+        ]
+        for pattern in meta_leakage_patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                text = text[:match.start()].rstrip()
 
         return text
 

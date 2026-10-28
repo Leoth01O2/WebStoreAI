@@ -97,6 +97,31 @@ STORE_CATEGORIES = {
         "a photo of a laptop cooling pad with fans and rgb light",
         "a product photo of a notebook cooling pad base with cooling fans",
     ],
+    "camera": [
+        "a photo of a camera, dslr camera, mirrorless camera, digital camera body or camera lens",
+        "a product photo of a digital photography camera or video camera",
+    ],
+    "webcam": [
+        "a photo of a computer webcam, video conferencing camera or streaming camera",
+    ],
+    "smartwatch": [
+        "a photo of a smartwatch, smart watch, fitness tracker or digital wrist watch",
+        "a product photo of an electronic smart watch device",
+    ],
+    "laptop": [
+        "a photo of a laptop computer, macbook, notebook or ultrabook",
+        "a product photo of an open laptop notebook computer",
+    ],
+    "tablet": [
+        "a photo of a tablet computer, iPad or digital touchscreen tablet",
+    ],
+    "phone": [
+        "a photo of a smartphone, mobile phone or iPhone",
+        "a product photo of a touchscreen mobile smartphone",
+    ],
+    "monitor": [
+        "a photo of a computer monitor, desktop display screen or pc monitor",
+    ],
 }
 
 # Open-Set Non-Product Reference Categories for Robust Zero-Shot Guard
@@ -118,7 +143,7 @@ NON_PRODUCT_LABELS = {
     ],
     "person": [
         "a portrait photo of a human person, man, woman, child, or human face",
-        "a selfie or photograph of a person",
+        "a selfie photo of a person or human facial portrait",
     ],
     "food": [
         "a photo of delicious food, dish, cooked meal, fruit, vegetables, or restaurant drink",
@@ -234,14 +259,49 @@ class LocalVisionService:
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.info(f"[LOCAL_VISION] CLIP model & text embeddings loaded in {elapsed_ms:.1f}ms.")
 
+    def _get_dynamic_catalog_categories(self) -> Dict[str, List[str]]:
+        """Dynamically discovers any new categories or product types from SQLite database."""
+        dynamic: Dict[str, List[str]] = {}
+        try:
+            from app.db.database import get_db_connection
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT DISTINCT product_type FROM products WHERE product_type IS NOT NULL AND status = 'active'"
+                )
+                for row in cursor.fetchall():
+                    ptype = str(row[0]).strip().lower()
+                    if ptype and ptype not in STORE_CATEGORIES:
+                        clean_name = ptype.replace("_", " ")
+                        dynamic[ptype] = [
+                            f"a photo of a {clean_name}",
+                            f"a product photo of a {clean_name} device or accessory",
+                        ]
+                cursor.execute("SELECT name FROM categories")
+                for row in cursor.fetchall():
+                    cname = str(row[0]).strip().lower()
+                    if cname and cname not in dynamic and cname not in STORE_CATEGORIES:
+                        dynamic[cname] = [
+                            f"a product photo of {cname}",
+                            f"a photo of a consumer product in category {cname}",
+                        ]
+        except Exception as e:
+            logger.debug(f"[LOCAL_VISION] Dynamic catalog category discovery note: {e}")
+        return dynamic
+
     def _precompute_text_embeddings(self):
         """Pre-computes and normalizes centroid text embeddings for store & non-product categories."""
         with torch.no_grad():
             self._cat_keys = []
             cat_centroid_list = []
 
-            # 1. Store categories: compute prompt ensemble centroid per category
-            for cat_key, prompts in STORE_CATEGORIES.items():
+            # 1. Merge canonical broad tech categories with dynamic SQLite database categories
+            all_product_categories = dict(STORE_CATEGORIES)
+            dynamic_cats = self._get_dynamic_catalog_categories()
+            all_product_categories.update(dynamic_cats)
+
+            # Compute prompt ensemble centroid per product category
+            for cat_key, prompts in all_product_categories.items():
                 p_inputs = self._processor(text=prompts, return_tensors="pt", padding=True, truncation=True)
                 p_inputs = {k: v.to(self._device) for k, v in p_inputs.items()}
                 p_out = self._model.get_text_features(**p_inputs)
@@ -447,8 +507,8 @@ class LocalVisionService:
             # -------------------------------------------------------------------
             # Decision 1: Definite Non-Product Rejection
             # -------------------------------------------------------------------
-            # Triggered if top non-product exceeds top store similarity OR
-            # non-product probability dominates with high similarity
+            # Triggered only when top non-product strictly dominates top product similarity
+            # and achieves clear non-product confidence (>= 0.22)
             is_non_product = False
             np_reason = ""
             reason_map = {
@@ -464,9 +524,8 @@ class LocalVisionService:
             }
 
             if (
-                top_non_prod_sim >= top_store_sim
-                or (top_non_prod_sim >= 0.20 and top_non_prod_sim >= (top_store_sim - 0.018))
-                or (sum_np_prob > 0.40 and top_non_prod_sim >= 0.20)
+                (top_non_prod_sim > top_store_sim and top_non_prod_sim >= 0.22)
+                or (sum_np_prob > 0.55 and top_non_prod_sim >= 0.22)
             ):
                 is_non_product = True
                 np_reason = reason_map.get(top_non_prod_key, "Ảnh không chứa sản phẩm công nghệ hợp lệ.")
@@ -489,12 +548,11 @@ class LocalVisionService:
             # -------------------------------------------------------------------
             # Decision 2: Open-Set Uncertainty (Low Confidence / Ambiguous Image)
             # -------------------------------------------------------------------
-            # When max store similarity is below threshold or very close to non-product,
+            # When max product similarity is below threshold or very close to non-product,
             # do not force a wrong store category.
             is_uncertain = (
-                top_store_sim < 0.25
-                or (top_store_sim - top_non_prod_sim) < 0.025
-                or (store_margin < 0.018 and top_store_sim < 0.28)
+                top_store_sim < 0.22
+                or (store_margin < 0.015 and top_store_sim < 0.25)
             )
 
             if is_uncertain:

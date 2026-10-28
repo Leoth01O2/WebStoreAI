@@ -16,6 +16,7 @@ import {
   Layers,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   Info,
 } from 'lucide-react';
 import { aiAPI } from '../services/api';
@@ -1361,6 +1362,29 @@ export const AiAssistantPage = ({ onNavigate }) => {
                 </div>
               ) : (
                 <>
+                  {/* Fallback Notice if Gemini was throttled */}
+                  {imgSearchResult.is_fallback && imgSearchResult.error_message && (
+                    <div
+                      style={{
+                        background: 'rgba(255, 180, 84, 0.12)',
+                        border: '1px solid var(--accent-amber)',
+                        borderRadius: '4px',
+                        padding: '0.75rem 1rem',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        fontSize: '0.85rem',
+                        color: 'var(--accent-amber)',
+                      }}
+                    >
+                      <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                      <div>
+                        <strong>Thông báo tự động chuyển đổi AI:</strong> {imgSearchResult.error_message}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Extracted Features Banner */}
                   {imgSearchResult.query_features && (
                     <div
@@ -1616,9 +1640,9 @@ export const AiAssistantPage = ({ onNavigate }) => {
                 </div>
 
                 <div style={{ background: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '1rem' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Số đơn hàng hoàn tất</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Đơn hoàn tất / Tổng đơn</div>
                   <div style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
-                    {repResult.total_orders} đơn
+                    {repResult.completed_orders ?? repResult.total_orders} <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 400 }}>/ {repResult.total_orders} đơn</span>
                   </div>
                 </div>
 

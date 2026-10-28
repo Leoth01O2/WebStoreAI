@@ -23,7 +23,7 @@ def normalize_device_type(ptype: Optional[str]) -> str:
     """
     if not ptype:
         return "accessory"
-    raw = str(ptype).lower().strip().replace("-", "_").replace(" ", "_")
+    raw = ptype.lower().strip().replace("-", "_").replace(" ", "_")
 
     # Direct canonical token matches
     canonical_tokens = {
@@ -80,21 +80,52 @@ def normalize_device_type(ptype: Optional[str]) -> str:
         "can_dien_tu": "smart_scale",
         "fan": "fan",
         "quat": "fan",
+        "camera": "camera",
+        "may_anh": "camera",
+        "smartwatch": "smartwatch",
+        "smart_watch": "smartwatch",
+        "dong_ho_thong_minh": "smartwatch",
+        "laptop": "laptop",
+        "may_tinh_xach_tay": "laptop",
+        "macbook": "laptop",
+        "tablet": "tablet",
+        "may_tinh_bang": "tablet",
+        "ipad": "tablet",
+        "phone": "phone",
+        "smartphone": "phone",
+        "dien_thoai": "phone",
+        "monitor": "monitor",
+        "man_hinh": "monitor",
+        "webcam": "webcam",
     }
     if raw in canonical_tokens:
         return canonical_tokens[raw]
 
-    # Precedence order matching for compound words / phrases:
+    # Precedence order matching for compound words / phrases (compound phrases BEFORE root words):
+    if any(k in raw for k in ["laptop_stand", "gia_do"]):
+        return "laptop_stand"
     if any(k in raw for k in ["cooling_pad", "de_tan_nhiet"]):
         return "cooling_pad"
     if any(k in raw for k in ["mousepad", "mouse_pad", "desk_mat", "ban_di_chuot", "lot_chuot"]):
         return "mousepad"
+    if any(k in raw for k in ["smartwatch", "smart_watch", "dong_ho_thong_minh"]):
+        return "smartwatch"
+    if any(k in raw for k in ["camera", "may_anh", "camcorder"]):
+        return "camera"
+    if any(k in raw for k in ["laptop", "macbook", "notebook"]):
+        return "laptop"
+    if any(k in raw for k in ["tablet", "ipad", "may_tinh_bang"]):
+        return "tablet"
+    if any(k in raw for k in ["smartphone", "dien_thoai"]):
+        return "phone"
+    if any(k in raw for k in ["monitor", "man_hinh"]):
+        return "monitor"
+    if any(k in raw for k in ["webcam"]):
+        return "webcam"
     if any(k in raw for k in ["gamepad", "tay_cam", "controller", "joystick"]):
         return "game_controller"
     if any(k in raw for k in ["hub", "dongle", "docking"]):
         return "hub_adapter"
-    if any(k in raw for k in ["laptop_stand", "gia_do"]):
-        return "laptop_stand"
     if any(k in raw for k in ["power_bank", "pin_du_phong", "sac_du_phong"]):
         return "power_bank"
     if any(k in raw for k in ["earbuds", "earphone", "in_ear", "tws"]):
@@ -211,7 +242,7 @@ class VisualIndexService:
         """Resolves whether an image path points to an existing file on the local disk."""
         if not path_or_url:
             return None
-        clean_path = str(path_or_url).strip()
+        clean_path = path_or_url.strip()
         if clean_path.startswith("http://") or clean_path.startswith("https://") or clean_path.startswith("data:"):
             return None
 
@@ -427,15 +458,15 @@ class VisualIndexService:
         self.collection.upsert(
             ids=ids,
             documents=documents,
-            metadatas=metadatas
+            metadatas=cast(Any, metadatas)
         )
 
         # Upsert into 512-dim visual CLIP vector collection
         self.vector_collection.upsert(
             ids=ids,
             documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas
+            embeddings=cast(Any, embeddings),
+            metadatas=cast(Any, metadatas)
         )
 
         logger.info(f"[VISUAL_INDEX] Successfully synced {len(rows)} product visual records into both ChromaDB collections.")
@@ -483,7 +514,7 @@ class VisualIndexService:
 
         ptype_val = str(meta.get("product_type") or meta.get("p_product_type") or "").lower()
         meta_dict = {
-            "product_id": int(product_id),
+            "product_id": product_id,
             "sku": str(meta.get("sku") or ""),
             "brand": str(meta.get("brand") or "").lower(),
             "product_type": normalize_device_type(ptype_val),
@@ -581,7 +612,7 @@ class VisualIndexService:
         all_metas: List[Dict[str, Any]] = []
         seen_pids: Set[str] = set()
 
-        def _collect_query_matches(res: Optional[Dict[str, Any]]) -> None:
+        def _collect_query_matches(res: Any) -> None:
             if not res:
                 return
             r_ids = res.get("ids")

@@ -25,6 +25,8 @@ class TopProductItem(BaseModel):
     product_id: int
     sku: str
     name: str
+    product_sku: Optional[str] = None
+    product_name: Optional[str] = None
     category_name: Optional[str] = None
     total_quantity_sold: int
     total_revenue: float

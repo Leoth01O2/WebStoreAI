@@ -936,6 +936,63 @@ class AIService:
         return f"Đáp ứng tốt tiêu chí tìm kiếm và nằm trong ngân sách {int(p.get('selling_price', 0)):,} đ"
 
 
+    @staticmethod
+    def _clean_report_output(text: str) -> str:
+        """
+        Sanitizes AI-generated business report output:
+        - Strips leaked prompt meta-instructions, internal notes, and system rules.
+        - Truncates degenerative repetitive loop blocks if local LLM cycled at the end.
+        """
+        if not text:
+            return text
+
+        cleaned = text.strip()
+
+        # 1. Strip thinking blocks
+        cleaned = re.sub(r'<think>.*?</think>', '', cleaned, flags=re.DOTALL)
+
+        # 2. Check for explicit end markers
+        for marker in ["[HẾT BÁO CÁO]", "--- HẾT BÁO CÁO ---", "[HẾT]", "--- HẾT ---"]:
+            if marker in cleaned:
+                cleaned = cleaned.split(marker)[0].rstrip()
+
+        # 3. Cut off known system instruction leakage patterns
+        leakage_patterns = [
+            r'\n(?:\*\*|\#\#)?\s*Ghi\s*[Cc]hú\s*[Bb]ổ\s*[Ss]ung\s*(?:\*\*|\#\#)?.*',
+            r'\n(?:\*\*|\#\#)?\s*Quyết\s*định\s*:\s*(?:\*\*|\#\#)?.*',
+            r'\n(?:\*\*|\#\#)?\s*Phong\s*cách\s*giao\s*tiếp\s*:\s*(?:\*\*|\#\#)?.*',
+            r'\n(?:\*\*|\#\#)?\s*Lưu\s*[Ýý]\s*:\s*(?:\*\*|\#\#)?\s*.*(?:không\s*tự\s*bịa|context).*',
+            r'\n\[QUY TẮC.*',
+            r'\n\[HỆ THỐNG\].*',
+            r'\n\[NHIỆM VỤ\].*',
+            r'\n\[DỮ LIỆU DOANH THU.*',
+        ]
+        for pattern in leakage_patterns:
+            match = re.search(pattern, cleaned, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                cleaned = cleaned[:match.start()].rstrip()
+
+        # 4. Truncate degenerative repetitive loops
+        lines = cleaned.split('\n')
+        seen_lines = {}
+        cutoff_idx = None
+        for idx, line in enumerate(lines):
+            trimmed = line.strip()
+            if len(trimmed) >= 15:
+                count = seen_lines.get(trimmed, 0) + 1
+                seen_lines[trimmed] = count
+                if count >= 3:
+                    cutoff_idx = idx
+                    break
+
+        if cutoff_idx is not None:
+            clean_lines = lines[:cutoff_idx]
+            while clean_lines and (not clean_lines[-1].strip() or clean_lines[-1].strip().startswith('**Kế Hoạch') or clean_lines[-1].strip().startswith('1.')):
+                clean_lines.pop()
+            cleaned = '\n'.join(clean_lines).rstrip()
+
+        return cleaned.strip()
+
     def generate_sales_report(
         self,
         period: str = "month",
@@ -991,7 +1048,9 @@ class AIService:
             f"- Doanh thu hôm nay: {int(summary['today_revenue']):,} VNĐ\n"
             f"- Doanh thu 7 ngày gần nhất: {int(summary.get('week_revenue', 0)):,} VNĐ\n"
             f"- Doanh thu tháng này: {int(summary.get('month_revenue', 0)):,} VNĐ\n"
-            f"- Tổng số đơn hàng: {summary['total_orders']}\n"
+            f"- Tổng số đơn hàng trên hệ thống: {summary['total_orders']} đơn\n"
+            f"- Số đơn hàng hoàn tất thực tế: {summary.get('completed_orders', 0)} đơn\n"
+            f"- Số đơn hàng đã hủy / hoàn tiền: {summary.get('cancelled_orders', 0)} đơn\n"
             f"- Số sản phẩm cần nhập hàng gấp: {summary['low_stock_count']} mặt hàng\n\n"
             f"LƯU Ý QUAN TRỌNG VỀ ĐỐI SOÁT:\n"
             f"- Tuyệt đối không diễn giải doanh số đơn hoàn thành chưa đối soát ({int(summary.get('legacy_unverified_revenue', 0)):,} VNĐ) là tiền đã xác minh hoặc chưa thanh toán. Đây là doanh số các đơn hoàn tất lịch sử cần đối soát thanh toán riêng biệt.\n\n"
@@ -1033,6 +1092,8 @@ class AIService:
             preferred_provider=provider
         )
 
+        ai_analysis = self._clean_report_output(ai_analysis)
+
         latency = int((time.time() - start_time) * 1000)
 
         self._record_audit_log(
@@ -1048,6 +1109,8 @@ class AIService:
             period=period,
             total_revenue=float(summary["total_revenue"]),
             total_orders=int(summary["total_orders"]),
+            completed_orders=int(summary.get("completed_orders", 0)),
+            cancelled_orders=int(summary.get("cancelled_orders", 0)),
             low_stock_count=int(summary["low_stock_count"]),
             top_selling_products=top_products,
             is_fallback=is_fallback,
