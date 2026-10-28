@@ -1,6 +1,6 @@
 # STOREFLOW AI 2.0 — SMART RETAIL & VINTAGE POS MANAGEMENT
 
-> **Dự án tốt nghiệp / Refactor v2:** Hệ thống Quản lý Bán hàng & Điểm bán lẻ (POS) thông minh tích hợp Trí tuệ Nhân tạo Local-First Đa phương thức (Qwen 2.5 1.5B & CLIP ViT-B/32).
+> **Đồ án học phần môn 'Ứng dụng trí tuệ nhân tạo' (StoreFlow AI 2.0):** Hệ thống Quản lý Bán hàng & Điểm bán lẻ (POS) thông minh tích hợp Trí tuệ Nhân tạo Local-First Đa phương thức (Qwen 2.5 1.5B & CLIP ViT-B/32).
 
 ---
 
@@ -18,30 +18,88 @@ StoreFlow AI 2.0 là hệ thống quản lý bán hàng kết hợp phong cách 
 
 ---
 
-## 🚀 HƯỚNG DẪN KHỞI ĐỘNG ỨNG DỤNG (3 BƯỚC)
+## 🛠️ CÀI ĐẶT LẦN ĐẦU KHI CLONE TỪ GITHUB
 
-### Bước 1: Khởi động Ollama Local (Mô hình Qwen 2.5 1.5B)
-Mở PowerShell 1:
+### 1. Yêu cầu môi trường tiên quyết
+- **Python:** 3.10 – 3.12 (khuyên dùng Python 3.12)
+- **Node.js:** Phiên bản 18+ & npm
+- **Ollama:** Tải và cài đặt từ [ollama.com](https://ollama.com)
+
+---
+
+### 2. Thiết lập từng thành phần (Chỉ làm 1 lần duy nhất)
+
+#### Bước 1: Setup Backend
+Mở Terminal 1 tại thư mục gốc của dự án:
 ```powershell
-.\scripts\start_ollama.ps1
+cd backend
+
+# 1. Tạo môi trường ảo
+python -m venv .venv
+
+# 2. Kích hoạt môi trường ảo (Windows PowerShell)
+.\.venv\Scripts\Activate.ps1
+# Nếu gặp lỗi ExecutionPolicy, chạy: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# 3. Cài đặt thư viện
+pip install -r requirements.txt
+
+# 4. Tạo file cấu hình môi trường từ template mẫu
+Copy-Item .env.example .env
+
+# 5. Khởi tạo Database và nạp dữ liệu mẫu (sản phẩm, tài khoản, đơn hàng)
+python seed_data.py
 ```
 
-### Bước 2: Khởi động Backend FastAPI
-Mở PowerShell 2:
+#### Bước 2: Setup Ollama (AI Cục Bộ)
+Mở Terminal 2:
+```powershell
+# Tải mô hình Qwen 2.5 1.5B (chỉ cần tải 1 lần đầu)
+ollama pull qwen2.5:1.5b
+
+# Khởi chạy dịch vụ Ollama
+ollama serve
+```
+
+#### Bước 3: Setup Frontend
+Mở Terminal 3:
+```powershell
+cd frontend
+npm install
+```
+
+---
+
+## 🚀 HƯỚNG DẪN KHỞI ĐỘNG HỆ THỐNG (CÁC LẦN MỞ SAU)
+
+### Cách 1: Khởi động tự động 1-Click (Khuyên dùng)
+Tại thư mục gốc dự án:
+- **Nhấp đúp chuột vào file `start_dev.bat`** (hoặc chạy file `start_dev.ps1` trong PowerShell).
+- File sẽ tự động bật 3 cửa sổ dịch vụ (Ollama, Backend, Frontend) cùng lúc.
+
+---
+
+### Cách 2: Khởi động thủ công (3 Terminal)
+
+#### Terminal 1: Ollama AI
+```powershell
+ollama serve
+```
+
+#### Terminal 2: Backend FastAPI
 ```powershell
 cd backend
 .\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
-*Tài liệu API Swagger:* Truy cập `http://localhost:8000/docs`.
+*Tài liệu API Swagger:* `http://localhost:8000/docs`
 
-### Bước 3: Khởi động Frontend Vite
-Mở PowerShell 3:
+#### Terminal 3: Frontend React
 ```powershell
 cd frontend
 npm run dev
 ```
-*Giao diện người dùng:* Truy cập `http://localhost:5173`.
+*Giao diện StoreFlow AI:* `http://localhost:5173`
 
 ---
 
@@ -59,7 +117,7 @@ npm run dev
 
 ## 📚 TÀI LIỆU DỰ ÁN CHI TIẾT
 
-- **Kịch bản Bảo vệ Đồ án (Demo Guide):** [docs/R8_DEMO_GUIDE.md](docs/R8_DEMO_GUIDE.md)
+- **Kịch bản Báo cáo Học phần / Demo (Demo Guide):** [docs/R8_DEMO_GUIDE.md](docs/R8_DEMO_GUIDE.md)
 - **Báo cáo Nghiệm thu Kỹ thuật R8:** [docs/R8_FINAL_QA_REPORT.md](docs/R8_FINAL_QA_REPORT.md)
 - **Lộ trình Tái cấu trúc R0 – R8:** [docs/REFACTOR_ROADMAP.md](docs/REFACTOR_ROADMAP.md)
 - **Kiến trúc RAG & Grounding:** [docs/RAG_ARCHITECTURE.md](docs/RAG_ARCHITECTURE.md)
