@@ -24,7 +24,7 @@ StoreFlow AI 2.0 là hệ thống quản lý bán hàng kết hợp phong cách 
 - **Python:** 3.10 – 3.12 (khuyên dùng Python 3.12)
 - **Node.js:** Phiên bản 18+ & npm
 - **Ollama:** Tải và cài đặt từ [ollama.com](https://ollama.com)
-
+- **API Key:** Để file .env.example thành .env và viết API Key của mình vào
 ---
 
 ### 2. Thiết lập từng thành phần (Chỉ làm 1 lần duy nhất)
