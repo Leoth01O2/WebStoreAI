@@ -21,17 +21,16 @@ export const StockBadge = ({ stock, minAlert = 5, status = 'active' }) => {
   return <Badge variant="green">Còn {stock}</Badge>;
 };
 
-export const RoleBadge = ({ role }) => {
+export const RoleBadge = ({ role, short = false }) => {
   switch (role) {
     case 'superadmin':
-    case 'manager':
-      return <Badge variant="blue">Chủ Cửa Hàng (SuperAdmin)</Badge>;
+      return <Badge variant="purple">{short ? 'Chủ Shop' : 'Chủ Cửa Hàng (SuperAdmin)'}</Badge>;
     case 'admin':
-      return <Badge variant="amber">Quản Trị Viên (Admin)</Badge>;
+      return <Badge variant="blue">{short ? 'Admin Dev' : 'Quản Trị Viên (Admin)'}</Badge>;
     case 'staff':
-      return <Badge variant="green">Thu Ngân / Nhân Viên</Badge>;
+      return <Badge variant="green">{short ? 'Thu Ngân' : 'Thu Ngân (Staff)'}</Badge>;
     case 'customer':
-      return <Badge variant="muted">Khách Hàng</Badge>;
+      return <Badge variant="amber">{short ? 'Khách Hàng' : 'Khách Hàng (Customer)'}</Badge>;
     default:
       return <Badge variant="muted">{role}</Badge>;
   }
@@ -39,6 +38,7 @@ export const RoleBadge = ({ role }) => {
 
 export const ORDER_STATUS_CONFIG = {
   pending: { label: 'Chờ duyệt', variant: 'amber' },
+  confirmed: { label: 'Đã duyệt (Chờ thu tiền)', variant: 'blue' },
   admin_approved: { label: 'Đã duyệt', variant: 'blue' },
   processing: { label: 'Đang xử lý', variant: 'amber' },
   completed: { label: 'Hoàn thành', variant: 'green' },
@@ -49,6 +49,51 @@ export const ORDER_STATUS_CONFIG = {
 export const OrderStatusBadge = ({ status }) => {
   const config = ORDER_STATUS_CONFIG[status] || {
     label: status || 'Chưa xác định',
+    variant: 'muted',
+  };
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+};
+
+export const PAYMENT_STATUS_CONFIG = {
+  unpaid: { label: 'Chưa thanh toán', variant: 'amber' },
+  pending_verification: { label: 'Chờ xác minh', variant: 'blue' },
+  paid: { label: 'Đã thanh toán', variant: 'green' },
+  refund_pending: { label: 'Chờ hoàn tiền', variant: 'amber' },
+  refunded: { label: 'Đã hoàn tiền', variant: 'red' },
+  unverified_legacy: { label: 'Lịch sử chưa đối soát', variant: 'muted' },
+  pending: { label: 'Chờ thanh toán', variant: 'amber' },
+  completed: { label: 'Đã thanh toán', variant: 'green' },
+};
+
+export const PaymentStatusBadge = ({ status, orderStatus }) => {
+  let effectiveStatus = status;
+  if (orderStatus === 'completed' && (!status || status === 'unverified_legacy' || status === 'unpaid' || status === 'pending')) {
+    effectiveStatus = 'paid';
+  }
+  const config = PAYMENT_STATUS_CONFIG[effectiveStatus] || {
+    label: effectiveStatus || 'Chưa xác định',
+    variant: 'muted',
+  };
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+};
+
+export const FULFILLMENT_STATUS_CONFIG = {
+  unfulfilled: { label: 'Chưa giao hàng', variant: 'amber' },
+  packing: { label: 'Đang đóng gói', variant: 'blue' },
+  shipping: { label: 'Đang giao hàng', variant: 'blue' },
+  delivered: { label: 'Đã giao hàng', variant: 'green' },
+  delivery_failed: { label: 'Giao thất bại', variant: 'red' },
+  returned_to_inventory: { label: 'Đã nhập lại kho', variant: 'muted' },
+  legacy_unknown: { label: 'Lịch sử chưa rõ', variant: 'muted' },
+};
+
+export const FulfillmentStatusBadge = ({ status, orderStatus }) => {
+  let effectiveStatus = status;
+  if (orderStatus === 'completed' && (!status || status === 'legacy_unknown' || status === 'unfulfilled')) {
+    effectiveStatus = 'delivered';
+  }
+  const config = FULFILLMENT_STATUS_CONFIG[effectiveStatus] || {
+    label: effectiveStatus || 'Chưa xác định',
     variant: 'muted',
   };
   return <Badge variant={config.variant}>{config.label}</Badge>;

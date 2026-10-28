@@ -11,14 +11,29 @@ from app.schemas.ai import (
     SalesQARequest,
     SalesQAResponse,
     AIAuditLogResponse,
-    ImageSearchResponse
+    ImageSearchResponse,
+    AIProvidersStatusResponse
 )
 from app.services.ai_service import ai_service
 from app.services.rag_service import rag_service
 from app.services.image_search_service import image_search_service
+from app.services.visual_index_service import visual_index_service
+from app.services.ai_providers.manager import ai_provider_manager
 
 router = APIRouter(prefix="/ai", tags=["AI & Hybrid RAG Assistant"])
 
+
+@router.get(
+    "/providers",
+    response_model=AIProvidersStatusResponse,
+    summary="Kiểm tra trạng thái các AI Providers (Ollama, Gemini, Grounded)"
+)
+def get_ai_providers_status():
+    """
+    Xem trạng thái sẵn sàng, mô hình đang chạy và cấu hình của các AI Provider.
+    Công khai cho toàn bộ người dùng để giao diện hiển thị badge nguồn AI tương ứng.
+    """
+    return ai_provider_manager.get_status_overview()
 
 
 @router.post(
@@ -50,7 +65,8 @@ def recommend_products(
         budget=request.budget,
         limit=request.limit or 5,
         user_id=user_id,
-        user_role=user_role
+        user_role=user_role,
+        provider=request.provider
     )
 
 
@@ -72,7 +88,8 @@ def generate_sales_report(
     return ai_service.generate_sales_report(
         period=request.period or "month",
         user_id=current_user.get("id"),
-        user_role=current_user.get("role", "superadmin")
+        user_role=current_user.get("role", "superadmin"),
+        provider=request.provider
     )
 
 
@@ -110,7 +127,8 @@ def answer_sales_qa(
         question=request.query,
         user_id=user_id,
         user_role=user_role,
-        user_full_name=user_full_name
+        user_full_name=user_full_name,
+        provider=request.provider
     )
 
 
@@ -130,21 +148,76 @@ def get_ai_audit_logs(
     return ai_service.get_audit_logs(limit=limit)
 
 
+@router.get(
+    "/sync-status",
+    summary="Kiểm tra trạng thái đồng bộ giữa SQLite và Vector DB ChromaDB (Admin/SuperAdmin only)"
+)
+def get_sync_status(
+    current_user: dict = Depends(require_roles("admin", "superadmin"))
+):
+    """
+    Kiểm tra tình trạng đồng bộ dữ liệu giữa bảng products (SQLite) và collection ChromaDB.
+    Phát hiện các sản phẩm chưa có vector hoặc vector mồ côi.
+    """
+    return rag_service.check_sync_status()
+
+
 @router.post(
     "/sync-index",
     summary="Đồng bộ lại toàn bộ sản phẩm vào Vector DB ChromaDB (Admin/SuperAdmin only)"
 )
 def sync_vector_index(
+    reconcile_only: bool = Query(False, description="Chỉ đối soát và đồng bộ các bản ghi sai lệch/thiếu"),
     current_user: dict = Depends(require_roles("admin", "superadmin"))
 ):
     """
-    Buộc quét lại toàn bộ danh mục sản phẩm từ SQLite và nạp lại vào ChromaDB.
+    Đồng bộ dữ liệu sản phẩm từ SQLite vào ChromaDB.
+    Nếu reconcile_only=True: tự động phát hiện, bổ sung vector thiếu và dọn dẹp vector mồ côi.
+    Nếu reconcile_only=False: quét và ghi đè lại toàn bộ catalog.
     """
+    if reconcile_only:
+        res = rag_service.reconcile_sync()
+        return {
+            "status": "success",
+            "message": f"Đã đối soát và đồng bộ tự phục hồi: bổ sung {res['upserted_count']}, xóa {res['deleted_count']}",
+            "details": res
+        }
     count = rag_service.sync_all_products()
     return {
         "status": "success",
         "message": f"Đã đồng bộ thành công {count} sản phẩm vào ChromaDB",
         "total_indexed": count
+    }
+
+
+@router.post(
+    "/sync-visuals",
+    summary="Đồng bộ chỉ mục hình ảnh sản phẩm vào ChromaDB (Admin/SuperAdmin)"
+)
+def sync_visual_index(
+    reconcile_only: bool = Query(True, description="Chỉ đối soát và bổ sung sản phẩm thiếu metadata"),
+    current_user: dict = Depends(require_roles("admin", "superadmin"))
+):
+    """
+    Đồng bộ dữ liệu hình ảnh sản phẩm từ SQLite vào ChromaDB visual collections (Phase R6).
+    """
+    reconciled = visual_index_service.reconcile_missing_visual_metadata()
+    if reconcile_only:
+        count = visual_index_service.vector_collection.count()
+        if reconciled > 0:
+            count = visual_index_service.sync_all_visuals()
+        return {
+            "status": "success",
+            "message": f"Đã đối soát metadata hình ảnh: bổ sung {reconciled} bản ghi mới.",
+            "total_indexed": count,
+            "reconciled_metadata_count": reconciled
+        }
+    count = visual_index_service.sync_all_visuals()
+    return {
+        "status": "success",
+        "message": f"Đã đối soát và đồng bộ chỉ mục hình ảnh: bổ sung {reconciled} metadata mới, tổng {count} sản phẩm đã được lập chỉ mục.",
+        "total_indexed": count,
+        "reconciled_metadata_count": reconciled
     }
 
 
@@ -156,15 +229,16 @@ def sync_vector_index(
 async def image_search(
     file: UploadFile = File(..., description="File ảnh sản phẩm cần tìm kiếm (JPG, PNG, WebP <= 5MB)"),
     limit: int = Query(5, ge=1, le=20, description="Số lượng sản phẩm tối đa trả về"),
+    provider: str = Query("local", description="Chế độ xử lý: 'local' (mặc định, Offline CLIP) hoặc 'gemini'"),
     current_user: Optional[dict] = Depends(enforce_ai_rate_limit)
 ):
     """
     Tìm kiếm sản phẩm thực tế trong kho bằng hình ảnh tải lên.
-    Luồng xử lý (Phase 12D):
-    1. Validation: Kiểm tra mime-type, dung lượng (<= 5MB) và tính toàn vẹn file ảnh.
-    2. Feature Extraction: Trích xuất đặc trưng hình ảnh (chủng loại, màu sắc, kiểu dáng, mô tả).
-    3. Candidate Retrieval: Truy vấn Top-K từ Visual Index có sẵn (Zero bulk Vision API call).
-    4. SQLite Truth Guard: Xác minh giá bán thực tế, số lượng tồn kho và trạng thái trực tiếp từ SQLite.
+    Luồng xử lý (Phase R6):
+    1. Validation: Kiểm tra mime-type, dung lượng (<= 5MB), PIL binary integrity và giới hạn pixel.
+    2. Local Feature Extraction: Trích xuất 512-dim visual embedding và thuộc tính trực quan bằng Local CLIP 100% offline.
+    3. Candidate Retrieval: Truy vấn vector cosine similarity từ ChromaDB storeflow_product_visual_vectors.
+    4. SQLite Truth Guard: Xác minh giá bán thực tế, tồn kho và trạng thái trực tiếp từ SQLite (loại trừ inactive, 0% leak cost_price).
     5. Relationship Classification: Phân loại 4 mức độ (Match, Similar, Related, None) có lý do đối chiếu.
     """
     contents = await file.read()
@@ -175,6 +249,7 @@ async def image_search(
         filename=file.filename or "uploaded_image.jpg",
         content_type=file.content_type,
         limit=limit,
-        user_id=user_id
+        user_id=user_id,
+        provider=provider
     )
 

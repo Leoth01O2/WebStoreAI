@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Sparkles,
   Bot,
@@ -16,6 +16,7 @@ import {
   Layers,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   Info,
 } from 'lucide-react';
 import { aiAPI } from '../services/api';
@@ -30,25 +31,53 @@ export const AiAssistantPage = ({ onNavigate }) => {
   const { user } = useAuth();
   const { addToast } = useToast();
 
-  const isSuperAdmin = user?.role === 'superadmin' || user?.role === 'manager';
+  const isSuperAdmin = user?.role === 'superadmin';
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
 
   // Active sub-tab: 'recommend' (Tư vấn sản phẩm) | 'image-search' (Tìm kiếm bằng hình ảnh) | 'report' (Phân tích doanh thu AI)
   const [activeTab, setActiveTab] = useState('recommend');
+
+  // --- AI PROVIDER STATE (PHASE R5) ---
+  const [providersInfo, setProvidersInfo] = useState(null);
+  const [providersLoading, setProvidersLoading] = useState(true);
+  const [selectedProvider, setSelectedProvider] = useState('auto'); // 'auto' | 'ollama' | 'gemini' | 'grounded'
+
+  const fetchProviders = async () => {
+    setProvidersLoading(true);
+    try {
+      const res = await aiAPI.getProviders();
+      setProvidersInfo(res);
+    } catch (err) {
+      console.warn('Không thể tải danh sách AI providers:', err);
+    } finally {
+      setProvidersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProviders();
+  }, []);
 
   // --- TAB 1: PRODUCT RECOMMENDATION STATE ---
   const [recQuery, setRecQuery] = useState('');
   const [recBudget, setRecBudget] = useState('');
   const [recLoading, setRecLoading] = useState(false);
   const [recResult, setRecResult] = useState(null);
+  const handleRecQueryKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleRecommendSubmit(e);
+    }
+  };
 
-  // --- TAB 2: IMAGE SEARCH STATE (PHASE 12E) ---
+  // --- TAB 2: IMAGE SEARCH STATE (PHASE R6) ---
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [imgSearchLoading, setImgSearchLoading] = useState(false);
   const [imgSearchResult, setImgSearchResult] = useState(null);
   const [selectedProductDetail, setSelectedProductDetail] = useState(null);
+  const [visionProvider, setVisionProvider] = useState('local');
   const fileInputRef = useRef(null);
 
   const handleFileChange = (file) => {
@@ -97,7 +126,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleImageSearchSubmit = async (fileToSubmit = selectedFile) => {
+  const handleImageSearchSubmit = async (fileToSubmit = selectedFile, chosenProvider = visionProvider) => {
     const file = fileToSubmit || selectedFile;
     if (!file) {
       addToast('Vui lòng chọn hoặc kéo thả một file ảnh để tìm kiếm', 'warning');
@@ -105,7 +134,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
     }
     try {
       setImgSearchLoading(true);
-      const data = await aiAPI.imageSearch(file, 6);
+      const data = await aiAPI.imageSearch(file, 6, chosenProvider);
 
       // Quota Exceeded Guard: nếu hết token/quota Gemini API
       if (data.is_quota_exceeded) {
@@ -180,7 +209,8 @@ export const AiAssistantPage = ({ onNavigate }) => {
     }
     try {
       setRecLoading(true);
-      const data = await aiAPI.recommend(recQuery.trim(), recBudget || null, 5);
+      const provParam = selectedProvider === 'auto' ? null : selectedProvider;
+      const data = await aiAPI.recommend(recQuery.trim(), recBudget || null, 5, provParam);
       setRecResult(data);
     } catch (err) {
       addToast(err.message, 'error');
@@ -198,7 +228,8 @@ export const AiAssistantPage = ({ onNavigate }) => {
     try {
       setRepLoading(true);
       setRepPeriod(period);
-      const data = await aiAPI.generateSalesReport(period);
+      const provParam = selectedProvider === 'auto' ? null : selectedProvider;
+      const data = await aiAPI.generateSalesReport(period, provParam);
       setRepResult(data);
     } catch (err) {
       addToast(err.message, 'error');
@@ -236,22 +267,28 @@ export const AiAssistantPage = ({ onNavigate }) => {
        prod?.price !== undefined)
     );
 
+    const baseStyle = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '0.75rem',
+      padding: '2px 8px',
+      borderRadius: '3px',
+      fontFamily: 'var(--font-mono)',
+      fontWeight: 700,
+      whiteSpace: 'nowrap',
+      flexShrink: 0,
+    };
+
     switch (norm) {
       case 'MATCH':
         return (
           <span
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '3px',
+              ...baseStyle,
               background: 'rgba(57, 211, 83, 0.15)',
               color: 'var(--accent-green)',
               border: '1px solid rgba(57, 211, 83, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
             }}
           >
             <CheckCircle size={12} /> [ KHỚP SẢN PHẨM ]
@@ -261,17 +298,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
         return (
           <span
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '3px',
+              ...baseStyle,
               background: 'rgba(0, 229, 255, 0.15)',
               color: 'var(--accent-cyan)',
               border: '1px solid rgba(0, 229, 255, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
             }}
           >
             <Layers size={12} /> [ SẢN PHẨM TƯƠNG TỰ ]
@@ -281,17 +311,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
         return (
           <span
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '3px',
+              ...baseStyle,
               background: 'rgba(255, 180, 84, 0.15)',
               color: 'var(--accent-amber)',
               border: '1px solid rgba(255, 180, 84, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
             }}
           >
             <Info size={12} /> [ SẢN PHẨM LIÊN QUAN ]
@@ -302,17 +325,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
           return (
             <span
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                fontSize: '0.75rem',
-                padding: '2px 8px',
-                borderRadius: '3px',
+                ...baseStyle,
                 background: 'rgba(57, 211, 83, 0.15)',
                 color: 'var(--accent-green)',
                 border: '1px solid rgba(57, 211, 83, 0.4)',
-                fontFamily: 'var(--font-mono)',
-                fontWeight: 700,
               }}
             >
               <CheckCircle size={12} /> [ ĐÃ ĐỐI CHIẾU ]
@@ -322,17 +338,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
         return (
           <span
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '3px',
+              ...baseStyle,
               background: 'rgba(248, 81, 73, 0.15)',
               color: 'var(--accent-red, #f85149)',
               border: '1px solid rgba(248, 81, 73, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
             }}
           >
             <AlertCircle size={12} /> [ KHÔNG TÌM THẤY ]
@@ -404,18 +413,94 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     boxShadow: '0 0 6px var(--accent-green)',
                   }}
                 />
-                HYBRID RAG ONLINE
+                RETRIEVAL & GROUNDING ONLINE
               </span>
             </div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-              Engine: <span style={{ color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>gemini-3.6-flash</span> | Index:{' '}
-              <span style={{ color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>ChromaDB Persistent</span> | Verification:{' '}
-              <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)' }}>SQLite WAL Guard</span>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span>
+                Active Engine:{' '}
+                <strong style={{
+                  color: activeTab === 'image-search'
+                    ? (visionProvider === 'local' ? 'var(--accent-cyan)' : 'var(--accent-amber)')
+                    : providersLoading ? 'var(--text-muted)' :
+                      (selectedProvider === 'ollama' || (selectedProvider === 'auto' && providersInfo?.active_provider === 'ollama')) ? 'var(--accent-cyan)' :
+                      (selectedProvider === 'gemini' || (selectedProvider === 'auto' && providersInfo?.active_provider === 'gemini')) ? 'var(--accent-green)' : 'var(--accent-amber)',
+                  fontFamily: 'var(--font-mono)'
+                }}>
+                  {activeTab === 'image-search'
+                    ? (visionProvider === 'local' ? 'Local Vision (CLIP Offline)' : 'Gemini Cloud Vision')
+                    : providersLoading
+                    ? '⏳ Đang kiểm tra trạng thái engine...'
+                    : selectedProvider === 'ollama'
+                    ? `Ollama Local (${providersInfo?.providers?.ollama?.model || 'qwen2.5:1.5b'})`
+                    : selectedProvider === 'gemini'
+                    ? `Google Gemini (${providersInfo?.providers?.gemini?.model || 'gemini-2.5-flash'})`
+                    : selectedProvider === 'grounded'
+                    ? 'Grounded Direct Lookup (SQLite WAL)'
+                    : providersInfo?.active_provider === 'ollama'
+                    ? `Ollama Local (${providersInfo.providers?.ollama?.model || 'qwen2.5:1.5b'})`
+                    : providersInfo?.active_provider === 'gemini'
+                    ? `Google Gemini (${providersInfo.providers?.gemini?.model || 'gemini-2.5-flash'})`
+                    : 'Grounded Direct Lookup (SQLite WAL)'}
+                </strong>
+              </span>
+              <span>|</span>
+              <span>Index: <span style={{ color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>ChromaDB Persistent</span></span>
+              <span>|</span>
+              <span>Guard: <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)' }}>SQLite WAL Guard</span></span>
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* AI Provider Switcher (Phase R5) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              background: 'rgba(0, 0, 0, 0.25)',
+              padding: '0.35rem 0.65rem',
+              borderRadius: '4px',
+              border: '1px solid var(--border-color)',
+              fontSize: '0.8rem',
+              opacity: activeTab === 'image-search' ? 0.45 : 1,
+              pointerEvents: activeTab === 'image-search' ? 'none' : 'auto',
+              transition: 'opacity 0.2s ease',
+            }}
+            title={activeTab === 'image-search' ? 'Chế độ AI tìm kiếm ảnh được chọn riêng bên trong tab Tìm kiếm bằng hình ảnh' : 'Chọn AI Provider xử lý (Local Ollama, Cloud Gemini hoặc Grounded Fallback)'}
+          >
+            <Cpu size={14} style={{ color: 'var(--accent-cyan)' }} />
+            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Provider:</span>
+            <select
+              value={selectedProvider}
+              onChange={(e) => setSelectedProvider(e.target.value)}
+              disabled={activeTab === 'image-search'}
+              style={{
+                background: 'var(--panel-bg)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '3px',
+                padding: '2px 6px',
+                fontSize: '0.78rem',
+                fontFamily: 'var(--font-mono)',
+                cursor: activeTab === 'image-search' ? 'not-allowed' : 'pointer',
+              }}
+              title={activeTab === 'image-search' ? 'Chế độ AI tìm kiếm ảnh được chọn riêng bên trong tab Tìm kiếm bằng hình ảnh' : 'Chọn AI Provider xử lý (Local Ollama, Cloud Gemini hoặc Grounded Fallback)'}
+            >
+              <option value="auto">
+                Tự động {providersLoading ? '⏳ (Đang kiểm tra...)' : `(${providersInfo?.active_provider ? providersInfo.active_provider.toUpperCase() : 'MẶC ĐỊNH'})`}
+              </option>
+              <option value="ollama" disabled={!providersLoading && !providersInfo?.providers?.ollama?.available}>
+                Ollama Local {providersLoading ? '⏳ (Đang kiểm tra...)' : (providersInfo?.providers?.ollama?.available ? '🟢 (Khả dụng)' : '🔴 (Chưa chạy)')}
+              </option>
+              <option value="gemini" disabled={!providersLoading && !providersInfo?.providers?.gemini?.available}>
+                Gemini Cloud {providersLoading ? '⏳ (Đang kiểm tra...)' : (providersInfo?.providers?.gemini?.available ? '🟢 (Khả dụng)' : '🔴 (Thiếu Key)')}
+              </option>
+              <option value="grounded">Grounded Fallback 🟢 (SQLite thuần)</option>
+            </select>
+          </div>
+
           {isAdmin && (
             <button
               onClick={handleSyncIndex}
@@ -441,6 +526,29 @@ export const AiAssistantPage = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+
+      {/* Ollama Not Ready Warning Banner */}
+      {!providersLoading && selectedProvider === 'ollama' && providersInfo && !providersInfo.providers?.ollama?.available && (
+        <div
+          style={{
+            marginBottom: '1rem',
+            padding: '0.75rem 1rem',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            fontSize: '0.85rem',
+            color: 'var(--accent-red)',
+          }}
+        >
+          <AlertCircle size={18} />
+          <div>
+            <strong>Ollama Local Service chưa khởi động hoặc chưa tải model:</strong> Dịch vụ chưa sẵn sàng tại <code>http://127.0.0.1:11434</code>. Hệ thống sẽ tự động fallback sang chế độ tra cứu SQLite Grounded để bảo đảm không gián đoạn giao dịch.
+          </div>
+        </div>
+      )}
 
       {/* Navigation Tabs */}
       <div
@@ -559,33 +667,84 @@ export const AiAssistantPage = ({ onNavigate }) => {
             <form onSubmit={handleRecommendSubmit}>
               <div className="ai-query-grid">
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: '6px',
+                      lineHeight: '20px',
+                      fontSize: '12px',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
                     Yêu cầu / Nhu cầu khách hàng:
                   </label>
                   <div style={{ position: 'relative' }}>
-                    <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input
-                      type="text"
-                      className="input"
+                    <Search
+                      size={16}
+                      style={{
+                        position: 'absolute',
+                        left: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: 'var(--text-muted)',
+                        pointerEvents: 'none',
+                        zIndex: 2,
+                      }}
+                    />
+                    <textarea
+                      rows={1}
+                      className="input form-control"
                       placeholder="Ví dụ: Tìm bàn phím cơ gõ êm cho dân văn phòng, tai nghe bluetooth chống ồn..."
                       value={recQuery}
                       onChange={(e) => setRecQuery(e.target.value)}
-                      style={{ paddingLeft: '32px', width: '100%' }}
+                      onKeyDown={handleRecQueryKeyDown}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        height: '44px',
+                        minHeight: '44px',
+                        maxHeight: '44px',
+                        boxSizing: 'border-box',
+                        margin: 0,
+                        padding: '10px 12px 10px 36px',
+                        lineHeight: '22px',
+                        fontSize: '14px',
+                        resize: 'none',
+                        overflowY: 'auto',
+                      }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: '6px',
+                      lineHeight: '20px',
+                      fontSize: '12px',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
                     Ngân sách tối đa (VND, tùy chọn):
                   </label>
                   <input
                     type="number"
-                    className="input"
+                    className="input form-control"
                     placeholder="Không giới hạn"
                     value={recBudget}
                     onChange={(e) => setRecBudget(e.target.value)}
-                    style={{ width: '100%' }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      height: '44px',
+                      minHeight: '44px',
+                      maxHeight: '44px',
+                      boxSizing: 'border-box',
+                      margin: 0,
+                      padding: '0 12px',
+                      fontSize: '14px',
+                    }}
                   />
                 </div>
 
@@ -594,12 +753,19 @@ export const AiAssistantPage = ({ onNavigate }) => {
                   className="btn btn-primary"
                   disabled={recLoading}
                   style={{
-                    height: '38px',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '44px',
+                    minHeight: '44px',
+                    maxHeight: '44px',
+                    boxSizing: 'border-box',
+                    margin: 0,
                     gap: '0.5rem',
                     padding: '0 1.25rem',
                     whiteSpace: 'nowrap',
+                    fontSize: '14px',
+                    fontWeight: 600,
                   }}
                 >
                   <Sparkles size={16} />
@@ -660,9 +826,9 @@ export const AiAssistantPage = ({ onNavigate }) => {
               <div style={{ display: 'inline-block', marginBottom: '0.75rem' }}>
                 <Bot size={36} className="spin-animation" />
               </div>
-              <div style={{ fontSize: '1rem', fontWeight: 600 }}>StoreFlow AI đang xử lý Hybrid RAG...</div>
+              <div style={{ fontSize: '1rem', fontWeight: 600 }}>StoreFlow AI đang xử lý truy vấn sản phẩm...</div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                1. Semantic Search ChromaDB Top-K ➔ 2. SQLite Stock Verification Guard ➔ 3. Gemini 3.6 Flash Generation
+                1. Dense Vector ChromaDB Top-K ➔ 2. Lexical Reranking & SQLite Stock Guard ➔ 3. AI Generation ({selectedProvider === 'ollama' ? 'Ollama Local' : selectedProvider === 'gemini' ? 'Gemini Cloud' : 'Active Provider'})
               </div>
             </div>
           )}
@@ -694,11 +860,41 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     <Terminal size={16} />
                     PHÂN TÍCH TƯ VẤN CỦA TRỢ LÝ AI
                   </div>
-                  {recResult.is_fallback ? (
-                    <Badge variant="warning">Chế độ tra cứu trực tiếp</Badge>
-                  ) : (
-                    <Badge variant="success">Gemini 3.6 Flash Grounded</Badge>
-                  )}
+                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                    {recResult.intent_provider_used && (
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginRight: '4px' }}>
+                        Intent: <strong style={{ color: recResult.intent_provider_used === 'ollama' ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>{recResult.intent_provider_used.toUpperCase()}</strong> |
+                      </span>
+                    )}
+                    {recResult.generation_provider_used === 'ollama' ? (
+                      <Badge variant="blue">Ollama Local ({providersInfo?.providers?.ollama?.model || 'Qwen 2.5 1.5B'})</Badge>
+                    ) : recResult.generation_provider_used === 'gemini' ? (
+                      <Badge variant="success">Gemini Cloud Grounded</Badge>
+                    ) : recResult.generation_provider_used === 'ambiguity_guard' ? (
+                      <Badge variant="warning">Ambiguity Guard (Quy tắc làm rõ)</Badge>
+                    ) : recResult.generation_provider_used === 'domain_guard' ? (
+                      <Badge variant="warning">Domain Guard (Phạm vi kinh doanh)</Badge>
+                    ) : (
+                      <Badge variant="warning">Chế độ tra cứu trực tiếp SQLite</Badge>
+                    )}
+                    {recResult.fallback_reason && (
+                      <span
+                        style={{
+                          fontSize: '0.7rem',
+                          color: 'var(--accent-amber)',
+                          fontFamily: 'var(--font-mono)',
+                          marginLeft: '4px',
+                          border: '1px solid rgba(255, 180, 84, 0.3)',
+                          padding: '1px 6px',
+                          borderRadius: '3px',
+                          background: 'rgba(255, 180, 84, 0.1)',
+                        }}
+                        title={`Lý do chuyển chế độ dự phòng: ${recResult.fallback_reason}`}
+                      >
+                        [{recResult.fallback_reason}]
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div
@@ -740,7 +936,7 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.83rem', color: 'var(--accent-green)', fontWeight: 600 }}>
                         <ShieldCheck size={16} />
-                        <span>Đã đối chiếu <strong>{recResult.recommended_products.length} sản phẩm</strong> còn hàng trong kho SQLite (danh sách chi tiết ở cột bên phải).</span>
+                        <span>Đã xác minh <strong>{recResult.recommended_products.length} sản phẩm phù hợp</strong> đáp ứng tiêu chí trong kho SQLite.</span>
                       </div>
                       <span style={{ fontSize: '0.76rem', color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                         👉 Chọn sản phẩm ở cột phải để Mở bán POS / Thêm giỏ hàng
@@ -754,14 +950,14 @@ export const AiAssistantPage = ({ onNavigate }) => {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <h3 style={{ fontSize: '0.95rem', margin: 0, fontWeight: 700, color: 'var(--text-primary)' }}>
-                    Sản phẩm khả dụng ({recResult.recommended_products.length})
+                    Sản phẩm phù hợp ({recResult.recommended_products ? recResult.recommended_products.length : 0})
                   </h3>
                   <span style={{ fontSize: '0.75rem', color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'var(--font-mono)' }}>
-                    <ShieldCheck size={14} /> Tồn kho xác thực &gt; 0
+                    <ShieldCheck size={14} /> Tiêu chí & Tồn kho &gt; 0
                   </span>
                 </div>
 
-                {recResult.recommended_products.length === 0 ? (
+                {(!recResult.recommended_products || recResult.recommended_products.length === 0) ? (
                   <div
                     style={{
                       background: 'var(--panel-bg)',
@@ -770,12 +966,13 @@ export const AiAssistantPage = ({ onNavigate }) => {
                       padding: '2rem',
                       textAlign: 'center',
                       color: 'var(--text-muted)',
+                      marginBottom: '1rem',
                     }}
                   >
-                    Không tìm thấy sản phẩm nào còn hàng khớp với yêu cầu.
+                    Không có sản phẩm nào đáp ứng đầy đủ tất cả tiêu chí yêu cầu trong kho.
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', marginBottom: '1rem' }}>
                     {recResult.recommended_products.map((p) => (
                       <ProductCard
                         key={p.product_id || p.id || p.sku}
@@ -790,6 +987,37 @@ export const AiAssistantPage = ({ onNavigate }) => {
                         actionLabel={user?.role === 'customer' ? 'Thêm giỏ / POS' : 'Mở bán POS'}
                       />
                     ))}
+                  </div>
+                )}
+
+                {/* Alternative Suggestions (Separately Labeled) */}
+                {recResult.alternative_products && recResult.alternative_products.length > 0 && (
+                  <div style={{ marginTop: '1.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <h4 style={{ fontSize: '0.85rem', margin: 0, fontWeight: 600, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>
+                        Gợi ý tham khảo — chưa đáp ứng đầy đủ yêu cầu ({recResult.alternative_products.length})
+                      </h4>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Chưa đáp ứng đủ tiêu chí</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.75rem' }}>
+                      {recResult.alternative_products.map((p) => (
+                        <ProductCard
+                          key={`alt-${p.product_id || p.id || p.sku}`}
+                          product={{
+                            ...p,
+                            match_reason: p.match_reason || p.ineligible_reason || 'Chưa đáp ứng đầy đủ tiêu chí'
+                          }}
+                          onViewDetail={(prod) => setSelectedProductDetail(prod)}
+                          onSelect={(prod) => {
+                            if (onNavigate) {
+                              onNavigate('pos');
+                              addToast(`Đã chuyển tới POS. Mã sản phẩm: ${prod.sku}`, 'info');
+                            }
+                          }}
+                          actionLabel={user?.role === 'customer' ? 'Xem / Giỏ hàng' : 'Mở bán POS'}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -828,9 +1056,31 @@ export const AiAssistantPage = ({ onNavigate }) => {
                 <Camera size={18} />
                 Tìm kiếm Sản phẩm Bằng Hình ảnh (AI Visual Match Engine)
               </h2>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Tải lên ảnh mẫu hoặc ảnh chụp sản phẩm → Trích xuất đặc trưng thị giác → Tra cứu tương đồng ngữ nghĩa ChromaDB → Đối chiếu tồn kho & giá bán thực tế từ SQLite WAL.
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.4rem' }}>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Tải lên ảnh mẫu hoặc ảnh chụp sản phẩm → Trích xuất đặc trưng thị giác → Tra cứu tương đồng ChromaDB → Đối chiếu tồn kho & giá bán thực tế từ SQLite.
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(0,0,0,0.25)', padding: '4px 10px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Chế độ AI:</span>
+                  <select
+                    value={visionProvider}
+                    onChange={(e) => setVisionProvider(e.target.value)}
+                    style={{
+                      background: 'var(--panel-bg)',
+                      color: visionProvider === 'local' ? 'var(--accent-cyan)' : 'var(--accent-amber)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '3px',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      padding: '2px 8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="local">🖥️ Local Vision (CLIP Offline, 0% Cloud)</option>
+                    <option value="gemini">☁️ Gemini Cloud Vision (Google AI)</option>
+                  </select>
+                </div>
+              </div>
             </div>
 
             <div className="ai-image-search-split">
@@ -1112,6 +1362,29 @@ export const AiAssistantPage = ({ onNavigate }) => {
                 </div>
               ) : (
                 <>
+                  {/* Fallback Notice if Gemini was throttled */}
+                  {imgSearchResult.is_fallback && imgSearchResult.error_message && (
+                    <div
+                      style={{
+                        background: 'rgba(255, 180, 84, 0.12)',
+                        border: '1px solid var(--accent-amber)',
+                        borderRadius: '4px',
+                        padding: '0.75rem 1rem',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        fontSize: '0.85rem',
+                        color: 'var(--accent-amber)',
+                      }}
+                    >
+                      <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                      <div>
+                        <strong>Thông báo tự động chuyển đổi AI:</strong> {imgSearchResult.error_message}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Extracted Features Banner */}
                   {imgSearchResult.query_features && (
                     <div
@@ -1131,20 +1404,30 @@ export const AiAssistantPage = ({ onNavigate }) => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'var(--font-mono)' }}>
                           <Terminal size={16} /> ĐẶC TRƯNG THỊ GIÁC TRÍCH XUẤT (AI VISUAL FEATURES)
                         </div>
-                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                          Thời gian xử lý: <span style={{ color: 'var(--accent-cyan)' }}>{imgSearchResult.execution_time_ms}ms</span> | Ứng viên đối chiếu: <span style={{ color: 'var(--accent-amber)' }}>{imgSearchResult.total_candidates}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: '3px', background: imgSearchResult.provider_used === 'local' ? 'rgba(0, 229, 255, 0.15)' : 'rgba(255, 180, 84, 0.15)', border: `1px solid ${imgSearchResult.provider_used === 'local' ? 'var(--accent-cyan)' : 'var(--accent-amber)'}`, color: imgSearchResult.provider_used === 'local' ? 'var(--accent-cyan)' : 'var(--accent-amber)', fontWeight: 600 }}>
+                            {imgSearchResult.provider_used === 'local' ? '🖥️ Local Vision (CLIP Offline)' : '☁️ Gemini Cloud Vision'}
+                          </span>
+                          <span>Xử lý: <strong style={{ color: 'var(--accent-cyan)' }}>{imgSearchResult.execution_time_ms}ms</strong></span>
+                          <span>Ứng viên: <strong style={{ color: 'var(--accent-amber)' }}>{imgSearchResult.total_candidates_found ?? imgSearchResult.total_candidates ?? 0}</strong></span>
                         </div>
                       </div>
 
                       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                        <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)', color: 'var(--accent-cyan)' }}>
-                          Loại thiết bị: <strong>{imgSearchResult.query_features.product_type || 'N/A'}</strong>
-                        </span>
+                        {imgSearchResult.query_features.is_uncertain ? (
+                          <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(255, 180, 84, 0.1)', border: '1px solid rgba(255, 180, 84, 0.3)', color: 'var(--accent-amber)' }}>
+                            Loại thiết bị: <strong>Chưa xác định chắc chắn (Độ tin cậy thấp)</strong>
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)', color: 'var(--accent-cyan)' }}>
+                            Loại thiết bị: <strong>{imgSearchResult.query_features.product_type || 'Chưa rõ'}</strong>
+                          </span>
+                        )}
                         <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(255, 180, 84, 0.1)', border: '1px solid rgba(255, 180, 84, 0.3)', color: 'var(--accent-amber)' }}>
-                          Màu sắc chủ đạo: <strong>{imgSearchResult.query_features.dominant_color || 'N/A'}</strong>
+                          Màu sắc chủ đạo: <strong>{imgSearchResult.query_features.dominant_color || 'Chưa rõ'}</strong>
                         </span>
                         <span style={{ fontSize: '0.8rem', padding: '2px 8px', borderRadius: '3px', background: 'rgba(57, 211, 83, 0.1)', border: '1px solid rgba(57, 211, 83, 0.3)', color: 'var(--accent-green)' }}>
-                          Kiểu dáng: <strong>{imgSearchResult.query_features.shape_form || 'N/A'}</strong>
+                          Kiểu dáng: <strong>{imgSearchResult.query_features.shape_form || 'Chưa rõ'}</strong>
                         </span>
                       </div>
 
@@ -1205,10 +1488,10 @@ export const AiAssistantPage = ({ onNavigate }) => {
                         color: 'var(--text-muted)',
                       }}
                     >
-                      <AlertCircle size={32} style={{ opacity: 0.5, marginBottom: '0.5rem' }} />
-                      <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>Không tìm thấy sản phẩm nào phù hợp</div>
-                      <div style={{ fontSize: '0.82rem', marginTop: '0.25rem' }}>
-                        Hãy thử tải lên một hình ảnh khác rõ ràng hơn hoặc chọn ảnh mẫu phía trên.
+                      <AlertCircle size={32} style={{ opacity: 0.7, marginBottom: '0.5rem', color: 'var(--accent-amber)' }} />
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>Không tìm thấy sản phẩm nào phù hợp</div>
+                      <div style={{ fontSize: '0.82rem', marginTop: '0.25rem', color: 'var(--text-muted)' }}>
+                        {imgSearchResult.uncertainty_reason || 'Hãy thử tải lên một hình ảnh khác rõ ràng hơn hoặc chụp cận cảnh sản phẩm.'}
                       </div>
                     </div>
                   ) : (
@@ -1336,7 +1619,9 @@ export const AiAssistantPage = ({ onNavigate }) => {
               <div style={{ display: 'inline-block', marginBottom: '0.75rem' }}>
                 <Cpu size={36} className="spin-animation" />
               </div>
-              <div style={{ fontSize: '1.05rem', fontWeight: 600 }}>Gemini 3.6 Flash đang tổng hợp số liệu kinh doanh...</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 600 }}>
+                AI Engine ({selectedProvider === 'ollama' ? 'Ollama Local GPU' : selectedProvider === 'gemini' ? 'Gemini Cloud' : 'Multi-Provider'}) đang tổng hợp số liệu kinh doanh...
+              </div>
               <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
                 Trích xuất SQL Doanh thu ➔ Phân tích Top sản phẩm ➔ Phát hiện nguy cơ hết kho ➔ Đề xuất kế hoạch nhập hàng
               </div>
@@ -1355,9 +1640,9 @@ export const AiAssistantPage = ({ onNavigate }) => {
                 </div>
 
                 <div style={{ background: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '1rem' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Số đơn hàng hoàn tất</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Đơn hoàn tất / Tổng đơn</div>
                   <div style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
-                    {repResult.total_orders} đơn
+                    {repResult.completed_orders ?? repResult.total_orders} <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 400 }}>/ {repResult.total_orders} đơn</span>
                   </div>
                 </div>
 
@@ -1393,10 +1678,12 @@ export const AiAssistantPage = ({ onNavigate }) => {
                     <Terminal size={16} />
                     BÁO CÁO CHIẾN LƯỢC KINH DOANH & ĐỀ XUẤT NHẬP KHO (STOREFLOW BI)
                   </div>
-                  {repResult.is_fallback ? (
-                    <Badge variant="warning">Chế độ SQL Aggregation</Badge>
+                  {repResult.is_fallback || repResult.provider === 'grounded' ? (
+                    <Badge variant="warning">Chế độ SQL Aggregation (Fallback)</Badge>
+                  ) : repResult.provider === 'ollama' ? (
+                    <Badge variant="blue">Ollama Local BI Analysis</Badge>
                   ) : (
-                    <Badge variant="success">AI Grounded Analysis</Badge>
+                    <Badge variant="success">Gemini Grounded Analysis</Badge>
                   )}
                 </div>
 

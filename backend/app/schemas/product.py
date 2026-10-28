@@ -13,6 +13,8 @@ class ProductBase(BaseModel):
     status: str = Field("active", description="Trạng thái: active hoặc inactive")
     image_url: Optional[str] = Field(None, description="Đường dẫn ảnh sản phẩm (upload nội bộ hoặc URL ảnh)")
     description: Optional[str] = Field(None, description="Mô tả chi tiết đặc tính kỹ thuật sản phẩm")
+    brand: Optional[str] = Field(None, max_length=100, description="Thương hiệu sản phẩm")
+    product_type: Optional[str] = Field(None, max_length=100, description="Chủng loại sản phẩm (laptop, keyboard, mouse, headphone,...)")
 
 class ProductCreate(ProductBase):
     pass
@@ -29,14 +31,27 @@ class ProductUpdate(BaseModel):
     status: Optional[str] = None
     image_url: Optional[str] = None
     description: Optional[str] = None
+    brand: Optional[str] = None
+    product_type: Optional[str] = None
 
-class ProductResponse(ProductBase):
+class ProductAdminResponse(ProductBase):
+    """
+    Schema phản hồi đầy đủ dành riêng cho Admin và SuperAdmin.
+    Bao gồm thông tin giá vốn (cost_price) phục vụ kế toán, quản trị lợi nhuận và nhập hàng.
+    """
     id: int
     category_name: Optional[str] = None
+    in_stock: bool = True
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
 class ProductPublicResponse(BaseModel):
+    """
+    Schema phản hồi an toàn KHÔNG CHỨA GIÁ VỐN (cost_price).
+    Áp dụng bắt buộc cho: Customer, Staff và Guest.
+    Cung cấp đầy đủ mọi thông tin cần thiết cho POS và Storefront:
+    Mã SKU, tên, danh mục, giá bán lẻ, số lượng tồn kho, trạng thái kinh doanh, ảnh, mô tả.
+    """
     id: int
     sku: str
     name: str
@@ -49,6 +64,13 @@ class ProductPublicResponse(BaseModel):
     status: str = "active"
     image_url: Optional[str] = None
     description: Optional[str] = None
+    brand: Optional[str] = None
+    product_type: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+# Backward-compatibility alias
+ProductResponse = ProductAdminResponse
 
 # --- PRODUCT VISUAL METADATA SCHEMAS (PHASE 12B) ---
 

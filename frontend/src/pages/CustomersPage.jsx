@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Plus, Edit2, Phone, Mail, MapPin } from 'lucide-react';
+import { Users, Search, Plus, Edit2, Trash2, Phone, Mail, MapPin, ShieldCheck } from 'lucide-react';
 import { customersAPI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 
 export const CustomersPage = () => {
+  const { user, isAdmin, isSuperAdmin } = useAuth();
+  // Chỉ SuperAdmin (Chủ shop) mới được sửa hoặc xóa khách hàng
+  const canManage = isSuperAdmin;
+  const isStaff = user?.role === 'staff';
+  // Staff và SuperAdmin đều được thêm khách hàng mới
+  const canAdd = isSuperAdmin || isStaff;
   const { addToast } = useToast();
 
   const [customers, setCustomers] = useState([]);
@@ -89,6 +96,17 @@ export const CustomersPage = () => {
     }
   };
 
+  const handleDeleteCustomer = async (id, name) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa khách hàng "${name}"?`)) return;
+    try {
+      await customersAPI.deleteCustomer(id);
+      addToast(`Đã xóa khách hàng "${name}" thành công!`, 'success');
+      loadCustomers();
+    } catch (err) {
+      addToast(err.message, 'error');
+    }
+  };
+
   const formatVND = (val) => Number(val || 0).toLocaleString('vi-VN') + ' đ';
 
   return (
@@ -99,11 +117,29 @@ export const CustomersPage = () => {
           <div className="retro-card-title">
             <Users size={18} />
             <span>QUẢN LÝ KHÁCH HÀNG ({customers.length} KHÁCH)</span>
+            {isStaff && (
+              <span
+                className="badge badge-blue"
+                style={{
+                  fontSize: '0.68rem',
+                  marginLeft: '0.5rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontFamily: 'var(--font-mono)',
+                }}
+                title="Dữ liệu cá nhân (email, địa chỉ) đã được che giấu tự động từ backend"
+              >
+                <ShieldCheck size={12} /> PII ĐÃ BẢO MẬT
+              </span>
+            )}
           </div>
 
-          <button onClick={handleOpenAdd} className="btn btn-primary btn-sm">
-            <Plus size={15} /> Thêm Khách Hàng
-          </button>
+          {canAdd && (
+            <button onClick={handleOpenAdd} className="btn btn-primary btn-sm">
+              <Plus size={15} /> Thêm Khách Hàng
+            </button>
+          )}
         </div>
 
         <div style={{ padding: '0.85rem 1.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)' }}>
@@ -186,19 +222,25 @@ export const CustomersPage = () => {
                     ) : '—'}
                   </td>
                   <td>
-                    {c.email && (
+                    {c.email ? (
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                         <Mail size={12} style={{ display: 'inline', marginRight: '4px' }} />
                         {c.email}
                       </div>
-                    )}
-                    {c.address && (
+                    ) : null}
+                    {c.address ? (
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                         <MapPin size={11} style={{ display: 'inline', marginRight: '4px' }} />
                         {c.address}
                       </div>
+                    ) : (
+                      isStaff ? (
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          [Địa chỉ đã bảo mật]
+                        </div>
+                      ) : null
                     )}
-                    {!c.email && !c.address && '—'}
+                    {!c.email && !c.address && !isStaff && '—'}
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     {c.group_name === 'vip' ? (
@@ -213,13 +255,29 @@ export const CustomersPage = () => {
                     {formatVND(c.total_spent)}
                   </td>
                   <td style={{ textAlign: 'center' }}>
-                    <button
-                      onClick={() => handleOpenEdit(c)}
-                      className="btn btn-outline btn-icon btn-sm"
-                      title="Sửa thông tin khách hàng"
-                    >
-                      <Edit2 size={13} />
-                    </button>
+                    {canManage ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '0.35rem' }}>
+                        <button
+                          onClick={() => handleOpenEdit(c)}
+                          className="btn btn-outline btn-icon btn-sm"
+                          title="Sửa thông tin khách hàng"
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCustomer(c.id, c.name)}
+                          className="btn btn-outline btn-icon btn-sm"
+                          style={{ color: 'var(--red-light)' }}
+                          title="Xóa khách hàng"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="badge badge-muted" style={{ fontSize: '0.68rem' }}>
+                        Chỉ xem
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))

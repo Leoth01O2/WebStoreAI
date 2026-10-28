@@ -1,21 +1,52 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from app.core.database import get_db
+from app.core.database import get_db, get_db_transaction
 from app.core.rbac import get_current_user, require_roles, get_customer_id_for_user
-from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse
+from app.schemas.customer import (
+    CustomerCreate, CustomerUpdate, CustomerResponse,
+    CustomerAdminResponse, CustomerStaffResponse, mask_email
+)
 
 router = APIRouter(prefix="/customers", tags=["Customers"])
 
-@router.get("", response_model=List[CustomerResponse], dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+def _serialize_customer_for_role(d: dict, role: str) -> Union[CustomerAdminResponse, CustomerStaffResponse, CustomerResponse]:
+    """
+    Helper serialize dữ liệu khách hàng theo Role:
+    - admin, superadmin: Dữ liệu đầy đủ (CustomerAdminResponse).
+    - staff: Che giấu PII (CustomerStaffResponse) — email masked, address=None, không user_id.
+    - customer: Xem đầy đủ hồ sơ của chính mình (CustomerResponse).
+    """
+    if role in ("admin", "superadmin"):
+        return CustomerAdminResponse.model_validate(d)
+    elif role == "staff":
+        staff_data = {
+            "id": d["id"],
+            "customer_code": d["customer_code"],
+            "name": d["name"],
+            "phone": d["phone"],
+            "email": mask_email(d.get("email")),
+            "address": None,  # Không để lộ địa chỉ chi tiết/số nhà
+            "group_name": d.get("group_name", "retail"),
+            "total_spent": d.get("total_spent", 0.0),
+            "created_at": d.get("created_at"),
+        }
+        return CustomerStaffResponse.model_validate(staff_data)
+    else:
+        return CustomerResponse.model_validate(d)
+
+@router.get("", response_model=List[Union[CustomerAdminResponse, CustomerStaffResponse]], dependencies=[Depends(require_roles("staff", "superadmin"))])
 def get_customers(
     search: Optional[str] = Query(None, description="Tìm theo tên hoặc số điện thoại"),
     group_name: Optional[str] = Query(None, description="Lọc theo nhóm khách hàng: retail, vip, wholesale"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Lấy danh sách khách hàng (Chỉ dành cho Staff, Admin, SuperAdmin).
-    Customer không được phép xem danh sách khách hàng khác (403 Forbidden).
+    Lấy danh sách khách hàng (Dành cho Staff, Admin, SuperAdmin).
+    - Admin / SuperAdmin: Nhận CustomerAdminResponse đầy đủ.
+    - Staff: Nhận CustomerStaffResponse (email bị che giấu, không lộ địa chỉ chi tiết, không user_id).
+    - Customer / Guest: Bị từ chối truy cập (403 Forbidden / 401 Unauthorized).
     """
+    role = current_user.get("role", "staff")
     with get_db() as conn:
         cursor = conn.cursor()
         query = "SELECT id, user_id, customer_code, name, phone, email, address, group_name, total_spent, created_at FROM customers WHERE 1=1"
@@ -33,7 +64,7 @@ def get_customers(
         query += " ORDER BY total_spent DESC, id DESC"
         cursor.execute(query, params)
         rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        return [_serialize_customer_for_role(dict(r), role) for r in rows]
 
 @router.get("/me", response_model=CustomerResponse)
 def get_my_customer_profile(current_user: dict = Depends(get_current_user)):
@@ -41,7 +72,7 @@ def get_my_customer_profile(current_user: dict = Depends(get_current_user)):
     Lấy thông tin hồ sơ khách hàng của tài khoản đang đăng nhập.
     Nếu chưa có, tự động tạo một hồ sơ khách hàng gắn với tài khoản này.
     """
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         own_id = get_customer_id_for_user(conn, current_user)
         if not own_id:
@@ -53,7 +84,6 @@ def get_my_customer_profile(current_user: dict = Depends(get_current_user)):
                 (current_user["id"], code, current_user.get("full_name") or current_user["username"], "", "", "")
             )
             own_id = cursor.lastrowid
-            conn.commit()
 
         cursor.execute(
             "SELECT id, user_id, customer_code, name, phone, email, address, group_name, total_spent, created_at FROM customers WHERE id = ?",
@@ -64,18 +94,21 @@ def get_my_customer_profile(current_user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ khách hàng")
         return dict(row)
 
-@router.get("/{customer_id}", response_model=CustomerResponse)
+@router.get("/{customer_id}", response_model=Union[CustomerAdminResponse, CustomerStaffResponse, CustomerResponse])
 def get_customer_detail(customer_id: int, current_user: dict = Depends(get_current_user)):
     """
     Xem chi tiết thông tin khách hàng:
-    - Staff / Admin / SuperAdmin: được xem bất kỳ khách hàng nào.
-    - Customer: CHỈ được xem thông tin của chính mình. Truy cập ID của người khác -> 403 Forbidden (Chống IDOR).
+    - Admin / SuperAdmin: Nhận CustomerAdminResponse đầy đủ.
+    - Staff: Nhận CustomerStaffResponse (Data Masking: email masked, không địa chỉ, không user_id).
+    - Customer: CHỈ được xem thông tin của chính mình (CustomerResponse đầy đủ). Xem ID người khác -> 403 Forbidden (Chống IDOR).
+    - Guest: 401 Unauthorized.
     """
+    role = current_user.get("role", "customer")
     with get_db() as conn:
         cursor = conn.cursor()
 
         # Kiểm tra IDOR nếu user là Customer
-        if current_user.get("role") == "customer":
+        if role == "customer":
             own_customer_id = get_customer_id_for_user(conn, current_user)
             if not own_customer_id or own_customer_id != customer_id:
                 raise HTTPException(
@@ -90,12 +123,13 @@ def get_customer_detail(customer_id: int, current_user: dict = Depends(get_curre
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Không tìm thấy khách hàng")
-        return dict(row)
+        return _serialize_customer_for_role(dict(row), role)
 
-@router.post("", response_model=CustomerResponse, dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+@router.post("", response_model=Union[CustomerAdminResponse, CustomerStaffResponse], dependencies=[Depends(require_roles("staff", "superadmin"))])
 def create_customer(customer_in: CustomerCreate, current_user: dict = Depends(get_current_user)):
     """Tạo khách hàng mới (Chỉ dành cho Staff, Admin, SuperAdmin)"""
-    with get_db() as conn:
+    role = current_user.get("role", "staff")
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM customers WHERE customer_code = ?", (customer_in.customer_code,))
         if cursor.fetchone():
@@ -110,26 +144,34 @@ def create_customer(customer_in: CustomerCreate, current_user: dict = Depends(ge
             )
         )
         new_id = cursor.lastrowid
-        conn.commit()
 
         cursor.execute(
             "SELECT id, user_id, customer_code, name, phone, email, address, group_name, total_spent, created_at FROM customers WHERE id = ?",
             (new_id,)
         )
-        return dict(cursor.fetchone())
+        d = dict(cursor.fetchone())
+        return _serialize_customer_for_role(d, role)
 
-@router.put("/{customer_id}", response_model=CustomerResponse)
+@router.put("/{customer_id}", response_model=Union[CustomerAdminResponse, CustomerStaffResponse, CustomerResponse])
 def update_customer(customer_id: int, customer_in: CustomerUpdate, current_user: dict = Depends(get_current_user)):
     """
     Cập nhật thông tin khách hàng:
     - Staff / Admin / SuperAdmin: có thể sửa thông tin khách hàng.
     - Customer: CHỈ sửa thông tin của chính mình (Chống IDOR -> 403). Không được đổi group_name hay customer_code.
     """
-    with get_db() as conn:
+    role = current_user.get("role", "customer")
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
 
+        # RBAC: Staff và Admin tuyệt đối không được sửa thông tin khách hàng
+        if role in ("admin", "staff"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chỉ SuperAdmin (Chủ cửa hàng) mới có quyền chỉnh sửa thông tin khách hàng"
+            )
+
         # Kiểm tra IDOR nếu role là Customer
-        if current_user.get("role") == "customer":
+        if role == "customer":
             own_customer_id = get_customer_id_for_user(conn, current_user)
             if not own_customer_id or own_customer_id != customer_id:
                 raise HTTPException(
@@ -146,7 +188,7 @@ def update_customer(customer_id: int, customer_in: CustomerUpdate, current_user:
         update_data = customer_in.model_dump(exclude_unset=True)
 
         # Nếu là Customer, không cho phép thay đổi group_name hoặc customer_code
-        if current_user.get("role") == "customer":
+        if role == "customer":
             update_data.pop("group_name", None)
             update_data.pop("customer_code", None)
 
@@ -161,10 +203,23 @@ def update_customer(customer_id: int, customer_in: CustomerUpdate, current_user:
         if updates:
             params.append(customer_id)
             cursor.execute(f"UPDATE customers SET {', '.join(updates)} WHERE id = ?", params)
-            conn.commit()
 
         cursor.execute(
             "SELECT id, user_id, customer_code, name, phone, email, address, group_name, total_spent, created_at FROM customers WHERE id = ?",
             (customer_id,)
         )
-        return dict(cursor.fetchone())
+        d = dict(cursor.fetchone())
+        return _serialize_customer_for_role(d, role)
+
+
+
+@router.delete("/{customer_id}", dependencies=[Depends(require_roles("superadmin"))])
+def delete_customer(customer_id: int, current_user: dict = Depends(get_current_user)):
+    """Xóa khách hàng (Chỉ dành riêng cho SuperAdmin - Chủ cửa hàng)"""
+    with get_db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM customers WHERE id = ?", (customer_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Không tìm thấy khách hàng")
+        cursor.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        return {"message": "Đã xóa khách hàng thành công"}

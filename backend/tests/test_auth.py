@@ -123,3 +123,27 @@ def test_rbac_admin_can_create_user():
     # Xác minh đăng nhập được với tài khoản vừa tạo
     verify_login = client.post("/api/v1/auth/login", json={"username": new_username, "password": "Password123"})
     assert verify_login.status_code == 200
+
+
+def test_customer2_invalid_passwords_strictly_rejected():
+    """
+    Regression Test:
+    Bảo đảm tài khoản customer2 chỉ đăng nhập được với mật khẩu hợp lệ (Customer@123)
+    và bị từ chối 401 tuyệt đối với bất kỳ mật khẩu nào khác (kể cả Customer2@123 hay mật khẩu sai).
+    """
+    # 1. Thử mật khẩu sai Customer2@123 -> Phải bị từ chối 401
+    res_bad = client.post("/api/v1/auth/login", json={"username": "customer2", "password": "Customer2@123"})
+    assert res_bad.status_code == 401
+    assert "Tên đăng nhập hoặc mật khẩu không chính xác" in res_bad.json()["detail"]
+
+    # 2. Thử mật khẩu sai ngẫu nhiên -> Phải bị từ chối 401
+    res_random = client.post("/api/v1/auth/login", json={"username": "customer2", "password": "RandomInvalidPassword!@#"})
+    assert res_random.status_code == 401
+
+    # 3. Mật khẩu chuẩn trong seed_data (Customer@123) -> Phải thành công 200
+    res_ok = client.post("/api/v1/auth/login", json={"username": "customer2", "password": "Customer@123"})
+    assert res_ok.status_code == 200
+    data = res_ok.json()
+    assert "access_token" in data
+    assert data["user"]["username"] == "customer2"
+    assert data["user"]["role"] == "customer"

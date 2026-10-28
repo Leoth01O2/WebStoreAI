@@ -47,7 +47,8 @@ def seed_database():
             ("Chuột & Bàn phím", "CAT-OFFICE", "Chuột không dây, bàn phím cơ, phụ kiện văn phòng"),
             ("Gia dụng thông minh", "CAT-SMART", "Đèn bàn bảo vệ mắt, máy hút ẩm, sạc không dây để bàn"),
             ("Phụ kiện & Dây cáp", "CAT-ACCESSORY", "Củ sạc nhanh GaN, cáp Type-C to Lightning, hub chuyển đổi"),
-            ("Gaming Gear", "CAT-GAMING", "Tai nghe 7.1, lót chuột led RGB, quạt tản nhiệt laptop")
+            ("Gaming Gear", "CAT-GAMING", "Tai nghe 7.1, lót chuột led RGB, quạt tản nhiệt laptop"),
+            ("Laptop & Máy tính", "CAT-LAPTOP", "Máy tính xách tay, MacBook, Ultrabook và linh kiện máy tính")
         ]
         cats_inserted = 0
         for cat in categories:
@@ -359,18 +360,55 @@ def seed_database():
             ("SP-GAME-04", "Tấm lót chuột Led RGB Cỡ cực đại", cat_map["Gaming Gear"], 120000, 210000, 18, 5, "chiếc", "active", IMAGE_MAP["SP-GAME-04"], "Bề mặt vải speed mượt mà, viền LED RGB 14 chế độ phát sáng, kích thước 80x30cm chống trượt."),
             ("SP-GAME-05", "Đế tản nhiệt Laptop Gaming 6 quạt mạnh mẽ", cat_map["Gaming Gear"], 190000, 310000, 0, 4, "chiếc", "active", IMAGE_MAP["SP-GAME-05"], "Đế làm mát có màn hình LED điều chỉnh tốc độ, 6 quạt gió cực mát (TẠM HẾT HÀNG để test).")
         ]
+        PRODUCT_ATTRIBUTES_MAP = {
+            "SP-AUDIO-01": ("RetroSound", "headphone"),
+            "SP-AUDIO-02": ("RetroSound", "speaker"),
+            "SP-AUDIO-03": ("Monitor Studio", "headphone"),
+            "SP-AUDIO-04": ("M1 Audio", "headphone"),
+            "SP-AUDIO-05": ("RunFree", "headphone"),
+            "SP-OFFICE-01": ("Retro Typewriter", "keyboard"),
+            "SP-OFFICE-02": ("Silent M3", "mouse"),
+            "SP-OFFICE-03": ("Slim Multi-Device", "keyboard"),
+            "SP-OFFICE-04": ("Basic Office", "mouse"),
+            "SP-OFFICE-05": ("PU Leather", "mousepad"),
+            "SP-SMART-01": ("Edison", "lamp"),
+            "SP-SMART-02": ("Ceramic", "diffuser"),
+            "SP-SMART-03": ("Nixie", "clock"),
+            "SP-SMART-04": ("Smart Scale", "smart_scale"),
+            "SP-SMART-05": ("Turbine", "fan"),
+            "SP-ACC-01": ("Retro Robot", "charger"),
+            "SP-ACC-02": ("Braided 100W", "cable"),
+            "SP-ACC-03": ("Type-C Hub", "hub_adapter"),
+            "SP-ACC-04": ("Cyberpunk", "powerbank"),
+            "SP-ACC-05": ("Aluminum Stand", "stand"),
+            "SP-GAME-01": ("Gaming G200", "headphone"),
+            "SP-GAME-02": ("Ultralight", "mouse"),
+            "SP-GAME-03": ("Hall Effect H1", "gamepad"),
+            "SP-GAME-04": ("RGB Pad", "mousepad"),
+            "SP-GAME-05": ("Cooling Pad 6F", "cooler"),
+        }
+
         prods_inserted = 0
         for prod in products:
-            cursor.execute("SELECT id FROM products WHERE sku = ?", (prod[0],))
-            if not cursor.fetchone():
+            sku = prod[0]
+            b_val, pt_val = PRODUCT_ATTRIBUTES_MAP.get(sku, (None, None))
+            cursor.execute("SELECT id FROM products WHERE sku = ?", (sku,))
+            existing_p = cursor.fetchone()
+            if not existing_p:
                 cursor.execute(
                     """INSERT INTO products (
                         sku, name, category_id, cost_price, selling_price,
-                        stock_quantity, min_stock_alert, unit, status, image_url, description
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    prod
+                        stock_quantity, min_stock_alert, unit, status, image_url, description,
+                        brand, product_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    prod + (b_val, pt_val)
                 )
                 prods_inserted += 1
+            else:
+                cursor.execute(
+                    "UPDATE products SET brand = COALESCE(brand, ?), product_type = COALESCE(product_type, ?) WHERE id = ?",
+                    (b_val, pt_val, existing_p["id"] if isinstance(existing_p, dict) or hasattr(existing_p, "keys") else existing_p[0])
+                )
         if prods_inserted > 0:
             print(f"[SEED] Đã tạo {prods_inserted} sản phẩm mới.")
 

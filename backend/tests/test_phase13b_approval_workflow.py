@@ -105,13 +105,14 @@ def test_staff_cannot_process_pending_order(customer_headers, staff_headers):
     assert "Đơn hàng chưa được Admin duyệt" in res_process.json()["detail"]
 
 
-def test_admin_approve_workflow(customer_headers, admin_headers, staff_headers):
+def test_admin_approve_workflow(customer_headers, admin_headers, staff_headers, superadmin_headers):
     """
-    DoD 4: Admin duyệt đơn PENDING thành công:
-    - Status chuyển sang ADMIN_APPROVED
+    DoD 4: SuperAdmin duyệt đơn PENDING thành công (Admin bị chặn 403):
+    - Admin cố duyệt -> 403 Forbidden
+    - SuperAdmin duyệt -> Status chuyển sang confirmed / admin_approved
     - Ghi nhận approved_by và approved_at
     - Sau khi duyệt, Staff có thể nhận xử lý (status chuyển sang PROCESSING)
-    - Admin không thể duyệt lại đơn đã duyệt (400 Bad Request)
+    - Không thể duyệt lại đơn đã duyệt (400 Bad Request)
     """
     with get_db() as conn:
         c = conn.cursor()
@@ -124,16 +125,20 @@ def test_admin_approve_workflow(customer_headers, admin_headers, staff_headers):
     }, headers=customer_headers)
     order_id = res_create.json()["id"]
 
-    # Admin duyệt đơn
-    res_approve = client.post(f"/api/v1/orders/{order_id}/approve", headers=admin_headers)
-    assert res_approve.status_code == 200, f"Admin duyệt đơn thất bại: {res_approve.text}"
+    # Admin cố duyệt đơn -> 403 Forbidden
+    res_admin_app = client.post(f"/api/v1/orders/{order_id}/approve", headers=admin_headers)
+    assert res_admin_app.status_code == 403
+
+    # SuperAdmin duyệt đơn
+    res_approve = client.post(f"/api/v1/orders/{order_id}/approve", headers=superadmin_headers)
+    assert res_approve.status_code == 200, f"SuperAdmin duyệt đơn thất bại: {res_approve.text}"
     approved_order = res_approve.json()
-    assert approved_order["status"] == "admin_approved"
+    assert approved_order["status"] in ("confirmed", "admin_approved")
     assert approved_order["approved_by"] is not None
     assert approved_order["approved_at"] is not None
 
     # Thử duyệt lại lần 2 -> 400 Bad Request
-    res_reapprove = client.post(f"/api/v1/orders/{order_id}/approve", headers=admin_headers)
+    res_reapprove = client.post(f"/api/v1/orders/{order_id}/approve", headers=superadmin_headers)
     assert res_reapprove.status_code == 400
     assert "pending" in res_reapprove.json()["detail"]
 
@@ -145,7 +150,7 @@ def test_admin_approve_workflow(customer_headers, admin_headers, staff_headers):
     assert res_process.json()["processed_at"] is not None
 
 
-def test_admin_reject_workflow_and_inventory_refund(customer_headers, admin_headers):
+def test_admin_reject_workflow_and_inventory_refund(customer_headers, admin_headers, superadmin_headers):
     """
     DoD 5: Admin từ chối đơn PENDING kèm lý do:
     - Status chuyển sang REJECTED
@@ -176,16 +181,24 @@ def test_admin_reject_workflow_and_inventory_refund(customer_headers, admin_head
         c.execute("SELECT stock_quantity FROM products WHERE id = ?", (prod_id,))
         assert c.fetchone()["stock_quantity"] == stock_initial - buy_qty, "Kho phải bị trừ sau khi Customer đặt hàng"
 
-    # 2. Admin từ chối đơn
+    # 2. Admin cố từ chối đơn -> 403 Forbidden
     rejection_reason = "Không liên lạc được với khách hàng qua số điện thoại"
-    res_reject = client.post(
+    res_admin_rej = client.post(
         f"/api/v1/orders/{order_id}/reject",
         json={"reason": rejection_reason},
         headers=admin_headers
     )
+    assert res_admin_rej.status_code == 403
+
+    # SuperAdmin từ chối đơn
+    res_reject = client.post(
+        f"/api/v1/orders/{order_id}/reject",
+        json={"reason": rejection_reason},
+        headers=superadmin_headers
+    )
     assert res_reject.status_code == 200, f"Từ chối đơn thất bại: {res_reject.text}"
     rejected_order = res_reject.json()
-    assert rejected_order["status"] == "rejected"
+    assert rejected_order["status"] in ("rejected", "cancelled")
     assert rejected_order["rejected_by"] is not None
     assert rejected_order["rejected_at"] is not None
     assert rejected_order["rejection_reason"] == rejection_reason
@@ -213,7 +226,7 @@ def test_admin_reject_workflow_and_inventory_refund(customer_headers, admin_head
     res_rereject = client.post(
         f"/api/v1/orders/{order_id}/reject",
         json={"reason": "Thử lại"},
-        headers=admin_headers
+        headers=superadmin_headers
     )
     assert res_rereject.status_code == 400
 

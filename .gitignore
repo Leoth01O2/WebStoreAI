@@ -4,6 +4,13 @@
 !.env.example
 *.pem
 *.key
+*.cert
+*.crt
+*.pfx
+*.p12
+credentials.json
+client_secret*.json
+service_account*.json
 
 # Python
 __pycache__/
@@ -27,6 +34,9 @@ webstore.db*
 storeflow.db*
 chroma_data/
 chroma_db/
+backups/
+backend/backups/
+*.bak
 
 # Uploads
 backend/uploads/products/*
@@ -43,3 +53,6 @@ frontend/dist-ssr/
 Thumbs.db
 .vscode/
 .idea/
+
+/backend/scratch/
+/scratch/

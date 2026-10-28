@@ -87,11 +87,22 @@ export const authAPI = {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
+  register: (registerData) =>
+    request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(registerData),
+    }),
   getMe: () => request('/auth/me'),
   createUser: (userData) =>
     request('/auth/users', {
       method: 'POST',
       body: JSON.stringify(userData),
+    }),
+  getUsers: () => request('/auth/users'),
+  updateUserStatus: (id, isActive) =>
+    request(`/auth/users/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: isActive }),
     }),
 };
 
@@ -192,6 +203,10 @@ export const customersAPI = {
       method: 'PUT',
       body: JSON.stringify(customerData),
     }),
+  deleteCustomer: (id) =>
+    request(`/customers/${id}`, {
+      method: 'DELETE',
+    }),
 };
 
 export const ordersAPI = {
@@ -244,6 +259,52 @@ export const ordersAPI = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  claimOrder: (id, note) =>
+    request(`/orders/${id}/claim`, {
+      method: 'POST',
+      body: JSON.stringify(note ? { note } : {}),
+    }),
+  reassignOrder: (id, newStaffId, reason) =>
+    request(`/orders/${id}/reassign`, {
+      method: 'POST',
+      body: JSON.stringify({ new_staff_id: newStaffId, reason }),
+    }),
+  notifyTransfer: (id, payload = {}) =>
+    request(`/orders/${id}/notify-transfer`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  verifyPayment: (id, payload = {}) =>
+    request(`/orders/${id}/verify-payment`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  confirmCodPayment: (id, note) =>
+    request(`/orders/${id}/confirm-cod-payment`, {
+      method: 'POST',
+      body: JSON.stringify(note ? { note } : {}),
+    }),
+  updateFulfillment: (id, fulfillmentStatus, note) =>
+    request(`/orders/${id}/update-fulfillment`, {
+      method: 'POST',
+      body: JSON.stringify({ fulfillment_status: fulfillmentStatus, note }),
+    }),
+  confirmReturn: (id, reason, note) =>
+    request(`/orders/${id}/confirm-return`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, note }),
+    }),
+  requestRefund: (id, reason) =>
+    request(`/orders/${id}/request-refund`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+  confirmRefund: (id, refundRef, reason) =>
+    request(`/orders/${id}/confirm-refund`, {
+      method: 'POST',
+      body: JSON.stringify({ refund_reference: refundRef, reason }),
+    }),
+  getAuditLogs: (id) => request(`/orders/${id}/audit-logs`),
 };
 
 export const purchasesAPI = {
@@ -293,31 +354,32 @@ export const reportsAPI = {
 };
 
 export const aiAPI = {
-  recommend: (query, budget = null, limit = 5) =>
+  getProviders: () => request('/ai/providers'),
+  recommend: (query, budget = null, limit = 5, provider = null) =>
     request('/ai/recommend', {
       method: 'POST',
-      body: JSON.stringify({ query, budget: budget ? Number(budget) : null, limit: Number(limit) || 5 }),
+      body: JSON.stringify({ query, budget: budget ? Number(budget) : null, limit: Number(limit) || 5, ...(provider ? { provider } : {}) }),
     }),
-  generateSalesReport: (period = 'month') =>
+  generateSalesReport: (period = 'month', provider = null) =>
     request('/ai/sales-report', {
       method: 'POST',
-      body: JSON.stringify({ period }),
+      body: JSON.stringify({ period, ...(provider ? { provider } : {}) }),
     }),
-  salesQA: (query) =>
+  salesQA: (query, provider = null) =>
     request('/ai/sales-qa', {
       method: 'POST',
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, ...(provider ? { provider } : {}) }),
     }),
   getLogs: (limit = 50) => request(`/ai/logs?limit=${limit}`),
   syncVectorIndex: () =>
     request('/ai/sync-index', {
       method: 'POST',
     }),
-  imageSearch: async (file, limit = 5) => {
+  imageSearch: async (file, limit = 5, provider = 'local') => {
     const token = getAuthToken();
     const formData = new FormData();
     formData.append('file', file);
-    const response = await fetch(`${API_BASE}/ai/image-search?limit=${limit}`, {
+    const response = await fetch(`${API_BASE}/ai/image-search?limit=${limit}&provider=${provider}`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

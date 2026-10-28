@@ -56,12 +56,33 @@ class ReportService:
             )
             low_stock_count = cursor.fetchone()["cnt"]
 
+            # Phân định doanh thu: Hoàn tất (A), Đã đối soát xác minh (B), Lịch sử chưa đối soát (C)
+            cursor.execute("PRAGMA table_info(orders)")
+            order_cols = {r["name"] if isinstance(r, dict) or hasattr(r, "keys") else r[1] for r in cursor.fetchall()}
+            if "payment_status_raw" in order_cols:
+                cursor.execute("SELECT COALESCE(SUM(final_amount), 0) as total FROM orders WHERE payment_status = 'paid'")
+                verified_payment_revenue = float(cursor.fetchone()["total"])
+                cursor.execute(
+                    "SELECT COALESCE(SUM(final_amount), 0) as total FROM orders WHERE status = 'completed' AND payment_status = 'unverified_legacy'"
+                )
+                legacy_unverified_revenue = float(cursor.fetchone()["total"])
+            else:
+                verified_payment_revenue = 0.0
+                if "is_legacy_unverified" in order_cols:
+                    cursor.execute(
+                        "SELECT COALESCE(SUM(final_amount), 0) as total FROM orders WHERE status = 'completed' AND is_legacy_unverified = 1"
+                    )
+                    legacy_unverified_revenue = float(cursor.fetchone()["total"])
+                else:
+                    legacy_unverified_revenue = total_revenue
             # Khách hàng
             cursor.execute("SELECT COUNT(*) as cnt FROM customers")
             total_customers = cursor.fetchone()["cnt"]
 
             return {
                 "total_revenue": total_revenue,
+                "verified_payment_revenue": verified_payment_revenue,
+                "legacy_unverified_revenue": legacy_unverified_revenue,
                 "today_revenue": today_revenue,
                 "week_revenue": week_revenue,
                 "month_revenue": month_revenue,
@@ -124,6 +145,8 @@ class ReportService:
                     "product_id": r["product_id"],
                     "sku": r["sku"],
                     "name": r["name"],
+                    "product_sku": r["sku"],
+                    "product_name": r["name"],
                     "category_name": r["category_name"],
                     "total_quantity_sold": r["total_quantity_sold"],
                     "total_revenue": float(r["total_revenue"])

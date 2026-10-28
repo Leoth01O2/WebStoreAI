@@ -20,12 +20,26 @@ os.makedirs(os.path.join(UPLOADS_DIR, "products"), exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Kiểm tra an toàn cấu hình khởi động (Boot Safety Guard)
+    from app.core.config import validate_boot_safety
+    validate_boot_safety(settings)
     # Khởi tạo schema cơ sở dữ liệu SQLite khi startup
     init_db()
-    # Tự động nạp vector index vào ChromaDB nếu chưa có
+    # Tự động đối soát và tự phục hồi vector index vào ChromaDB khi startup (Self-Healing Sync Guard)
     try:
         if rag_service.collection.count() == 0:
             rag_service.sync_all_products()
+        else:
+            sync_status = rag_service.check_sync_status()
+            if not sync_status.get("is_synced", True):
+                rag_service.reconcile_sync()
+    except Exception:
+        pass
+    # Pre-warm Local Vision CLIP singleton & embeddings in background/startup
+    try:
+        import threading
+        from app.services.local_vision_service import local_vision_service
+        threading.Thread(target=local_vision_service._ensure_loaded, daemon=True).start()
     except Exception:
         pass
     yield

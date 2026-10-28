@@ -1,11 +1,14 @@
 import os
 import uuid
-from typing import List, Optional
+import logging
+from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+
+logger = logging.getLogger(__name__)
 from app.core.database import get_db, get_db_transaction
-from app.core.rbac import get_current_user, require_roles
+from app.core.rbac import get_current_user, get_current_user_optional, require_roles
 from app.schemas.category import CategoryCreate, CategoryUpdate, CategoryResponse
-from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse, ProductPublicResponse
+from app.schemas.product import ProductCreate, ProductUpdate, ProductResponse, ProductAdminResponse, ProductPublicResponse
 from app.services.rag_service import rag_service
 from app.services.visual_index_service import visual_index_service
 
@@ -29,6 +32,8 @@ def get_public_categories():
 def get_public_products(
     search: Optional[str] = Query(None, description="Tìm theo tên hoặc mã SKU"),
     category_id: Optional[int] = Query(None, description="Lọc theo ID nhóm hàng"),
+    brand: Optional[str] = Query(None, description="Lọc theo thương hiệu"),
+    product_type: Optional[str] = Query(None, description="Lọc theo chủng loại sản phẩm"),
     min_price: Optional[float] = Query(None, description="Giá bán tối thiểu"),
     max_price: Optional[float] = Query(None, description="Giá bán tối đa"),
     in_stock_only: bool = Query(False, description="Chỉ lấy sản phẩm còn hàng"),
@@ -43,7 +48,8 @@ def get_public_products(
         query = """
             SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                    p.selling_price, p.stock_quantity,
-                   p.unit, p.status, p.image_url, p.description
+                   p.unit, p.status, p.image_url, p.description,
+                   p.brand, p.product_type
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.id
             WHERE p.status = 'active'
@@ -51,13 +57,22 @@ def get_public_products(
         params = []
 
         if search:
-            query += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ?)"
+            query += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ? OR p.brand LIKE ?)"
             s_param = f"%{search.strip()}%"
-            params.extend([s_param, s_param, s_param])
+            params.extend([s_param, s_param, s_param, s_param])
 
         if category_id is not None:
             query += " AND p.category_id = ?"
             params.append(category_id)
+
+        if brand:
+            query += " AND (p.brand LIKE ? OR p.name LIKE ?)"
+            b_param = f"%{brand.strip()}%"
+            params.extend([b_param, b_param])
+
+        if product_type:
+            query += " AND p.product_type = ?"
+            params.append(product_type.strip())
 
         if min_price is not None:
             query += " AND p.selling_price >= ?"
@@ -88,7 +103,8 @@ def get_public_product_detail(product_id: int):
         cursor.execute(
             """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                       p.selling_price, p.stock_quantity,
-                      p.unit, p.status, p.image_url, p.description
+                      p.unit, p.status, p.image_url, p.description,
+                      p.brand, p.product_type
                FROM products p
                LEFT JOIN categories c ON p.category_id = c.id
                WHERE p.id = ? AND p.status = 'active'""",
@@ -113,10 +129,10 @@ def get_categories(current_user: dict = Depends(get_current_user)):
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
-@router.post("/categories", response_model=CategoryResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/categories", response_model=CategoryResponse, dependencies=[Depends(require_roles("superadmin"))])
 def create_category(category_in: CategoryCreate, current_user: dict = Depends(get_current_user)):
     """Tạo mới danh mục (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM categories WHERE code = ?", (category_in.code,))
         if cursor.fetchone():
@@ -127,15 +143,14 @@ def create_category(category_in: CategoryCreate, current_user: dict = Depends(ge
             (category_in.name, category_in.code, category_in.description)
         )
         new_id = cursor.lastrowid
-        conn.commit()
 
         cursor.execute("SELECT id, name, code, description, created_at FROM categories WHERE id = ?", (new_id,))
         return dict(cursor.fetchone())
 
-@router.put("/categories/{category_id}", response_model=CategoryResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.put("/categories/{category_id}", response_model=CategoryResponse, dependencies=[Depends(require_roles("superadmin"))])
 def update_category(category_id: int, category_in: CategoryUpdate, current_user: dict = Depends(get_current_user)):
     """Cập nhật danh mục (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM categories WHERE id = ?", (category_id,))
         cat = cursor.fetchone()
@@ -161,27 +176,33 @@ def update_category(category_id: int, category_in: CategoryUpdate, current_user:
         if updates:
             params.append(category_id)
             cursor.execute(f"UPDATE categories SET {', '.join(updates)} WHERE id = ?", params)
-            conn.commit()
 
         cursor.execute("SELECT id, name, code, description, created_at FROM categories WHERE id = ?", (category_id,))
         return dict(cursor.fetchone())
 
-@router.delete("/categories/{category_id}", dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.delete("/categories/{category_id}", dependencies=[Depends(require_roles("superadmin"))])
 def delete_category(category_id: int, current_user: dict = Depends(get_current_user)):
     """Xóa danh mục (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM categories WHERE id = ?", (category_id,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
 
+        # Ràng buộc khóa ngoại: Kiểm tra có sản phẩm nào thuộc danh mục này không
+        cursor.execute("SELECT id FROM products WHERE category_id = ? LIMIT 1", (category_id,))
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=400,
+                detail="Không thể xóa danh mục đang có sản phẩm. Vui lòng chuyển hoặc xóa sản phẩm trước."
+            )
+
         cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
-        conn.commit()
         return {"message": "Đã xóa danh mục thành công"}
 
 # ==================== PRODUCTS ====================
 
-@router.post("/products/upload-image", dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/products/upload-image", dependencies=[Depends(require_roles("superadmin"))])
 async def upload_product_image(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user)
@@ -213,10 +234,12 @@ async def upload_product_image(
 
     return {"image_url": f"/uploads/products/{unique_filename}"}
 
-@router.get("/products", response_model=List[ProductResponse])
+@router.get("/products", response_model=List[Union[ProductAdminResponse, ProductPublicResponse]])
 def get_products(
     search: Optional[str] = Query(None, description="Tìm theo tên hoặc mã SKU"),
     category_id: Optional[int] = Query(None, description="Lọc theo ID nhóm hàng"),
+    brand: Optional[str] = Query(None, description="Lọc theo thương hiệu"),
+    product_type: Optional[str] = Query(None, description="Lọc theo chủng loại sản phẩm"),
     status: Optional[str] = Query(None, description="Lọc theo trạng thái: active, inactive"),
     min_price: Optional[float] = Query(None, description="Giá bán tối thiểu"),
     max_price: Optional[float] = Query(None, description="Giá bán tối đa"),
@@ -225,28 +248,54 @@ def get_products(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Danh sách sản phẩm có tìm kiếm, lọc đa tiêu chí (Tất cả vai trò: Admin, Staff, Manager)
+    Danh sách sản phẩm có tìm kiếm, lọc đa tiêu chí:
+    - Admin & SuperAdmin: Xem đầy đủ thông tin kể cả giá vốn (cost_price) phục vụ kế toán/nhập hàng.
+    - Staff, Customer & Guest: Xem thông tin bán lẻ an toàn (ProductPublicResponse), TUYỆT ĐỐI KHÔNG nhận cost_price.
     """
+    is_superadmin = bool(current_user and current_user.get("role") == "superadmin")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        query = """
-            SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                   p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                   p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.id
-            WHERE 1=1
-        """
+        if is_superadmin:
+            query = """
+                SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                       p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
+                       p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                       p.created_at, p.updated_at
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE 1=1
+            """
+        else:
+            # Bảo vệ từ tầng SQL: Staff, Customer, Guest không bao giờ SELECT cost_price
+            query = """
+                SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                       p.selling_price, p.stock_quantity, p.min_stock_alert,
+                       p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                       p.created_at, p.updated_at
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE 1=1
+            """
         params = []
 
         if search:
-            query += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ?)"
+            query += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.description LIKE ? OR p.brand LIKE ?)"
             s_param = f"%{search.strip()}%"
-            params.extend([s_param, s_param, s_param])
+            params.extend([s_param, s_param, s_param, s_param])
 
         if category_id is not None:
             query += " AND p.category_id = ?"
             params.append(category_id)
+
+        if brand:
+            query += " AND (p.brand LIKE ? OR p.name LIKE ?)"
+            b_param = f"%{brand.strip()}%"
+            params.extend([b_param, b_param])
+
+        if product_type:
+            query += " AND p.product_type = ?"
+            params.append(product_type.strip())
 
         if status:
             query += " AND p.status = ?"
@@ -269,32 +318,74 @@ def get_products(
         query += " ORDER BY p.id DESC"
         cursor.execute(query, params)
         rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["in_stock"] = d.get("stock_quantity", 0) > 0
+            if is_superadmin:
+                results.append(ProductAdminResponse.model_validate(d))
+            else:
+                results.append(ProductPublicResponse.model_validate(d))
+        return results
 
-@router.get("/products/{product_id}", response_model=ProductResponse)
-def get_product_detail(product_id: int, current_user: dict = Depends(get_current_user)):
-    """Xem chi tiết thông tin một sản phẩm"""
+@router.get("/products/{product_id}", response_model=Union[ProductAdminResponse, ProductPublicResponse])
+def get_product_detail(
+    product_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Xem chi tiết thông tin một sản phẩm:
+    - Admin & SuperAdmin: Xem đầy đủ thông tin kể cả giá vốn (cost_price).
+    - Staff, Customer & Guest: Xem thông tin bán lẻ an toàn (ProductPublicResponse), TUYỆT ĐỐI KHÔNG nhận cost_price.
+    """
+    is_superadmin = bool(current_user and current_user.get("role") == "superadmin")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
-                      p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                      p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
-               FROM products p
-               LEFT JOIN categories c ON p.category_id = c.id
-               WHERE p.id = ?""",
-            (product_id,)
-        )
+        if is_superadmin:
+            cursor.execute(
+                """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                          p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
+                          p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                          p.created_at, p.updated_at
+                   FROM products p
+                   LEFT JOIN categories c ON p.category_id = c.id
+                   WHERE p.id = ?""",
+                (product_id,)
+            )
+        else:
+            # Bảo vệ từ tầng SQL: Không SELECT cost_price
+            cursor.execute(
+                """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
+                          p.selling_price, p.stock_quantity, p.min_stock_alert,
+                          p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                          p.created_at, p.updated_at
+                   FROM products p
+                   LEFT JOIN categories c ON p.category_id = c.id
+                   WHERE p.id = ?""",
+                (product_id,)
+            )
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
-        return dict(row)
+        d = dict(row)
+        d["in_stock"] = d.get("stock_quantity", 0) > 0
+        if is_superadmin:
+            return ProductAdminResponse.model_validate(d)
+        return ProductPublicResponse.model_validate(d)
 
-@router.post("/products", response_model=ProductResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/products", response_model=ProductResponse, dependencies=[Depends(require_roles("superadmin"))])
 def create_product(product_in: ProductCreate, current_user: dict = Depends(get_current_user)):
     """Tạo sản phẩm mới (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
+
+        # Kiểm tra category_id hợp lệ (bảo vệ toàn vẹn khóa ngoại)
+        if product_in.category_id is not None:
+            cursor.execute("SELECT id FROM categories WHERE id = ?", (product_in.category_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail=f"Danh mục ID {product_in.category_id} không tồn tại")
+
         cursor.execute("SELECT id FROM products WHERE sku = ?", (product_in.sku,))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail=f"Mã SKU '{product_in.sku}' đã tồn tại")
@@ -302,41 +393,46 @@ def create_product(product_in: ProductCreate, current_user: dict = Depends(get_c
         cursor.execute(
             """INSERT INTO products (
                 sku, name, category_id, cost_price, selling_price,
-                stock_quantity, min_stock_alert, unit, status, image_url, description
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                stock_quantity, min_stock_alert, unit, status, image_url, description,
+                brand, product_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 product_in.sku, product_in.name, product_in.category_id,
                 product_in.cost_price, product_in.selling_price, product_in.stock_quantity,
                 product_in.min_stock_alert, product_in.unit, product_in.status,
-                product_in.image_url, product_in.description
+                product_in.image_url, product_in.description,
+                product_in.brand, product_in.product_type
             )
         )
         new_id = cursor.lastrowid
-        conn.commit()
-
-        # Đồng bộ vector sang ChromaDB
-        try:
-            if new_id is not None:
-                rag_service.upsert_single_product(new_id)
-                visual_index_service.sync_single_product_visual(new_id)
-        except Exception:
-            pass
 
         cursor.execute(
             """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                       p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                      p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                      p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                      p.created_at, p.updated_at
                FROM products p
                LEFT JOIN categories c ON p.category_id = c.id
                WHERE p.id = ?""",
             (new_id,)
         )
-        return dict(cursor.fetchone())
+        result = dict(cursor.fetchone())
 
-@router.put("/products/{product_id}", response_model=ProductResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+    # Đồng bộ vector sang ChromaDB chỉ sau khi SQLite transaction commit thành công
+    try:
+        if new_id is not None:
+            rag_service.upsert_single_product(new_id)
+            visual_index_service.sync_single_product_visual(new_id)
+    except Exception as e:
+        logger.error(f"ChromaDB vector sync failed after creating product ID {new_id}: {e}. Flagging for auto-healing.")
+        rag_service.mark_sync_needed()
+
+    return result
+
+@router.put("/products/{product_id}", response_model=ProductResponse, dependencies=[Depends(require_roles("superadmin"))])
 def update_product(product_id: int, product_in: ProductUpdate, current_user: dict = Depends(get_current_user)):
     """Cập nhật thông tin sản phẩm (Admin, Manager)"""
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
         if not cursor.fetchone():
@@ -349,6 +445,10 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
                 cursor.execute("SELECT id FROM products WHERE sku = ? AND id != ?", (value, product_id))
                 if cursor.fetchone():
                     raise HTTPException(status_code=400, detail=f"Mã SKU '{value}' đã được sử dụng")
+            if field == "category_id" and value is not None:
+                cursor.execute("SELECT id FROM categories WHERE id = ?", (value,))
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=400, detail=f"Danh mục ID {value} không tồn tại")
             updates.append(f"{field} = ?")
             params.append(value)
 
@@ -356,27 +456,39 @@ def update_product(product_id: int, product_in: ProductUpdate, current_user: dic
             updates.append("updated_at = CURRENT_TIMESTAMP")
             params.append(product_id)
             cursor.execute(f"UPDATE products SET {', '.join(updates)} WHERE id = ?", params)
-            conn.commit()
-
-            # Đồng bộ vector sang ChromaDB
-            try:
-                rag_service.upsert_single_product(product_id)
-                visual_index_service.sync_single_product_visual(product_id)
-            except Exception:
-                pass
 
         cursor.execute(
             """SELECT p.id, p.sku, p.name, p.category_id, c.name as category_name,
                       p.cost_price, p.selling_price, p.stock_quantity, p.min_stock_alert,
-                      p.unit, p.status, p.image_url, p.description, p.created_at, p.updated_at
+                      p.unit, p.status, p.image_url, p.description, p.brand, p.product_type,
+                      p.created_at, p.updated_at
                FROM products p
                LEFT JOIN categories c ON p.category_id = c.id
                WHERE p.id = ?""",
             (product_id,)
         )
-        return dict(cursor.fetchone())
+        result = dict(cursor.fetchone())
 
-@router.delete("/products/{product_id}", dependencies=[Depends(require_roles("admin", "superadmin"))])
+    # Đồng bộ vector sang ChromaDB chỉ sau khi SQLite transaction commit thành công
+    try:
+        updated_keys = set(product_in.model_dump(exclude_unset=True).keys())
+        semantic_keys = {"name", "sku", "category_id", "description", "status", "brand", "product_type"}
+        visual_sensitive_keys = {"image_url", "name", "category_id", "description", "status", "brand", "product_type"}
+
+        rag_service.upsert_single_product(product_id)
+
+        # Requirement R6: Khi chỉ sửa giá/tồn kho, không tính lại visual embedding không cần thiết
+        if updated_keys & visual_sensitive_keys:
+            visual_index_service.sync_single_product_visual(product_id)
+        else:
+            logger.info(f"Skipping visual re-embedding for product {product_id} as only price/stock changed.")
+    except Exception as e:
+        logger.error(f"ChromaDB vector sync failed after updating product ID {product_id}: {e}. Flagging for auto-healing.")
+        rag_service.mark_sync_needed()
+
+    return result
+
+@router.delete("/products/{product_id}", dependencies=[Depends(require_roles("superadmin"))])
 def delete_product(
     product_id: int,
     hard_delete: bool = Query(False, description="Xóa cứng (bỏ qua lịch sử hóa đơn)"),
@@ -387,7 +499,7 @@ def delete_product(
     - Mặc định (hard_delete=false): Nếu đã có hóa đơn liên quan thì chuyển status='inactive' (soft delete).
     - hard_delete=true: Xóa vĩnh viễn bất kể lịch sử (dùng cho admin dọn dẹp dữ liệu).
     """
-    with get_db() as conn:
+    with get_db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM products WHERE id = ?", (product_id,))
         if not cursor.fetchone():
@@ -399,35 +511,32 @@ def delete_product(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Chỉ SuperAdmin mới có quyền xóa cứng (hard delete) sản phẩm vĩnh viễn"
                 )
-            # Hard delete: xóa vĩnh viễn — KHÔNG reassign FK (dùng khi dọn duplicate)
-            # order_items.product_id có thể trở thành dangling; cân nhắc dùng script cleanup thay thế.
             cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
-            conn.commit()
-            try:
-                rag_service.delete_single_product(product_id)
-                visual_index_service.delete_single_product_visual(product_id)
-            except Exception:
-                pass
-            return {"message": "Đã xóa cứng sản phẩm vĩnh viễn (hard delete)"}
+            msg = {"message": "Đã xóa cứng sản phẩm vĩnh viễn (hard delete)"}
+            is_soft_deleted = False
+        else:
+            # Soft delete mặc định: kiểm tra hóa đơn
+            cursor.execute("SELECT id FROM order_items WHERE product_id = ? LIMIT 1", (product_id,))
+            if cursor.fetchone():
+                cursor.execute("UPDATE products SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (product_id,))
+                msg = {"message": "Sản phẩm đã có lịch sử bán hàng nên được chuyển sang trạng thái ngừng kinh doanh (inactive)"}
+                is_soft_deleted = True
+            else:
+                cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
+                msg = {"message": "Đã xóa sản phẩm vĩnh viễn"}
+                is_soft_deleted = False
 
-        # Soft delete mặc định: kiểm tra hóa đơn
-        cursor.execute("SELECT id FROM order_items WHERE product_id = ? LIMIT 1", (product_id,))
-        if cursor.fetchone():
-            cursor.execute("UPDATE products SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (product_id,))
-            conn.commit()
-            try:
-                rag_service.upsert_single_product(product_id)
-                visual_index_service.sync_single_product_visual(product_id)
-            except Exception:
-                pass
-            return {"message": "Sản phẩm đã có lịch sử bán hàng nên được chuyển sang trạng thái ngừng kinh doanh (inactive)"}
-
-        cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
-        conn.commit()
-        try:
+    # Đồng bộ vector sang ChromaDB sau khi transaction commit
+    try:
+        if is_soft_deleted:
+            rag_service.upsert_single_product(product_id)
+            visual_index_service.sync_single_product_visual(product_id)
+        else:
             rag_service.delete_single_product(product_id)
             visual_index_service.delete_single_product_visual(product_id)
-        except Exception:
-            pass
-        return {"message": "Đã xóa sản phẩm vĩnh viễn"}
+    except Exception as e:
+        logger.error(f"ChromaDB vector sync failed after deleting/deactivating product ID {product_id}: {e}. Flagging for auto-healing.")
+        rag_service.mark_sync_needed()
+
+    return msg
 

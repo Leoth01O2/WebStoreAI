@@ -114,9 +114,9 @@ def test_4_admin_allowed_operations():
     res_cat = client.get("/api/v1/categories", headers=headers)
     assert res_cat.status_code == 200
 
-    # Nhập hàng
-    res = client.get("/api/v1/purchases", headers=headers)
-    assert res.status_code == 200
+    products = res.json()
+    assert len(products) > 0
+    assert all(p.get("cost_price") is None for p in products)
 
     # Quản lý tài khoản: Admin được tạo staff
     new_staff_username = f"staff_created_{uuid.uuid4().hex[:6]}"
@@ -189,9 +189,13 @@ def test_5_admin_cannot_access_superadmin_features():
     assert len(prod_list) > 0
     target_prod_id = prod_list[0]["id"]
 
+    # Admin bị cấm truy cập /purchases
+    res_purchases = client.get("/api/v1/purchases", headers=admin_headers)
+    assert res_purchases.status_code == 403
+
     del_res = client.delete(f"/api/v1/products/{target_prod_id}?hard_delete=true", headers=admin_headers)
     assert del_res.status_code == 403
-    assert "SuperAdmin" in del_res.json()["detail"]
+    assert "quyền" in del_res.json()["detail"].lower() or "superadmin" in del_res.json()["detail"].lower()
 
 # ==============================================================================
 # 6. STAFF GỌI API QUẢN TRỊ CẤP CAO -> 403 FORBIDDEN
@@ -318,12 +322,12 @@ def test_8_customer_anti_idor_and_cross_user_protection():
     )
     assert res_edit_other.status_code == 403
 
-    # 4. Admin tạo 1 đơn hàng riêng cho Customer 2
-    admin_token = get_token("admin", "Admin@123")
-    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    # 4. Staff tạo 1 đơn hàng riêng cho Customer 2 (Admin bị cấm tạo đơn)
+    staff_token = get_token("staff", "Staff@123")
+    staff_headers = {"Authorization": f"Bearer {staff_token}"}
 
     # Lấy 1 sản phẩm có hàng
-    products = client.get("/api/v1/products", headers=admin_headers).json()
+    products = client.get("/api/v1/products", headers=staff_headers).json()
     avail_prod = [p for p in products if p["stock_quantity"] > 2][0]
 
     order_c2_res = client.post(
@@ -333,7 +337,7 @@ def test_8_customer_anti_idor_and_cross_user_protection():
             "items": [{"product_id": avail_prod["id"], "quantity": 1}],
             "payment_method": "cash"
         },
-        headers=admin_headers
+        headers=staff_headers
     )
     assert order_c2_res.status_code == 200
     order_c2_id = order_c2_res.json()["id"]

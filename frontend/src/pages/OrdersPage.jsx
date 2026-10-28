@@ -10,18 +10,24 @@ import {
   PackageCheck,
   CheckCircle2,
   RefreshCw,
+  Truck,
+  RotateCcw,
+  History,
+  DollarSign,
+  CreditCard,
+  UserCheck,
 } from 'lucide-react';
 import { ordersAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Badge, OrderStatusBadge } from '../components/ui/Badge';
+import { Badge, OrderStatusBadge, PaymentStatusBadge, FulfillmentStatusBadge, RoleBadge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { ReceiptModal } from '../components/ui/ReceiptModal';
 
 const OrderLifecycleStepper = ({ status, rejectionReason }) => {
   const steps = [
     { key: 'pending', label: '1. Chờ duyệt', num: 1 },
-    { key: 'admin_approved', label: '2. Đã duyệt', num: 2 },
+    { key: 'confirmed', label: '2. Đã duyệt', num: 2 },
     { key: 'processing', label: '3. Đang xử lý', num: 3 },
     { key: 'completed', label: '4. Hoàn thành', num: 4 },
   ];
@@ -41,7 +47,7 @@ const OrderLifecycleStepper = ({ status, rejectionReason }) => {
           <span>❌ ĐƠN HÀNG ĐÃ BỊ TỪ CHỐI</span>
         </div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-          <strong>Lý do từ chối:</strong> {rejectionReason || 'Đơn hàng không được duyệt bởi Quản trị viên'}
+          <strong>Lý do từ chối:</strong> {rejectionReason || 'Đơn hàng không được duyệt bởi Chủ cửa hàng'}
         </div>
       </div>
     );
@@ -72,6 +78,7 @@ const OrderLifecycleStepper = ({ status, rejectionReason }) => {
     switch (st) {
       case 'pending':
         return 0;
+      case 'confirmed':
       case 'admin_approved':
         return 1;
       case 'processing':
@@ -188,10 +195,10 @@ const OrderLifecycleStepper = ({ status, rejectionReason }) => {
 };
 
 export const OrdersPage = () => {
-  const { user, isAdmin, isSuperAdmin, isManager } = useAuth();
+  const { user, isAdmin, isSuperAdmin } = useAuth();
   const { addToast } = useToast();
   const isCustomer = user?.role === 'customer';
-  const canCancel = isAdmin || isSuperAdmin || isManager;
+  const canCancel = isAdmin || isSuperAdmin;
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -226,6 +233,22 @@ export const OrdersPage = () => {
   const [rejectingOrder, setRejectingOrder] = useState(null);
   const [rejectReason, setRejectReason] = useState('Đơn hàng bị Admin từ chối');
   const [submittingReject, setSubmittingReject] = useState(false);
+
+  // Phase R3: Workflow States (Claim, Reassign, Payment, Fulfillment, Refund, Audit)
+  const [claimingOrderId, setClaimingOrderId] = useState(null);
+  const [reassignModal, setReassignModal] = useState(null);
+  const [submittingReassign, setSubmittingReassign] = useState(false);
+
+  const [verifyPaymentModal, setVerifyPaymentModal] = useState(null);
+  const [submittingVerifyPayment, setSubmittingVerifyPayment] = useState(false);
+
+  const [returnModal, setReturnModal] = useState(null);
+  const [submittingReturn, setSubmittingReturn] = useState(false);
+
+  const [refundModal, setRefundModal] = useState(null);
+  const [submittingRefund, setSubmittingRefund] = useState(false);
+
+  const [auditLogsModal, setAuditLogsModal] = useState(null);
 
   const fetchWorkflowCounts = async () => {
     if (!user) return;
@@ -306,12 +329,12 @@ export const OrdersPage = () => {
   const handleApproveOrder = async (order) => {
     try {
       await ordersAPI.approveOrder(order.id);
-      addToast(`Đã duyệt đơn hàng #${order.order_code} thành công!`, 'success');
+      addToast(`Đã duyệt đơn hàng #${order.order_code} (Chuyển Thu ngân) thành công!`, 'success');
       window.dispatchEvent(new CustomEvent('workflow-updated'));
       loadOrders();
       fetchWorkflowCounts();
       if (viewingOrder?.id === order.id) {
-        setViewingOrder((prev) => ({ ...prev, status: 'admin_approved' }));
+        setViewingOrder((prev) => ({ ...prev, status: 'confirmed' }));
       }
     } catch (err) {
       addToast(err.message || 'Lỗi khi duyệt đơn hàng', 'error');
@@ -433,32 +456,224 @@ export const OrdersPage = () => {
     }
   };
 
+  // --- PHASE R3 WORKFLOW HANDLERS ---
+  const handleClaimOrder = async (order) => {
+    setClaimingOrderId(order.id);
+    try {
+      const updated = await ordersAPI.claimOrder(order.id);
+      addToast(`Nhận đơn hàng #${order.order_code} thành công! Đơn chuyển sang đang xử lý.`, 'success');
+      window.dispatchEvent(new CustomEvent('workflow-updated'));
+      loadOrders();
+      fetchWorkflowCounts();
+      if (viewingOrder?.id === order.id) {
+        setViewingOrder(updated);
+      }
+    } catch (err) {
+      if (err.message?.includes('409') || err.message?.includes('đã được nhân viên khác nhận')) {
+        addToast(`XUNG ĐỘT (HTTP 409): Đơn hàng #${order.order_code} đã được nhân viên khác nhận trước đó!`, 'error');
+      } else {
+        addToast(err.message || 'Lỗi khi nhận đơn hàng', 'error');
+      }
+      loadOrders();
+      fetchWorkflowCounts();
+    } finally {
+      setClaimingOrderId(null);
+    }
+  };
+
+  const handleReassignOrder = async (e) => {
+    e.preventDefault();
+    if (!reassignModal || !reassignModal.newStaffId) return;
+    setSubmittingReassign(true);
+    try {
+      const updated = await ordersAPI.reassignOrder(
+        reassignModal.order.id,
+        parseInt(reassignModal.newStaffId, 10),
+        reassignModal.reason || 'Admin điều chuyển nhân viên'
+      );
+      addToast(`Đã điều chuyển đơn #${reassignModal.order.order_code} thành công!`, 'success');
+      setReassignModal(null);
+      window.dispatchEvent(new CustomEvent('workflow-updated'));
+      loadOrders();
+      if (viewingOrder?.id === reassignModal.order.id) {
+        setViewingOrder(updated);
+      }
+    } catch (err) {
+      addToast(err.message || 'Lỗi khi điều chuyển đơn hàng', 'error');
+    } finally {
+      setSubmittingReassign(false);
+    }
+  };
+
+  const handleVerifyPayment = async (e) => {
+    e.preventDefault();
+    if (!verifyPaymentModal) return;
+    setSubmittingVerifyPayment(true);
+    try {
+      const updated = await ordersAPI.verifyPayment(verifyPaymentModal.order.id, {
+        verified_reference: verifyPaymentModal.verifiedRef || undefined,
+        note: verifyPaymentModal.note || undefined,
+      });
+      addToast(`Đã xác minh thanh toán cho đơn #${verifyPaymentModal.order.order_code}!`, 'success');
+      setVerifyPaymentModal(null);
+      window.dispatchEvent(new CustomEvent('workflow-updated'));
+      loadOrders();
+      if (viewingOrder?.id === verifyPaymentModal.order.id) {
+        setViewingOrder(updated);
+      }
+    } catch (err) {
+      addToast(err.message || 'Lỗi khi xác minh thanh toán', 'error');
+    } finally {
+      setSubmittingVerifyPayment(false);
+    }
+  };
+
+  const handleConfirmCodPayment = async (order) => {
+    try {
+      const updated = await ordersAPI.confirmCodPayment(order.id, 'Xác nhận đã thu tiền mặt COD từ khách');
+      addToast(`Đã ghi nhận thu tiền COD cho đơn #${order.order_code}!`, 'success');
+      window.dispatchEvent(new CustomEvent('workflow-updated'));
+      loadOrders();
+      if (viewingOrder?.id === order.id) {
+        setViewingOrder(updated);
+      }
+    } catch (err) {
+      addToast(err.message || 'Lỗi khi xác nhận thanh toán COD', 'error');
+    }
+  };
+
+  const handleUpdateFulfillment = async (order, targetStatus, note = null) => {
+    try {
+      const updated = await ordersAPI.updateFulfillment(order.id, targetStatus, note);
+      addToast(`Cập nhật trạng thái giao vận: ${targetStatus} cho đơn #${order.order_code}!`, 'success');
+      window.dispatchEvent(new CustomEvent('workflow-updated'));
+      loadOrders();
+      if (viewingOrder?.id === order.id) {
+        setViewingOrder(updated);
+      }
+    } catch (err) {
+      addToast(err.message || 'Lỗi khi cập nhật giao vận', 'error');
+    }
+  };
+
+  const handleConfirmReturn = async (e) => {
+    e.preventDefault();
+    if (!returnModal) return;
+    setSubmittingReturn(true);
+    try {
+      const updated = await ordersAPI.confirmReturn(
+        returnModal.order.id,
+        returnModal.reason || 'Hàng hoàn về kho',
+        returnModal.note || undefined
+      );
+      addToast(`Đã xác nhận nhập lại kho đơn #${returnModal.order.order_code}. Tồn kho đã hoàn trả nguyên vẹn!`, 'success');
+      setReturnModal(null);
+      window.dispatchEvent(new CustomEvent('workflow-updated'));
+      loadOrders();
+      if (viewingOrder?.id === returnModal.order.id) {
+        setViewingOrder(updated);
+      }
+    } catch (err) {
+      addToast(err.message || 'Lỗi khi xác nhận hoàn kho', 'error');
+    } finally {
+      setSubmittingReturn(false);
+    }
+  };
+
+  const handleRequestRefund = async (e) => {
+    e.preventDefault();
+    if (!refundModal) return;
+    setSubmittingRefund(true);
+    try {
+      const updated = await ordersAPI.requestRefund(refundModal.order.id, refundModal.reason || 'Khách yêu cầu hoàn tiền');
+      addToast(`Đã yêu cầu hoàn tiền cho đơn #${refundModal.order.order_code}! Đang chờ Admin phê duyệt.`, 'success');
+      setRefundModal(null);
+      window.dispatchEvent(new CustomEvent('workflow-updated'));
+      loadOrders();
+      if (viewingOrder?.id === refundModal.order.id) {
+        setViewingOrder(updated);
+      }
+    } catch (err) {
+      addToast(err.message || 'Lỗi khi yêu cầu hoàn tiền', 'error');
+    } finally {
+      setSubmittingRefund(false);
+    }
+  };
+
+  const handleConfirmRefund = async (e) => {
+    e.preventDefault();
+    if (!refundModal) return;
+    const cleanRef = (refundModal.refundRef || '').trim();
+    if (!cleanRef || cleanRef === '.') {
+      addToast('Bắt buộc nhập mã giao dịch hoặc số tham chiếu hoàn tiền thực tế!', 'warning');
+      return;
+    }
+    const rawReason = (refundModal.reason || '').trim();
+    const cleanReason = (rawReason && rawReason !== '.') ? rawReason : 'Đã hoàn tiền cho khách qua chuyển khoản / tiền mặt';
+
+    setSubmittingRefund(true);
+    try {
+      const updated = await ordersAPI.confirmRefund(
+        refundModal.order.id,
+        cleanRef,
+        cleanReason
+      );
+      addToast(`Đã xác nhận hoàn tiền thực tế cho đơn #${refundModal.order.order_code}! (Không ảnh hưởng đến kho)`, 'success');
+      setRefundModal(null);
+      window.dispatchEvent(new CustomEvent('workflow-updated'));
+      loadOrders();
+      if (viewingOrder?.id === refundModal.order.id) {
+        setViewingOrder(updated);
+      }
+    } catch (err) {
+      addToast(err.message || 'Lỗi khi xác nhận hoàn tiền', 'error');
+    } finally {
+      setSubmittingRefund(false);
+    }
+  };
+
+  const handleOpenAuditLogs = async (order) => {
+    setAuditLogsModal({ order, logs: [], loading: true });
+    try {
+      const logs = await ordersAPI.getAuditLogs(order.id);
+      setAuditLogsModal({ order, logs, loading: false });
+    } catch (err) {
+      addToast(err.message || 'Lỗi khi tải lịch sử kiểm toán', 'error');
+      setAuditLogsModal(null);
+    }
+  };
+
   const getTabs = () => {
     let pendingCount = 0;
     let approvedCount = 0;
-    let processingCount = 0;
 
     if (isCustomer) {
       pendingCount = workflowCounts?.my_pending_count || 0;
-      processingCount = workflowCounts?.my_processing_count || 0;
+      return [
+        { id: '', label: 'Tất cả' },
+        { id: 'pending', label: 'Chờ duyệt', count: pendingCount, color: 'var(--amber-primary)' },
+        { id: 'completed', label: 'Đã hoàn tất' },
+        { id: 'cancelled,rejected', label: 'Đã hủy' },
+      ];
     } else if (user?.role === 'staff') {
       approvedCount = workflowCounts?.approved_count || 0;
-      processingCount = workflowCounts?.processing_count || 0;
+      return [
+        { id: '', label: 'Tất cả hóa đơn' },
+        { id: 'confirmed,admin_approved,processing', label: 'Đã duyệt (Chờ xuất bill/thu tiền)', count: approvedCount, color: 'var(--green-terminal)' },
+        { id: 'completed', label: 'Đã hoàn tất' },
+      ];
     } else {
-      // admin, superadmin, manager
+      // superadmin (Chủ shop)
       pendingCount = workflowCounts?.pending_count || 0;
       approvedCount = workflowCounts?.approved_count || 0;
-      processingCount = workflowCounts?.processing_count || 0;
+      return [
+        { id: '', label: 'Tất cả hóa đơn' },
+        { id: 'pending', label: 'Chờ duyệt', count: pendingCount, color: 'var(--amber-primary)' },
+        { id: 'confirmed,admin_approved,processing', label: 'Đã duyệt (Chờ thu tiền)', count: approvedCount, color: 'var(--green-terminal)' },
+        { id: 'completed', label: 'Đã hoàn tất' },
+        { id: 'cancelled,rejected', label: 'Đã hủy / Từ chối' },
+      ];
     }
-
-    return [
-      { id: '', label: 'Tất cả' },
-      { id: 'pending', label: 'Chờ duyệt', count: pendingCount, color: 'var(--amber-primary)' },
-      { id: 'admin_approved', label: 'Đã duyệt', count: approvedCount, color: 'var(--green-terminal)' },
-      { id: 'processing', label: 'Đang xử lý', count: processingCount, color: 'var(--blue-light)' },
-      { id: 'completed', label: 'Hoàn thành' },
-      { id: 'cancelled,rejected', label: 'Đã hủy / Từ chối' },
-    ];
   };
 
   const formatVND = (val) => Number(val || 0).toLocaleString('vi-VN') + ' đ';
@@ -599,8 +814,8 @@ export const OrdersPage = () => {
               <th>MÃ HÓA ĐƠN</th>
               <th>THỜI GIAN</th>
               <th>KHÁCH HÀNG</th>
-              <th>NGƯỜI BÁN</th>
-              <th>HÌNH THỨC</th>
+              <th>NGƯỜI BÁN / PHỤ TRÁCH</th>
+              <th>HÌNH THỨC & GIAO VẬN</th>
               <th style={{ textAlign: 'right' }}>TỔNG TIỀN</th>
               <th style={{ textAlign: 'center' }}>TRẠNG THÁI</th>
               <th style={{ textAlign: 'center' }}>THAO TÁC</th>
@@ -636,11 +851,34 @@ export const OrdersPage = () => {
                       </div>
                     )}
                   </td>
-                  <td>{o.user_name || '—'}</td>
                   <td>
-                    <span className="badge badge-muted">
-                      {o.payment_method === 'cash' ? 'Tiền mặt' : o.payment_method === 'transfer' ? 'C.Khoản' : 'Thẻ'}
-                    </span>
+                    <div>{o.user_name || '—'}</div>
+                    {o.assigned_name ? (
+                      <div style={{ fontSize: '0.72rem', color: 'var(--amber-primary)', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <UserCheck size={11} /> <span>{o.assigned_name}</span>
+                      </div>
+                    ) : (o.status === 'confirmed' || o.status === 'admin_approved') ? (
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.2rem' }}>
+                        (Chưa phân công)
+                      </div>
+                    ) : null}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                      <span className="badge badge-muted" style={{ width: 'fit-content' }}>
+                        {o.payment_method === 'cash' ? 'Tiền mặt (COD)' : o.payment_method === 'transfer' ? 'Chuyển khoản' : 'Thẻ'}
+                      </span>
+                      {o.payment_status && (
+                        <div>
+                          <PaymentStatusBadge status={o.payment_status} orderStatus={o.status} />
+                        </div>
+                      )}
+                      {o.fulfillment_status && (
+                        <div>
+                          <FulfillmentStatusBadge status={o.fulfillment_status} orderStatus={o.status} />
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="currency" style={{ textAlign: 'right', fontWeight: 700, color: (o.status === 'cancelled' || o.status === 'rejected') ? 'var(--text-muted)' : 'var(--green-terminal)' }}>
                     {formatVND(o.final_amount)}
@@ -650,14 +888,14 @@ export const OrdersPage = () => {
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                      {/* Admin/SuperAdmin Quick Actions */}
-                      {(isAdmin || isSuperAdmin) && o.status === 'pending' && (
+                      {/* SuperAdmin Duyệt / Từ chối đơn Online (pending) */}
+                      {isSuperAdmin && o.status === 'pending' && (
                         <>
                           <button
                             onClick={() => handleApproveOrder(o)}
                             className="btn btn-outline btn-icon btn-sm"
                             style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
-                            title="Duyệt đơn hàng"
+                            title="Duyệt đơn (Chuyển Thu ngân)"
                           >
                             <Check size={13} />
                           </button>
@@ -665,31 +903,20 @@ export const OrdersPage = () => {
                             onClick={() => setRejectingOrder(o)}
                             className="btn btn-outline btn-icon btn-sm"
                             style={{ color: 'var(--red-light)', borderColor: 'var(--red-light)' }}
-                            title="Từ chối đơn hàng"
+                            title="Từ chối / Hủy đơn"
                           >
                             <X size={13} />
                           </button>
                         </>
                       )}
 
-                      {/* Staff/Admin Quick Actions */}
-                      {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'admin_approved' && (
-                        <button
-                          onClick={() => handleProcessOrder(o)}
-                          className="btn btn-outline btn-icon btn-sm"
-                          style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)' }}
-                          title="Nhận xử lý đơn hàng"
-                        >
-                          <PackageCheck size={13} />
-                        </button>
-                      )}
-
-                      {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'processing' && (
+                      {/* Staff/SuperAdmin Thu tiền & Hoàn tất hóa đơn (1-click) */}
+                      {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved' || o.status === 'processing') && (
                         <button
                           onClick={() => handleCompleteOrder(o)}
                           className="btn btn-outline btn-icon btn-sm"
                           style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
-                          title="Hoàn tất đơn hàng"
+                          title="Thu tiền / Hoàn tất hóa đơn"
                         >
                           <CheckCircle2 size={13} />
                         </button>
@@ -703,6 +930,13 @@ export const OrdersPage = () => {
                         <Eye size={13} />
                       </button>
                       <button
+                        onClick={() => handleOpenAuditLogs(o)}
+                        className="btn btn-outline btn-icon btn-sm"
+                        title="Lịch sử / Audit log"
+                      >
+                        <History size={13} />
+                      </button>
+                      <button
                         onClick={() => setReceiptOrder(o)}
                         className="btn btn-outline btn-icon btn-sm"
                         title="In lại hóa đơn"
@@ -710,6 +944,10 @@ export const OrdersPage = () => {
                         <Printer size={13} />
                       </button>
                       {canCancel && o.status === 'completed' && (
+                        o.fulfillment_status !== 'delivered' ||
+                        o.payment_status === 'refund_pending' ||
+                        o.payment_status === 'refunded'
+                      ) && (
                         <button
                           onClick={() => setCancellingOrder(o)}
                           className="btn btn-outline btn-icon btn-sm"
@@ -772,10 +1010,27 @@ export const OrdersPage = () => {
               </div>
 
               <div className="order-card-row">
-                <span style={{ color: 'var(--text-muted)' }}>Hình thức:</span>
-                <span className="badge badge-muted">
-                  {o.payment_method === 'cash' ? 'Tiền mặt' : o.payment_method === 'transfer' ? 'C.Khoản' : 'Thẻ'}
+                <span style={{ color: 'var(--text-muted)' }}>Phụ trách:</span>
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {o.assigned_name ? (
+                    <span style={{ color: 'var(--amber-primary)' }}>{o.assigned_name}</span>
+                  ) : o.status === 'admin_approved' ? (
+                    <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Chưa có Staff nhận</span>
+                  ) : (
+                    o.user_name || '—'
+                  )}
                 </span>
+              </div>
+
+              <div className="order-card-row">
+                <span style={{ color: 'var(--text-muted)' }}>Thanh toán & Giao vận:</span>
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="badge badge-muted">
+                    {o.payment_method === 'cash' ? 'Tiền mặt' : o.payment_method === 'transfer' ? 'C.Khoản' : 'Thẻ'}
+                  </span>
+                  {o.payment_status && <PaymentStatusBadge status={o.payment_status} orderStatus={o.status} />}
+                  {o.fulfillment_status && <FulfillmentStatusBadge status={o.fulfillment_status} orderStatus={o.status} />}
+                </div>
               </div>
 
               <div className="order-card-row" style={{ paddingTop: '0.25rem' }}>
@@ -787,42 +1042,33 @@ export const OrdersPage = () => {
 
               {/* Action buttons with minimum 40px touch targets */}
               <div className="order-card-actions">
-                {(isAdmin || isSuperAdmin) && o.status === 'pending' && (
+                {isSuperAdmin && o.status === 'pending' && (
                   <>
                     <button
                       onClick={() => handleApproveOrder(o)}
                       className="btn btn-outline btn-sm"
                       style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)' }}
                     >
-                      <Check size={14} /> Duyệt đơn
+                      <Check size={14} /> {o.payment_method === 'transfer' || o.payment_status === 'pending_verification' ? 'Đối soát & Duyệt đơn' : 'Duyệt đơn'}
                     </button>
                     <button
                       onClick={() => setRejectingOrder(o)}
                       className="btn btn-outline btn-sm"
                       style={{ color: 'var(--red-light)', borderColor: 'var(--red-light)' }}
                     >
-                      <X size={14} /> Từ chối
+                      <X size={14} /> Từ chối đơn
                     </button>
                   </>
                 )}
 
-                {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'admin_approved' && (
-                  <button
-                    onClick={() => handleProcessOrder(o)}
-                    className="btn btn-outline btn-sm"
-                    style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)', width: '100%', flex: '1 1 100%' }}
-                  >
-                    <PackageCheck size={15} /> Nhận xử lý đơn
-                  </button>
-                )}
-
-                {(user?.role === 'staff' || isAdmin || isSuperAdmin) && o.status === 'processing' && (
+                {/* Staff/SuperAdmin Thu tiền & Hoàn tất đơn (1-click) */}
+                {(user?.role === 'staff' || isSuperAdmin) && (o.status === 'confirmed' || o.status === 'admin_approved' || o.status === 'processing') && (
                   <button
                     onClick={() => handleCompleteOrder(o)}
                     className="btn btn-outline btn-sm"
                     style={{ color: 'var(--green-terminal)', borderColor: 'var(--green-terminal)', width: '100%', flex: '1 1 100%' }}
                   >
-                    <CheckCircle2 size={15} /> Hoàn tất đơn
+                    <CheckCircle2 size={15} /> Thu tiền & Hoàn tất hóa đơn
                   </button>
                 )}
 
@@ -834,6 +1080,13 @@ export const OrdersPage = () => {
                 </button>
 
                 <button
+                  onClick={() => handleOpenAuditLogs(o)}
+                  className="btn btn-outline btn-sm"
+                >
+                  <History size={14} /> Lịch sử
+                </button>
+
+                <button
                   onClick={() => setReceiptOrder(o)}
                   className="btn btn-outline btn-sm"
                 >
@@ -841,6 +1094,10 @@ export const OrdersPage = () => {
                 </button>
 
                 {canCancel && o.status === 'completed' && (
+                  o.fulfillment_status !== 'delivered' ||
+                  o.payment_status === 'refund_pending' ||
+                  o.payment_status === 'refunded'
+                ) && (
                   <button
                     onClick={() => setCancellingOrder(o)}
                     className="btn btn-outline btn-sm"
@@ -872,74 +1129,84 @@ export const OrdersPage = () => {
         title={`CHI TIẾT HÓA ĐƠN #${viewingOrder?.order_code}`}
         maxWidth="600px"
         footer={
-          <>
-            {/* Quick Actions in Detail Modal */}
-            {(isAdmin || isSuperAdmin) && viewingOrder?.status === 'pending' && (
-              <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '0.5rem' }}>
+            {/* Trái: Lịch sử Audit Log & In ấn */}
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => handleOpenAuditLogs(viewingOrder)}
+                className="btn btn-outline btn-sm"
+              >
+                <History size={14} /> Xem Lịch Sử / Audit Log
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceiptOrder(viewingOrder)}
+                className="btn btn-outline btn-sm"
+              >
+                <Printer size={14} /> In Hóa Đơn
+              </button>
+            </div>
+
+            {/* Phải: Các thao tác chính theo phân quyền */}
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* SuperAdmin Duyệt / Từ chối đơn pending */}
+              {(isAdmin || isSuperAdmin) && viewingOrder?.status === 'pending' && (
+                <>
+                  <button
+                    onClick={() => handleApproveOrder(viewingOrder)}
+                    className="btn btn-primary btn-sm"
+                    style={{ background: 'var(--green-terminal)', color: '#000' }}
+                  >
+                    <Check size={14} /> {viewingOrder.payment_method === 'transfer' || viewingOrder.payment_status === 'pending_verification' ? 'Đối Soát & Duyệt Đơn' : 'Duyệt Đơn'}
+                  </button>
+                  <button
+                    onClick={() => setRejectingOrder(viewingOrder)}
+                    className="btn btn-danger btn-sm"
+                  >
+                    <X size={14} /> Từ Chối Đơn
+                  </button>
+                </>
+              )}
+
+              {/* Staff / SuperAdmin Thu tiền & Hoàn tất hóa đơn (1-click) */}
+              {(user?.role === 'staff' || isAdmin || isSuperAdmin) && (viewingOrder?.status === 'confirmed' || viewingOrder?.status === 'admin_approved' || viewingOrder?.status === 'processing') && (
                 <button
-                  onClick={() => handleApproveOrder(viewingOrder)}
-                  className="btn btn-primary"
+                  onClick={() => handleCompleteOrder(viewingOrder)}
+                  className="btn btn-primary btn-sm"
                   style={{ background: 'var(--green-terminal)', color: '#000' }}
                 >
-                  <Check size={15} /> Duyệt Đơn
+                  <CheckCircle2 size={14} /> Thu Tiền / Hoàn Tất Hóa Đơn
                 </button>
+              )}
+
+              {canCancel && viewingOrder?.status === 'completed' && (
+                viewingOrder.fulfillment_status !== 'delivered' ||
+                viewingOrder.payment_status === 'refund_pending' ||
+                viewingOrder.payment_status === 'refunded'
+              ) && (
                 <button
-                  onClick={() => setRejectingOrder(viewingOrder)}
-                  className="btn btn-danger"
+                  onClick={() => setCancellingOrder(viewingOrder)}
+                  className="btn btn-danger btn-sm"
                 >
-                  <X size={15} /> Từ Chối Đơn
+                  <XCircle size={14} /> Hủy Đơn & Hoàn Tồn Kho
                 </button>
-              </>
-            )}
+              )}
 
-            {(user?.role === 'staff' || isAdmin || isSuperAdmin) && viewingOrder?.status === 'admin_approved' && (
-              <button
-                onClick={() => handleProcessOrder(viewingOrder)}
-                className="btn btn-primary"
-                style={{ background: 'var(--amber-primary)', color: '#000' }}
-              >
-                <PackageCheck size={15} /> Nhận Xử Lý Đơn
-              </button>
-            )}
+              {isCustomer && viewingOrder?.status === 'pending' && (
+                <button
+                  onClick={() => setCustomerCancellingOrder(viewingOrder)}
+                  className="btn btn-danger btn-sm"
+                >
+                  <XCircle size={14} /> Hủy Đơn Hàng
+                </button>
+              )}
 
-            {(user?.role === 'staff' || isAdmin || isSuperAdmin) && viewingOrder?.status === 'processing' && (
-              <button
-                onClick={() => handleCompleteOrder(viewingOrder)}
-                className="btn btn-primary"
-                style={{ background: 'var(--green-terminal)', color: '#000' }}
-              >
-                <CheckCircle2 size={15} /> Hoàn Tất Đơn Hàng
+              <button onClick={() => setViewingOrder(null)} className="btn btn-outline btn-sm">
+                Đóng
               </button>
-            )}
-
-            <button
-              onClick={() => {
-                setReceiptOrder(viewingOrder);
-              }}
-              className="btn btn-outline"
-            >
-              <Printer size={15} /> In Hóa Đơn
-            </button>
-            {canCancel && viewingOrder?.status === 'completed' && (
-              <button
-                onClick={() => setCancellingOrder(viewingOrder)}
-                className="btn btn-danger"
-              >
-                <XCircle size={15} /> Hủy Đơn & Hoàn Tồn Kho
-              </button>
-            )}
-            {isCustomer && viewingOrder?.status === 'pending' && (
-              <button
-                onClick={() => setCustomerCancellingOrder(viewingOrder)}
-                className="btn btn-danger"
-              >
-                <XCircle size={15} /> Hủy Đơn Hàng
-              </button>
-            )}
-            <button onClick={() => setViewingOrder(null)} className="btn btn-primary">
-              Đóng
-            </button>
-          </>
+            </div>
+          </div>
         }
       >
         {viewingOrder && (
@@ -953,12 +1220,33 @@ export const OrdersPage = () => {
               <div><strong>Mã HĐ:</strong> <span className="font-mono">{viewingOrder.order_code}</span></div>
               <div><strong>Thời gian:</strong> {new Date(viewingOrder.created_at).toLocaleString('vi-VN')}</div>
               <div><strong>Khách hàng:</strong> {viewingOrder.customer_name || 'Khách vãng lai'}</div>
-              <div><strong>Thu ngân:</strong> {viewingOrder.user_name || '—'}</div>
-              <div><strong>Phương thức:</strong> {viewingOrder.payment_method.toUpperCase()}</div>
+              <div><strong>Người tạo:</strong> {viewingOrder.user_name || '—'}</div>
               <div>
-                <strong>Trạng thái:</strong>{' '}
+                <strong>Người phụ trách:</strong>{' '}
+                {viewingOrder.assigned_name ? (
+                  <span style={{ color: 'var(--amber-primary)', fontWeight: 600 }}>{viewingOrder.assigned_name}</span>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Chưa phân công</span>
+                )}
+              </div>
+              <div><strong>Hình thức:</strong> {viewingOrder.payment_method.toUpperCase()}</div>
+              <div>
+                <strong>Thanh toán:</strong>{' '}
+                <PaymentStatusBadge status={viewingOrder.payment_status} orderStatus={viewingOrder.status} />
+              </div>
+              <div>
+                <strong>Giao vận:</strong>{' '}
+                <FulfillmentStatusBadge status={viewingOrder.fulfillment_status} orderStatus={viewingOrder.status} />
+              </div>
+              <div>
+                <strong>Trạng thái đơn:</strong>{' '}
                 <OrderStatusBadge status={viewingOrder.status} />
               </div>
+              {viewingOrder.shipping_address && (
+                <div style={{ gridColumn: 'span 2' }}>
+                  <strong>Địa chỉ giao:</strong> {viewingOrder.shipping_name && `${viewingOrder.shipping_name} - `}{viewingOrder.shipping_phone && `${viewingOrder.shipping_phone}: `}{viewingOrder.shipping_address}
+                </div>
+              )}
             </div>
 
             {viewingOrder.rejection_reason && (
@@ -1010,63 +1298,41 @@ export const OrdersPage = () => {
               </div>
             </div>
 
-            {isSuperAdmin && (
-              <div
-                style={{
-                  marginTop: '1.25rem',
-                  padding: '0.85rem 1rem',
-                  background: 'rgba(245, 158, 11, 0.05)',
-                  border: '1px dashed var(--amber-primary)',
-                  borderRadius: 'var(--radius-xs)',
-                }}
-              >
-                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--amber-primary)', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span>⚡ THAO TÁC NGOẠI LỆ (CHỦ CỬA HÀNG - SUPERADMIN)</span>
+            {/* THAO TÁC HOÀN TIỀN (CHỈ HIỆN KHI CÓ QUYỀN VÀ ĐỦ ĐIỀU KIỆN) */}
+            {(() => {
+              const canCustomerRefund = isCustomer && viewingOrder.status === 'completed' && viewingOrder.payment_status === 'paid';
+              const canSuperAdminConfirmRefund = isSuperAdmin && viewingOrder.payment_status === 'refund_pending';
+              if (!canCustomerRefund && !canSuperAdminConfirmRefund) return null;
+              return (
+                <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <CreditCard size={14} style={{ color: 'var(--amber-primary)' }} />
+                    <span>HOÀN TIỀN & ĐỐI SOÁT (REFUND)</span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                    {canCustomerRefund && (
+                      <button
+                        type="button"
+                        onClick={() => setRefundModal({ order: viewingOrder, mode: 'request', refundRef: '', reason: '' })}
+                        className="btn btn-outline btn-sm"
+                        style={{ borderColor: 'var(--amber-primary)', color: 'var(--amber-primary)' }}
+                      >
+                        <RotateCcw size={14} /> Yêu cầu hoàn tiền (Refund)
+                      </button>
+                    )}
+                    {canSuperAdminConfirmRefund && (
+                      <button
+                        type="button"
+                        onClick={() => setRefundModal({ order: viewingOrder, mode: 'confirm', refundRef: '', reason: '' })}
+                        className="btn btn-danger btn-sm"
+                      >
+                        <Check size={14} /> Xác nhận đã hoàn tiền (Approve Refund)
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {viewingOrder.status !== 'cancelled' && viewingOrder.status !== 'rejected' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setForceActionModal({ order: viewingOrder, action: 'force_cancel' });
-                        setForceActionReason('');
-                      }}
-                      className="btn btn-outline btn-sm"
-                      style={{ color: 'var(--red-light)', borderColor: 'var(--red-light)' }}
-                    >
-                      Hủy Khẩn Cấp (Force Cancel)
-                    </button>
-                  )}
-                  {viewingOrder.status === 'rejected' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setForceActionModal({ order: viewingOrder, action: 'reopen_rejected' });
-                        setForceActionReason('Mở lại đơn bị từ chối');
-                      }}
-                      className="btn btn-outline btn-sm"
-                      style={{ color: 'var(--green-light)', borderColor: 'var(--green-terminal)' }}
-                    >
-                      Mở Lại Đơn (Reopen)
-                    </button>
-                  )}
-                  {viewingOrder.status !== 'cancelled' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setForceActionModal({ order: viewingOrder, action: 'override_status' });
-                        setForceActionReason('');
-                        setForceActionTargetStatus('processing');
-                      }}
-                      className="btn btn-outline btn-sm"
-                      style={{ color: 'var(--amber-primary)', borderColor: 'var(--amber-primary)' }}
-                    >
-                      Chuyển Trạng Thái (Override)
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
       </Modal>
@@ -1256,6 +1522,258 @@ export const OrdersPage = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* PHASE R3: REASSIGN ORDER MODAL */}
+      <Modal
+        isOpen={!!reassignModal}
+        onClose={() => setReassignModal(null)}
+        title={`ĐIỀU CHUYỂN ĐƠN HÀNG #${reassignModal?.order?.order_code}`}
+        maxWidth="460px"
+      >
+        <form onSubmit={handleReassignOrder}>
+          <div style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.85rem' }}>
+            Nhân viên hiện tại: <strong>{reassignModal?.order?.assigned_name || 'Chưa phân công'}</strong>
+          </div>
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label className="form-label" style={{ fontWeight: 600 }}>ID Nhân viên mới (Bắt buộc)</label>
+            <input
+              type="number"
+              className="form-control font-mono"
+              required
+              placeholder="Nhập ID nhân viên..."
+              value={reassignModal?.newStaffId || ''}
+              onChange={(e) => setReassignModal({ ...reassignModal, newStaffId: e.target.value })}
+            />
+          </div>
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label className="form-label" style={{ fontWeight: 600 }}>Lý do điều chuyển (Bắt buộc)</label>
+            <textarea
+              className="form-control"
+              rows={2}
+              required
+              placeholder="Nhập lý do điều chuyển ca / phân công lại..."
+              value={reassignModal?.reason || ''}
+              onChange={(e) => setReassignModal({ ...reassignModal, reason: e.target.value })}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+            <button type="button" onClick={() => setReassignModal(null)} className="btn btn-outline">
+              Hủy
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={submittingReassign}>
+              {submittingReassign ? 'Đang điều chuyển...' : 'Xác Nhận Điều Chuyển'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+
+
+      {/* PHASE R3: VERIFY PAYMENT MODAL */}
+      <Modal
+        isOpen={!!verifyPaymentModal}
+        onClose={() => setVerifyPaymentModal(null)}
+        title={`XÁC MINH THANH TOÁN #${verifyPaymentModal?.order?.order_code}`}
+        maxWidth="480px"
+      >
+        <form onSubmit={handleVerifyPayment}>
+          <div style={{ padding: '0.6rem', background: 'rgba(34, 197, 94, 0.08)', border: '1px solid var(--green-terminal)', borderRadius: 'var(--radius-xs)', marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--green-light)' }}>
+            ✓ Admin xác nhận đã kiểm tra đối soát biến động số dư thực tế trong tài khoản ngân hàng.
+          </div>
+          <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+            <label className="form-label" style={{ fontWeight: 600 }}>Mã đối soát sao kê ngân hàng</label>
+            <input
+              type="text"
+              className="form-control font-mono"
+              placeholder="VD: REF-BANK-2026-9921..."
+              value={verifyPaymentModal?.verifiedRef || ''}
+              onChange={(e) => setVerifyPaymentModal({ ...verifyPaymentModal, verifiedRef: e.target.value })}
+            />
+          </div>
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label className="form-label">Ghi chú đối soát</label>
+            <textarea
+              className="form-control"
+              rows={2}
+              placeholder="Ghi chú xác minh thanh toán..."
+              value={verifyPaymentModal?.note || ''}
+              onChange={(e) => setVerifyPaymentModal({ ...verifyPaymentModal, note: e.target.value })}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+            <button type="button" onClick={() => setVerifyPaymentModal(null)} className="btn btn-outline">
+              Hủy
+            </button>
+            <button type="submit" className="btn btn-primary" style={{ background: 'var(--green-terminal)', color: '#000' }} disabled={submittingVerifyPayment}>
+              {submittingVerifyPayment ? 'Đang xác minh...' : 'Xác Nhận Đã Nhận Tiền (Mark Paid)'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* PHASE R3: RETURN TO INVENTORY MODAL */}
+      <Modal
+        isOpen={!!returnModal}
+        onClose={() => setReturnModal(null)}
+        title={`XÁC NHẬN NHẬP LẠI KHO #${returnModal?.order?.order_code}`}
+        maxWidth="480px"
+      >
+        <form onSubmit={handleConfirmReturn}>
+          <div style={{ padding: '0.6rem', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid var(--red-light)', borderRadius: 'var(--radius-xs)', marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--red-light)' }}>
+            ⚠️ <strong>BẢO VỆ TỒN KHO:</strong> Chỉ thực hiện khi kiện hàng đã thực tế quay về kho cửa hàng và được kiểm đếm nguyên vẹn. Hệ thống có cơ chế chống cộng kho lặp hai lần.
+          </div>
+          <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+            <label className="form-label" style={{ fontWeight: 600 }}>Lý do nhập lại kho (Bắt buộc)</label>
+            <input
+              type="text"
+              className="form-control"
+              required
+              placeholder="VD: Khách không nghe máy, bưu tá giao thất bại hoàn hàng..."
+              value={returnModal?.reason || ''}
+              onChange={(e) => setReturnModal({ ...returnModal, reason: e.target.value })}
+            />
+          </div>
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label className="form-label">Ghi chú tình trạng hàng hóa</label>
+            <textarea
+              className="form-control"
+              rows={2}
+              placeholder="Tình trạng bao bì, sản phẩm nguyên vẹn..."
+              value={returnModal?.note || ''}
+              onChange={(e) => setReturnModal({ ...returnModal, note: e.target.value })}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+            <button type="button" onClick={() => setReturnModal(null)} className="btn btn-outline">
+              Hủy
+            </button>
+            <button type="submit" className="btn btn-danger" disabled={submittingReturn}>
+              {submittingReturn ? 'Đang nhập kho...' : 'Xác Nhận Nhập Lại Kho'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* PHASE R3: REFUND MODAL */}
+      <Modal
+        isOpen={!!refundModal}
+        onClose={() => setRefundModal(null)}
+        title={refundModal?.mode === 'confirm' ? `XÁC NHẬN HOÀN TIỀN THỰC TẾ #${refundModal?.order?.order_code}` : `YÊU CẦU HOÀN TIỀN #${refundModal?.order?.order_code}`}
+        maxWidth="480px"
+      >
+        <form onSubmit={refundModal?.mode === 'confirm' ? handleConfirmRefund : handleRequestRefund}>
+          <div style={{ padding: '0.6rem', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid var(--amber-primary)', borderRadius: 'var(--radius-xs)', marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--amber-primary)' }}>
+            ℹ️ <strong>ĐỘC LẬP TỒN KHO:</strong> Hoàn tiền không tự động nhập lại kho và hoàn hàng không tự động hoàn tiền.
+          </div>
+          {refundModal?.mode === 'confirm' && (
+            <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+              <label className="form-label" style={{ fontWeight: 600 }}>
+                Mã giao dịch hoàn tiền (Ủy nhiệm chi / Bill chuyển khoản) <span style={{ color: 'var(--red-light)' }}>*</span>
+              </label>
+              <input
+                type="text"
+                className="form-control font-mono"
+                required
+                placeholder="VD: REFUND-TX-88392, FT26102799..."
+                value={refundModal?.refundRef || ''}
+                onChange={(e) => setRefundModal({ ...refundModal, refundRef: e.target.value })}
+              />
+            </div>
+          )}
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label className="form-label" style={{ fontWeight: 600 }}>Lý do hoàn tiền (Bắt buộc)</label>
+            <textarea
+              className="form-control"
+              rows={3}
+              required
+              placeholder="Nhập lý do hoàn tiền..."
+              value={refundModal?.reason || ''}
+              onChange={(e) => setRefundModal({ ...refundModal, reason: e.target.value })}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+            <button type="button" onClick={() => setRefundModal(null)} className="btn btn-outline">
+              Hủy
+            </button>
+            <button
+              type="submit"
+              className={`btn ${refundModal?.mode === 'confirm' ? 'btn-danger' : 'btn-primary'}`}
+              disabled={submittingRefund}
+            >
+              {submittingRefund ? 'Đang xử lý...' : refundModal?.mode === 'confirm' ? 'Xác Nhận Đã Hoàn Tiền' : 'Gửi Yêu Cầu Hoàn Tiền'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* PHASE R3: AUDIT LOGS TIMELINE MODAL */}
+      <Modal
+        isOpen={!!auditLogsModal}
+        onClose={() => setAuditLogsModal(null)}
+        title={`DIỄN BIẾN & LỊCH SỬ KIỂM TOÁN #${auditLogsModal?.order?.order_code}`}
+        maxWidth="640px"
+        footer={
+          <button onClick={() => setAuditLogsModal(null)} className="btn btn-primary">
+            Đóng
+          </button>
+        }
+      >
+        {auditLogsModal && (
+          <div>
+            {auditLogsModal.loading ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                Đang tải lịch sử kiểm toán...
+              </div>
+            ) : (!auditLogsModal.logs || auditLogsModal.logs.length === 0) ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                Chưa có vết kiểm toán nào được ghi nhận cho đơn hàng này.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '450px', overflowY: 'auto', paddingRight: '0.25rem' }}>
+                {auditLogsModal.logs.map((log) => (
+                  <div
+                    key={log.id}
+                    style={{
+                      padding: '0.75rem',
+                      background: 'var(--bg-input)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-xs)',
+                      fontSize: '0.8rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem', flexWrap: 'wrap', gap: '0.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Badge variant="blue">{log.action?.toUpperCase()}</Badge>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {log.performer_name || log.user_name || (log.performed_by ? `User #${log.performed_by}` : 'Hệ thống')}
+                        </span>
+                        {(log.performer_role || log.user_role) && (
+                          <RoleBadge role={log.performer_role || log.user_role} short />
+                        )}
+                      </div>
+                      <span className="font-mono" style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                        {log.created_at ? new Date(log.created_at).toLocaleString('vi-VN') : ''}
+                      </span>
+                    </div>
+
+                    {(log.previous_status || log.resulting_status || log.old_status || log.new_status) && (
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                        Trạng thái: <span className="font-mono">{log.previous_status || log.old_status || '—'}</span> ➔ <strong className="font-mono" style={{ color: 'var(--amber-primary)' }}>{log.resulting_status || log.new_status}</strong>
+                      </div>
+                    )}
+
+                    {(log.reason || log.note) && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-primary)', marginTop: '0.35rem', fontStyle: 'italic', background: 'var(--bg-surface)', padding: '0.35rem 0.5rem', borderRadius: '4px' }}>
+                        "{log.reason || log.note}"
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* RECEIPT MODAL */}

@@ -1,9 +1,25 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.rbac import get_current_user, require_roles, get_customer_id_for_user
-from app.schemas.order import OrderCreate, OrderResponse, OrderItemResponse, RejectOrderRequest, ForceActionRequest
+from app.schemas.order import (
+    OrderCreate,
+    OrderResponse,
+    OrderItemResponse,
+    RejectOrderRequest,
+    ForceActionRequest,
+    ClaimOrderRequest,
+    ReassignOrderRequest,
+    NotifyTransferRequest,
+    VerifyPaymentRequest,
+    ConfirmCodPaymentRequest,
+    UpdateFulfillmentRequest,
+    ConfirmReturnRequest,
+    RequestRefundRequest,
+    ConfirmRefundRequest,
+    OrderAuditLogResponse,
+)
 from app.services.inventory_service import InventoryService
 
 router = APIRouter(prefix="/orders", tags=["Orders & POS"])
@@ -26,22 +42,37 @@ def get_orders(
     """
     with get_db() as conn:
         cursor = conn.cursor()
-        query = """
+        cursor.execute("PRAGMA table_info(orders)")
+        cols = {r["name"] if isinstance(r, dict) or hasattr(r, "keys") else r[1] for r in cursor.fetchall()}
+        has_v3 = "payment_status_raw" in cols
+        extra_select = ", o.payment_status_raw, o.fulfillment_status" if has_v3 else ""
+
+        query = f"""
             SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
                    o.user_id, u.full_name as user_name, o.total_amount, o.discount_amount,
                    o.final_amount, o.payment_method, o.payment_status, o.status, o.note,
+                   o.assigned_to, u_assign.full_name as assigned_name,
+                   o.shipping_name, o.shipping_phone, o.shipping_address, o.is_legacy_unverified,
                    o.approved_by, o.approved_at, o.processed_by, o.processed_at,
                    o.rejected_by, o.rejected_at, o.rejection_reason,
-                   o.created_at
+                   o.created_at{extra_select}
             FROM orders o
             LEFT JOIN customers c ON o.customer_id = c.id
             LEFT JOIN users u ON o.user_id = u.id
+            LEFT JOIN users u_assign ON o.assigned_to = u_assign.id
             WHERE 1=1
         """
         params = []
 
+        user_role = current_user.get("role")
+        if user_role == "admin":
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail="Quản trị viên kỹ thuật không có quyền xem hóa đơn kinh doanh của cửa hàng"
+            )
+
         # Enforce quyền riêng tư: Customer chỉ xem đơn hàng của mình
-        if current_user.get("role") == "customer":
+        if user_role == "customer":
             own_customer_id = get_customer_id_for_user(conn, current_user)
             if own_customer_id:
                 query += " AND (o.user_id = ? OR o.customer_id = ?)"
@@ -49,10 +80,24 @@ def get_orders(
             else:
                 query += " AND o.user_id = ?"
                 params.append(current_user["id"])
+        elif user_role == "staff":
+            # Thu ngân TUYỆT ĐỐI KHÔNG nhìn thấy các đơn pending
+            if status == "pending":
+                return []
+            if not status:
+                query += " AND o.status IN ('confirmed', 'completed', 'admin_approved', 'processing')"
+            else:
+                query += " AND o.status != 'pending'"
 
         if status:
-            if "," in status:
+            if status in ("confirmed", "admin_approved"):
+                query += " AND o.status IN ('confirmed', 'admin_approved')"
+            elif "," in status:
                 stat_list = [s.strip() for s in status.split(",") if s.strip()]
+                if "confirmed" in stat_list and "admin_approved" not in stat_list:
+                    stat_list.append("admin_approved")
+                elif "admin_approved" in stat_list and "confirmed" not in stat_list:
+                    stat_list.append("confirmed")
                 placeholders = ",".join("?" for _ in stat_list)
                 query += f" AND o.status IN ({placeholders})"
                 params.extend(stat_list)
@@ -77,8 +122,12 @@ def get_orders(
         cursor.execute(query, params)
         orders = [dict(r) for r in cursor.fetchall()]
 
-        # Gắn danh sách items tóm tắt cho từng order
+        # Gắn danh sách items tóm tắt cho từng order và fallback tương thích
         for order in orders:
+            if not has_v3:
+                order.setdefault("payment_status_raw", order.get("payment_status"))
+                order.setdefault("fulfillment_status", "delivered" if order.get("status") == "completed" else "unfulfilled")
+            order.setdefault("is_legacy_unverified", 0)
             cursor.execute(
                 """SELECT oi.id, oi.product_id, p.sku as product_sku, p.name as product_name,
                           p.image_url, oi.quantity, oi.unit_price, oi.subtotal
@@ -107,13 +156,14 @@ def get_workflow_counts(current_user: dict = Depends(get_current_user)):
             cursor.execute("""
                 SELECT status, COUNT(*) as cnt
                 FROM orders
-                WHERE status IN ('pending', 'admin_approved', 'processing')
+                WHERE status IN ('pending', 'confirmed', 'admin_approved', 'processing')
                 GROUP BY status
             """)
             counts = {row["status"]: row["cnt"] for row in cursor.fetchall()}
+            approved_count = counts.get("confirmed", 0) + counts.get("admin_approved", 0)
             return {
                 "pending_count": counts.get("pending", 0),
-                "approved_count": counts.get("admin_approved", 0),
+                "approved_count": approved_count,
                 "processing_count": counts.get("processing", 0),
             }
 
@@ -121,12 +171,13 @@ def get_workflow_counts(current_user: dict = Depends(get_current_user)):
             cursor.execute("""
                 SELECT status, COUNT(*) as cnt
                 FROM orders
-                WHERE status IN ('admin_approved', 'processing')
+                WHERE status IN ('confirmed', 'admin_approved', 'processing')
                 GROUP BY status
             """)
             counts = {row["status"]: row["cnt"] for row in cursor.fetchall()}
+            approved_count = counts.get("confirmed", 0) + counts.get("admin_approved", 0)
             return {
-                "approved_count": counts.get("admin_approved", 0),
+                "approved_count": approved_count,
                 "processing_count": counts.get("processing", 0),
             }
 
@@ -166,16 +217,24 @@ def get_order_detail(order_id: int, current_user: dict = Depends(get_current_use
     """
     with get_db() as conn:
         cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(orders)")
+        cols = {r["name"] if isinstance(r, dict) or hasattr(r, "keys") else r[1] for r in cursor.fetchall()}
+        has_v3 = "payment_status_raw" in cols
+        extra_select = ", o.payment_status_raw, o.fulfillment_status" if has_v3 else ""
+
         cursor.execute(
-            """SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
+            f"""SELECT o.id, o.order_code, o.customer_id, c.name as customer_name, c.phone as customer_phone,
                       o.user_id, u.full_name as user_name, o.total_amount, o.discount_amount,
                       o.final_amount, o.payment_method, o.payment_status, o.status, o.note,
+                      o.assigned_to, u_assign.full_name as assigned_name,
+                      o.shipping_name, o.shipping_phone, o.shipping_address, o.is_legacy_unverified,
                       o.approved_by, o.approved_at, o.processed_by, o.processed_at,
                       o.rejected_by, o.rejected_at, o.rejection_reason,
-                      o.created_at
+                      o.created_at{extra_select}
                FROM orders o
                LEFT JOIN customers c ON o.customer_id = c.id
                LEFT JOIN users u ON o.user_id = u.id
+               LEFT JOIN users u_assign ON o.assigned_to = u_assign.id
                WHERE o.id = ?""",
             (order_id,)
         )
@@ -184,16 +243,33 @@ def get_order_detail(order_id: int, current_user: dict = Depends(get_current_use
             raise HTTPException(status_code=404, detail="Không tìm thấy hóa đơn")
 
         order_data = dict(row)
+        if not has_v3:
+            order_data.setdefault("payment_status_raw", order_data.get("payment_status"))
+            order_data.setdefault("fulfillment_status", "delivered" if order_data.get("status") == "completed" else "unfulfilled")
+        order_data.setdefault("is_legacy_unverified", 0)
+
+        user_role = current_user.get("role")
+        if user_role == "admin":
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail="Quản trị viên kỹ thuật không có quyền xem hóa đơn kinh doanh của cửa hàng"
+            )
+
+        if user_role == "staff" and order_data.get("status") == "pending":
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail="Thu ngân không có quyền xem đơn hàng đang chờ duyệt"
+            )
 
         # Chống IDOR: Khách hàng không được xem hóa đơn của người khác
-        if current_user.get("role") == "customer":
+        if user_role == "customer":
             own_customer_id = get_customer_id_for_user(conn, current_user)
             is_own_order = (order_data.get("user_id") == current_user["id"]) or (
                 own_customer_id is not None and order_data.get("customer_id") == own_customer_id
             )
             if not is_own_order:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
+                    status_code=http_status.HTTP_403_FORBIDDEN,
                     detail="Bạn không có quyền xem thông tin hóa đơn của khách hàng khác"
                 )
 
@@ -212,32 +288,44 @@ def get_order_detail(order_id: int, current_user: dict = Depends(get_current_use
 def create_order(order_in: OrderCreate, current_user: dict = Depends(get_current_user)):
     """
     Tạo hóa đơn bán hàng POS mới (Atomic Transaction):
-    - Khách hàng (Customer): không được mạo danh customer_id của người khác (Anti-IDOR).
-    - Đơn do Customer đặt từ xa bắt buộc khởi tạo ở trạng thái PENDING.
-    - Đơn do Staff / Admin / SuperAdmin lập tại quầy POS mặc định COMPLETED.
-    - Tự động trừ tồn kho (giữ chỗ)
-    - Ghi log xuất nhập tồn
-    - Cập nhật tổng chi tiêu của khách nếu completed
-    - Rollback toàn bộ nếu có lỗi hoặc không đủ tồn kho
+    - Khách hàng (Customer):
+        + Bắt buộc phải có hồ sơ customers liên kết với current_user.
+        + Tự động gán customer_id chính chủ từ cơ sở dữ liệu.
+        + Nếu client cố tình gửi customer_id khác -> từ chối HTTP 403 Forbidden (Anti-IDOR).
+        + Không có hồ sơ hợp lệ -> từ chối HTTP 400 Bad Request, không được mượn ID người khác.
+        + Khởi tạo bắt buộc ở trạng thái PENDING.
+    - Staff / Admin / SuperAdmin lập tại quầy POS:
+        + Hỗ trợ tạo đơn khách lẻ hoặc chọn khách hàng tại quầy.
+        + Mặc định trạng thái COMPLETED.
+    - Tự động trừ tồn kho (giữ chỗ) trong transaction nguyên tử.
     """
     user_role = current_user.get("role")
+    if user_role == "admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Quản trị viên kỹ thuật không có quyền tạo hóa đơn bán hàng"
+        )
     if user_role == "customer":
         with get_db() as conn:
             own_customer_id = get_customer_id_for_user(conn, current_user)
-            if order_in.customer_id and own_customer_id and order_in.customer_id != own_customer_id:
+            if not own_customer_id:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Bạn không thể tạo đơn hàng cho khách hàng khác"
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="Tài khoản chưa có hồ sơ khách hàng liên kết hợp lệ để tạo đơn. Vui lòng liên hệ quản trị viên."
                 )
-            if not order_in.customer_id and own_customer_id:
-                order_in.customer_id = own_customer_id
+            if order_in.customer_id is not None and order_in.customer_id != own_customer_id:
+                raise HTTPException(
+                    status_code=http_status.HTTP_403_FORBIDDEN,
+                    detail="Bạn không có quyền, không thể tạo đơn hàng cho khách hàng khác (IDOR Violation)"
+                )
+            order_in.customer_id = own_customer_id
         order_status = "pending"
     else:
         order_status = order_in.status or "completed"
 
-    return InventoryService.create_order(order_in, user_id=current_user["id"], status=order_status)
+    return InventoryService.create_order(order_in, user_id=current_user["id"], status=order_status, user_role=user_role)
 
-@router.post("/{order_id}/approve", response_model=OrderResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/{order_id}/approve", response_model=OrderResponse, dependencies=[Depends(require_roles("superadmin"))])
 def approve_order(
     order_id: int,
     current_user: dict = Depends(get_current_user)
@@ -250,7 +338,7 @@ def approve_order(
     """
     return InventoryService.approve_order(order_id, user_id=current_user["id"])
 
-@router.post("/{order_id}/reject", response_model=OrderResponse, dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/{order_id}/reject", response_model=OrderResponse, dependencies=[Depends(require_roles("superadmin"))])
 def reject_order(
     order_id: int,
     reject_in: Optional[RejectOrderRequest] = None,
@@ -267,7 +355,7 @@ def reject_order(
     reason = reject_in.reason if reject_in and reject_in.reason else "Đơn hàng bị Admin từ chối"
     return InventoryService.reject_order(order_id, user_id=current_user["id"], reason=reason)
 
-@router.post("/{order_id}/process", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+@router.post("/{order_id}/process", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "superadmin"))])
 def process_order(
     order_id: int,
     current_user: dict = Depends(get_current_user)
@@ -281,7 +369,7 @@ def process_order(
     """
     return InventoryService.process_order(order_id, user_id=current_user["id"])
 
-@router.post("/{order_id}/complete", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+@router.post("/{order_id}/complete", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "superadmin"))])
 def complete_order(
     order_id: int,
     current_user: dict = Depends(get_current_user)
@@ -296,7 +384,7 @@ def complete_order(
     """
     return InventoryService.complete_order(order_id, user_id=current_user["id"])
 
-@router.post("/{order_id}/cancel", dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.post("/{order_id}/cancel", dependencies=[Depends(require_roles("superadmin"))])
 def cancel_order(
     order_id: int,
     cancel_in: Optional[CancelOrderRequest] = None,
@@ -358,4 +446,260 @@ def superadmin_force_action(
         target_status=action_in.target_status
     )
 
+# =========================================================================
+# PHASE R3: WORKFLOW EXTENSIONS (Claim, Payment, Fulfillment, Refund, Audit)
+# =========================================================================
 
+def _get_required_role(current_user: dict) -> str:
+    role = current_user.get("role")
+    if not isinstance(role, str) or not role:
+        raise HTTPException(
+            status_code=http_status.HTTP_401_UNAUTHORIZED,
+            detail="Thông tin vai trò người dùng không hợp lệ"
+        )
+    return role
+
+@router.post("/{order_id}/claim", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "superadmin"))])
+def claim_order(
+    order_id: int,
+    claim_in: Optional[ClaimOrderRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Staff / Admin nhận xử lý đơn hàng đã được Admin phê duyệt (Atomic Claim Lock):
+    - Đơn phải ở trạng thái 'admin_approved' và chưa có ai nhận (assigned_to IS NULL).
+    - Cập nhật nguyên tử orders.assigned_to = user_id, status = 'processing'.
+    - Ghi log 'claim' vào order_audit_logs trong cùng transaction.
+    - Trả HTTP 409 Conflict nếu đơn đã bị Staff khác nhận trước đó.
+    """
+    note = claim_in.note if claim_in else None
+    return InventoryService.claim_order(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=_get_required_role(current_user),
+        note=note
+    )
+
+@router.post("/{order_id}/reassign", response_model=OrderResponse, dependencies=[Depends(require_roles("superadmin"))])
+def reassign_order(
+    order_id: int,
+    reassign_in: ReassignOrderRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Admin / SuperAdmin điều chuyển đơn hàng cho Staff khác:
+    - Yêu cầu lý do điều chuyển.
+    - Ghi audit log 'reassign'.
+    """
+    return InventoryService.reassign_order(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=_get_required_role(current_user),
+        new_staff_id=reassign_in.new_staff_id,
+        reason=reassign_in.reason
+    )
+
+@router.post("/{order_id}/notify-transfer", response_model=OrderResponse)
+def notify_transfer(
+    order_id: int,
+    transfer_in: Optional[NotifyTransferRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Khách hàng / Nhân viên thông báo đã chuyển khoản:
+    - Chuyển payment_status sang 'pending_verification'.
+    - Không tự đánh dấu paid khi chỉ gửi thông báo/ảnh chụp.
+    - Anti-IDOR: Khách hàng chỉ được thông báo trên đơn của mình.
+    """
+    own_customer_id = None
+    role = _get_required_role(current_user)
+    if role == "admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Quản trị viên kỹ thuật không có quyền thao tác trên hóa đơn bán hàng"
+        )
+    if role == "customer":
+        with get_db() as conn:
+            own_customer_id = get_customer_id_for_user(conn, current_user)
+
+    ref = (getattr(transfer_in, "transfer_ref", None) or getattr(transfer_in, "transfer_reference", None)) if transfer_in else None
+    bank = transfer_in.bank_name if transfer_in else None
+    note = transfer_in.note if transfer_in else None
+
+    return InventoryService.notify_transfer(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=role,
+        transfer_ref=ref,
+        bank_name=bank,
+        note=note,
+        own_customer_id=own_customer_id
+    )
+
+@router.post("/{order_id}/verify-payment", response_model=OrderResponse, dependencies=[Depends(require_roles("superadmin"))])
+def verify_payment(
+    order_id: int,
+    verify_in: Optional[VerifyPaymentRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Admin / SuperAdmin xác minh thanh toán chuyển khoản:
+    - Yêu cầu đối soát chứng từ thực tế.
+    - Chuyển payment_status sang 'paid'.
+    - Ghi audit log 'verify_payment'.
+    """
+    ref = (getattr(verify_in, "verified_ref", None) or getattr(verify_in, "verified_reference", None)) if verify_in else None
+    note = verify_in.note if verify_in else None
+    return InventoryService.verify_payment(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=_get_required_role(current_user),
+        verified_ref=ref,
+        note=note
+    )
+
+@router.post("/{order_id}/confirm-cod-payment", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "superadmin"))])
+def confirm_cod_payment(
+    order_id: int,
+    cod_in: Optional[ConfirmCodPaymentRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Xác nhận thực tế đã thu tiền mặt COD từ khách/đơn vị vận chuyển:
+    - Chuyển payment_status từ 'unpaid' -> 'paid'.
+    - Ghi audit log 'confirm_cod'.
+    """
+    note = cod_in.note if cod_in else None
+    return InventoryService.confirm_cod_payment(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=_get_required_role(current_user),
+        note=note
+    )
+
+@router.post("/{order_id}/update-fulfillment", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "superadmin"))])
+def update_fulfillment(
+    order_id: int,
+    req: UpdateFulfillmentRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Cập nhật tiến trình đóng gói / giao vận:
+    - Trạng thái hợp lệ: unfulfilled, packing, shipping, delivered, delivery_failed.
+    - Giao hàng thất bại (delivery_failed) TUYỆT ĐỐI không tự động hoàn kho.
+    - Ghi audit log 'update_fulfillment'.
+    """
+    return InventoryService.update_fulfillment(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=_get_required_role(current_user),
+        fulfillment_status=req.fulfillment_status,
+        note=req.note
+    )
+
+@router.post("/{order_id}/confirm-return", response_model=OrderResponse, dependencies=[Depends(require_roles("staff", "superadmin"))])
+def confirm_return(
+    order_id: int,
+    return_in: Optional[ConfirmReturnRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Xác nhận hàng thực sự đã nhập lại kho (Return to inventory):
+    - Chỉ cho phép sau khi delivery_failed hoặc cancelled.
+    - Chỉ nhập kho MỘT lần duy nhất (idempotency check với inventory_logs).
+    - Cập nhật fulfillment_status sang 'returned_to_inventory'.
+    - Ghi audit log 'confirm_return'.
+    """
+    reason = return_in.reason if return_in else "Hàng giao không thành công quay về kho"
+    note = return_in.note if return_in else None
+    return InventoryService.confirm_return(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=_get_required_role(current_user),
+        reason=reason,
+        note=note
+    )
+
+@router.post("/{order_id}/request-refund", response_model=OrderResponse)
+def request_refund(
+    order_id: int,
+    req: Optional[RequestRefundRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Yêu cầu hoàn tiền (Customer, Staff, Admin, SuperAdmin):
+    - Đơn phải đang ở trạng thái payment_status 'paid'.
+    - Chuyển sang 'refund_pending'.
+    - Hoàn tiền độc lập với hoàn hàng: Không chạm đến tồn kho.
+    - Anti-IDOR: Khách hàng chỉ yêu cầu trên đơn của mình.
+    """
+    own_customer_id = None
+    role = _get_required_role(current_user)
+    if role == "admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Quản trị viên kỹ thuật không có quyền thao tác trên hóa đơn bán hàng"
+        )
+    if role == "customer":
+        with get_db() as conn:
+            own_customer_id = get_customer_id_for_user(conn, current_user)
+
+    reason = req.reason if req else "Khách yêu cầu hoàn tiền"
+    return InventoryService.request_refund(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=role,
+        reason=reason,
+        own_customer_id=own_customer_id
+    )
+
+@router.post("/{order_id}/confirm-refund", response_model=OrderResponse, dependencies=[Depends(require_roles("superadmin"))])
+def confirm_refund(
+    order_id: int,
+    req: Optional[ConfirmRefundRequest] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Admin / SuperAdmin xác nhận đã hoàn tiền thực tế:
+    - Chuyển payment_status sang 'refunded'.
+    - Độc lập với tồn kho: Không nhập kho.
+    - Điều chỉnh customer.total_spent nếu đơn đã hoàn thành trước đó.
+    - Ghi audit log 'confirm_refund'.
+    """
+    ref = (getattr(req, "refund_ref", None) or getattr(req, "refund_reference", None)) if req else None
+    reason = req.reason if req else "Đã thực hiện chuyển khoản / hoàn tiền mặt cho khách"
+    return InventoryService.confirm_refund(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=_get_required_role(current_user),
+        refund_ref=ref,
+        reason=reason
+    )
+
+@router.get("/{order_id}/audit-logs", response_model=List[OrderAuditLogResponse])
+def get_order_audit_logs(
+    order_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Lấy lịch sử kiểm toán / diễn biến của đơn hàng:
+    - Customer chỉ xem audit log đơn của mình (Anti-IDOR).
+    - Staff, Admin, SuperAdmin xem được audit log của tất cả đơn.
+    """
+    own_customer_id = None
+    role = _get_required_role(current_user)
+    if role == "admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Quản trị viên kỹ thuật không có quyền thao tác trên hóa đơn bán hàng"
+        )
+    if role == "customer":
+        with get_db() as conn:
+            own_customer_id = get_customer_id_for_user(conn, current_user)
+
+    return InventoryService.get_order_audit_logs(
+        order_id=order_id,
+        user_id=current_user["id"],
+        user_role=role,
+        own_customer_id=own_customer_id
+    )

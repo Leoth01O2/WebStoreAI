@@ -7,9 +7,20 @@ BACKEND_URL = "http://127.0.0.1:8000"
 @pytest.fixture(autouse=True, scope="module")
 def check_vite_running():
     try:
-        requests.get(VITE_URL, timeout=1)
+        res = requests.get(VITE_URL, timeout=1)
+        if res.status_code != 200:
+            pytest.skip("Vite dev server is not running on http://127.0.0.1:5173 - skipping live E2E server tests")
     except Exception:
         pytest.skip("Vite dev server is not running on http://127.0.0.1:5173 - skipping live E2E server tests")
+
+    # Safety Guard: Ensure backend server is running in testing environment or using test database
+    try:
+        health = requests.get(f"{BACKEND_URL}/api/health", timeout=1).json()
+        if health.get("environment") != "testing":
+            # Read-only tests are fine, but tests that write orders/purchases must be guarded
+            pass
+    except Exception:
+        pass
 
 def test_frontend_serves_html():
     res = requests.get(VITE_URL, timeout=5)
@@ -27,6 +38,14 @@ def test_vite_proxy_to_backend():
     assert data["database"] == "sqlite_wal_active"
 
 def test_full_staff_pos_e2e_flow():
+    # Production Safety Guard
+    try:
+        health = requests.get(f"{BACKEND_URL}/api/health", timeout=2).json()
+        if health.get("environment") != "testing":
+            pytest.skip("Skipping write operations against non-testing environment")
+    except Exception:
+        pytest.skip("Cannot verify backend environment safety")
+
     # 1. Staff Login
     login_res = requests.post(f"{VITE_URL}/api/v1/auth/login", json={
         "username": "staff",
@@ -74,6 +93,14 @@ def test_full_staff_pos_e2e_flow():
     assert report_res.status_code == 403
 
 def test_manager_analytics_and_order_cancel_flow():
+    # Production Safety Guard
+    try:
+        health = requests.get(f"{BACKEND_URL}/api/health", timeout=2).json()
+        if health.get("environment") != "testing":
+            pytest.skip("Skipping write operations against non-testing environment")
+    except Exception:
+        pytest.skip("Cannot verify backend environment safety")
+
     # 1. Manager Login
     login_res = requests.post(f"{VITE_URL}/api/v1/auth/login", json={
         "username": "superadmin",

@@ -8,18 +8,16 @@ import {
   CreditCard,
   Banknote,
   QrCode,
-  UserCheck,
   UserPlus,
   RotateCcw,
-  Check,
   CheckCircle2,
   AlertCircle,
   ShieldCheck,
   Smartphone,
   X,
   Radio,
-  Eye,
   Info,
+  LogIn,
 } from 'lucide-react';
 import { productsAPI, customersAPI, ordersAPI } from '../services/api';
 import { StockBadge } from '../components/ui/Badge';
@@ -67,6 +65,7 @@ export const PosPage = ({ onNavigate }) => {
   // Completed Order for Receipt Modal
   const [completedOrder, setCompletedOrder] = useState(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
   // Quick Add Customer Modal
   const [showCustomerModal, setShowCustomerModal] = useState(false);
@@ -164,6 +163,12 @@ export const PosPage = ({ onNavigate }) => {
       return;
     }
 
+    const existingItem = cart.find((item) => item.product.id === product.id);
+    if (existingItem && existingItem.quantity >= product.stock_quantity) {
+      addToast(`Không thể thêm. Tồn kho chỉ còn ${product.stock_quantity} sản phẩm!`, 'warning');
+      return;
+    }
+
     // Trigger visual click feedback
     setRecentlyAddedId(product.id);
     setTimeout(() => setRecentlyAddedId(null), 300);
@@ -172,7 +177,6 @@ export const PosPage = ({ onNavigate }) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
         if (existing.quantity >= product.stock_quantity) {
-          addToast(`Không thể thêm. Tồn kho chỉ còn ${product.stock_quantity} sản phẩm!`, 'warning');
           return prev;
         }
         return prev.map((item) =>
@@ -185,6 +189,14 @@ export const PosPage = ({ onNavigate }) => {
 
   // Update quantity in cart
   const updateQuantity = (productId, delta) => {
+    const existingItem = cart.find((item) => item.product.id === productId);
+    if (!existingItem) return;
+
+    if (delta > 0 && existingItem.quantity + delta > existingItem.product.stock_quantity) {
+      addToast(`Tồn kho chỉ còn ${existingItem.product.stock_quantity} sản phẩm!`, 'warning');
+      return;
+    }
+
     setCart((prev) => {
       return prev
         .map((item) => {
@@ -192,7 +204,6 @@ export const PosPage = ({ onNavigate }) => {
             const newQty = item.quantity + delta;
             if (newQty <= 0) return null;
             if (newQty > item.product.stock_quantity) {
-              addToast(`Tồn kho chỉ còn ${item.product.stock_quantity} sản phẩm!`, 'warning');
               return item;
             }
             return { ...item, quantity: newQty };
@@ -242,10 +253,7 @@ export const PosPage = ({ onNavigate }) => {
     }
 
     if (isGuest) {
-      addToast('Vui lòng đăng nhập tài khoản Khách hàng để hoàn tất đặt hàng!', 'warning');
-      if (onNavigate) {
-        onNavigate('login');
-      }
+      setShowGuestModal(true);
       return;
     }
 
@@ -270,7 +278,7 @@ export const PosPage = ({ onNavigate }) => {
         customer_id: selectedCustomer ? selectedCustomer.id : (isCustomer && myProfile ? myProfile.id : null),
         discount_amount: isCustomer ? 0 : Number(discountAmount || 0),
         payment_method: paymentMethod,
-        payment_status: 'completed',
+        payment_status: isCustomer ? (paymentMethod === 'transfer' ? 'pending_verification' : 'unpaid') : 'paid',
         note: orderNote || null,
         items: cart.map((item) => ({
           product_id: item.product.id,
@@ -354,9 +362,7 @@ export const PosPage = ({ onNavigate }) => {
 
   const formatVND = (val) => Number(val || 0).toLocaleString('vi-VN') + ' đ';
 
-  const transferMemo = useMemo(() => {
-    return `SF-POS${Date.now().toString().slice(-4)}`;
-  }, [finalAmount]);
+  const [transferMemo] = useState(() => `SF-POS${Math.floor(1000 + Math.random() * 9000)}`);
 
   return (
     <div className="pos-container">
@@ -575,29 +581,30 @@ export const PosPage = ({ onNavigate }) => {
           ) : (
             cart.map((item) => (
               <div key={item.product.id} className="cart-item-row">
-                {/* Cart Item Thumbnail */}
-                <div style={{ width: '42px', height: '42px', borderRadius: '4px', overflow: 'hidden', flexShrink: 0 }}>
-                  <ProductImage
-                    src={item.product.image_url}
-                    alt={item.product.name}
-                    style={{ width: '100%', height: '100%' }}
-                  />
-                </div>
-
-                {/* Cart Item Info */}
-                <div style={{ flex: 1, minWidth: 0, paddingRight: '4px' }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={item.product.name}>
-                    {item.product.name}
+                {/* Cart Item Thumbnail & Info */}
+                <div className="cart-item-info">
+                  <div className="cart-item-thumb">
+                    <ProductImage
+                      src={item.product.image_url}
+                      alt={item.product.name}
+                      style={{ width: '100%', height: '100%' }}
+                    />
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    {item.product.sku} | {formatVND(item.product.selling_price)}
+                  <div className="cart-item-details">
+                    <div className="cart-item-name" title={item.product.name}>
+                      {item.product.name}
+                    </div>
+                    <div className="cart-item-meta">
+                      {item.product.sku} | {formatVND(item.product.selling_price)}
+                    </div>
                   </div>
                 </div>
 
                 {/* Quantity Controls */}
                 <div className="cart-qty-control">
                   <button
-                    className="cart-qty-btn"
+                    type="button"
+                    className="cart-qty-btn cart-qty-minus"
                     onClick={() => updateQuantity(item.product.id, -1)}
                     aria-label="Giảm 1"
                   >
@@ -605,7 +612,8 @@ export const PosPage = ({ onNavigate }) => {
                   </button>
                   <span className="cart-qty-val">{item.quantity}</span>
                   <button
-                    className="cart-qty-btn"
+                    type="button"
+                    className="cart-qty-btn cart-qty-plus"
                     onClick={() => updateQuantity(item.product.id, 1)}
                     aria-label="Tăng 1"
                   >
@@ -614,16 +622,17 @@ export const PosPage = ({ onNavigate }) => {
                 </div>
 
                 {/* Subtotal */}
-                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.85rem', color: 'var(--green-terminal)', textAlign: 'right', minWidth: '70px' }}>
+                <div className="cart-item-subtotal">
                   {formatVND(item.product.selling_price * item.quantity)}
                 </div>
 
                 {/* Remove Button */}
                 <button
+                  type="button"
                   onClick={() => removeFromCart(item.product.id)}
-                  className="btn btn-outline btn-icon btn-sm"
-                  style={{ width: '28px', height: '28px', border: 'none', color: 'var(--red-light)' }}
+                  className="cart-item-remove-btn"
                   title="Xóa khỏi giỏ"
+                  aria-label="Xóa khỏi giỏ"
                 >
                   <Trash2 size={13} />
                 </button>
@@ -1067,6 +1076,43 @@ export const PosPage = ({ onNavigate }) => {
           </div>
         </Modal>
       )}
+
+      {/* Guest Login Required Modal */}
+      <Modal
+        isOpen={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        title="YÊU CẦU ĐĂNG NHẬP / ĐĂNG KÝ"
+        maxWidth="460px"
+      >
+        <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+          <div style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>🔐</div>
+          <h4 style={{ color: 'var(--amber-primary)', marginBottom: '0.5rem' }}>
+            DÀNH CHO KHÁCH HÀNG THÀNH VIÊN
+          </h4>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+            Bạn đang xem sản phẩm với vai trò Khách vãng lai. Vui lòng đăng nhập hoặc tạo tài khoản thành viên để hoàn tất đơn hàng, lưu lại lịch sử mua sắm và theo dõi trạng thái giao hàng.
+          </p>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => setShowGuestModal(false)}
+            >
+              Tiếp tục xem sản phẩm
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setShowGuestModal(false);
+                if (onNavigate) onNavigate('login');
+              }}
+            >
+              <LogIn size={15} /> Đăng Nhập / Đăng Ký
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Printable Receipt Modal */}
       <ReceiptModal

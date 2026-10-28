@@ -7,7 +7,7 @@ from app.services.report_service import ReportService
 
 router = APIRouter(prefix="/inventory", tags=["Inventory & Logs"])
 
-@router.get("/logs", response_model=List[InventoryLogResponse], dependencies=[Depends(require_roles("admin", "superadmin"))])
+@router.get("/logs", response_model=List[InventoryLogResponse], dependencies=[Depends(require_roles("superadmin"))])
 def get_inventory_logs(
     product_id: Optional[int] = Query(None, description="Lọc theo ID sản phẩm"),
     change_type: Optional[str] = Query(None, description="Lọc theo loại: import, sale, return_cancel, adjustment"),
@@ -44,7 +44,7 @@ def get_inventory_logs(
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
-@router.get("/low-stock", response_model=List[LowStockAlertItem], dependencies=[Depends(require_roles("staff", "admin", "superadmin"))])
+@router.get("/low-stock", response_model=List[LowStockAlertItem], dependencies=[Depends(require_roles("staff", "superadmin"))])
 def get_low_stock_alerts(current_user: dict = Depends(get_current_user)):
     """Lấy danh sách sản phẩm chạm ngưỡng tồn kho thấp (Staff, Admin, SuperAdmin)"""
     return ReportService.get_low_stock_products()

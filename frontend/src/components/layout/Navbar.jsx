@@ -13,18 +13,21 @@ import {
   Sparkles,
   Menu,
   X,
+  Cpu,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { RoleBadge } from '../ui/Badge';
-import { inventoryAPI, ordersAPI } from '../../services/api';
+import { inventoryAPI, ordersAPI, aiAPI } from '../../services/api';
 import { ThemeToggle } from './ThemeToggle';
 
 export const Navbar = ({ activeTab, onSelectTab }) => {
-  const { user, logout, isAdmin, isManager } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const [time, setTime] = useState(new Date().toLocaleTimeString('vi-VN'));
   const [lowStockCount, setLowStockCount] = useState(0);
   const [workflowCounts, setWorkflowCounts] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [aiEngineStatus, setAiEngineStatus] = useState(null);
 
   // Digital clock update
   useEffect(() => {
@@ -93,15 +96,52 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
     return () => clearInterval(interval);
   }, [user]);
 
+  // Check AI Engine Status for display
+  useEffect(() => {
+    let isMounted = true;
+    const checkAI = async () => {
+      try {
+        const info = await aiAPI.getProviders();
+        if (!isMounted) return;
+        if (info?.providers?.ollama?.available) {
+          setAiEngineStatus({
+            label: 'Ollama GPU',
+            shortLabel: 'Ollama',
+            type: 'local',
+            title: 'Ollama Local GPU: Qwen 2.5 1.5B (RTX 3050) - Chi phí $0'
+          });
+        } else if (info?.providers?.gemini?.available) {
+          setAiEngineStatus({
+            label: 'Gemini Cloud',
+            shortLabel: 'Gemini',
+            type: 'cloud',
+            title: 'Google Gemini Cloud AI'
+          });
+        } else {
+          setAiEngineStatus({
+            label: 'SQLite RAG',
+            shortLabel: 'SQLite',
+            type: 'safe',
+            title: 'Chế độ tra cứu trực tiếp SQLite'
+          });
+        }
+      } catch {
+        if (isMounted) setAiEngineStatus({ label: 'Safe Fallback', type: 'safe', title: 'Chế độ tra cứu an toàn' });
+      }
+    };
+    checkAI();
+    return () => { isMounted = false; };
+  }, []);
+
   const getWorkflowBadge = () => {
     if (!user || !workflowCounts) return null;
     const role = user.role;
-    if (role === 'admin' || role === 'superadmin') {
+    if (role === 'superadmin') {
       const pending = workflowCounts.pending_count || 0;
       if (pending > 0) {
         return {
-          label: `Đơn chờ duyệt: ${pending}`,
-          shortLabel: `Chờ duyệt: ${pending}`,
+          label: `Đơn chờ Chủ shop duyệt: ${pending}`,
+          shortLabel: `${pending}`,
           type: 'danger',
           count: pending,
         };
@@ -110,8 +150,8 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
       const approved = workflowCounts.approved_count || 0;
       if (approved > 0) {
         return {
-          label: `Đơn cần xử lý: ${approved}`,
-          shortLabel: `Cần xử lý: ${approved}`,
+          label: `Đơn đã duyệt cần xuất hóa đơn: ${approved}`,
+          shortLabel: `${approved}`,
           type: 'success',
           count: approved,
         };
@@ -123,7 +163,7 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
       if (total > 0) {
         return {
           label: `Đơn của tôi: ${pending} chờ duyệt, ${processing} đang xử lý`,
-          shortLabel: `${total} đơn hoạt động`,
+          shortLabel: `${total}`,
           type: 'warning',
           count: total,
         };
@@ -135,16 +175,52 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
   const navItems = [
     {
       id: 'pos',
-      label: !user ? 'Cửa Hàng (Storefront)' : (user?.role === 'customer' ? 'Mua Hàng (POS)' : 'POS Bán Hàng'),
+      label: !user ? 'Cửa Hàng' : (user?.role === 'customer' ? 'Mua Hàng' : 'POS Bán Hàng'),
       icon: ShoppingCart,
-      roles: ['superadmin', 'admin', 'manager', 'staff', 'customer', 'guest'],
+      roles: ['superadmin', 'staff', 'customer', 'guest'],
     },
-    { id: 'products', label: 'Sản Phẩm & Kho', icon: Package, roles: ['superadmin', 'admin', 'manager'] },
-    { id: 'orders', label: user?.role === 'customer' ? 'Đơn Hàng Của Tôi' : 'Hóa Đơn', icon: FileText, roles: ['superadmin', 'admin', 'manager', 'staff', 'customer'] },
-    { id: 'customers', label: 'Khách Hàng', icon: Users, roles: ['superadmin', 'admin', 'manager'] },
-    { id: 'purchases', label: 'Nhập Hàng', icon: Truck, roles: ['superadmin', 'admin', 'manager'] },
-    { id: 'dashboard', label: 'Doanh Thu', icon: BarChart3, roles: ['superadmin', 'manager'] },
-    { id: 'ai', label: 'AI Assistant', icon: Sparkles, roles: ['superadmin', 'admin', 'manager', 'staff', 'customer', 'guest'] },
+    {
+      id: 'products',
+      label: user?.role === 'admin' ? 'Sản Phẩm (Read-Only)' : 'Sản Phẩm',
+      icon: Package,
+      roles: ['superadmin', 'admin'],
+    },
+    {
+      id: 'orders',
+      label: user?.role === 'customer' ? 'Đơn Hàng Của Tôi' : 'Hóa Đơn',
+      icon: FileText,
+      roles: ['superadmin', 'staff', 'customer'],
+    },
+    {
+      id: 'customers',
+      label: 'Khách Hàng',
+      icon: Users,
+      roles: ['superadmin', 'staff'],
+    },
+    {
+      id: 'purchases',
+      label: 'Nhập Hàng',
+      icon: Truck,
+      roles: ['superadmin'],
+    },
+    {
+      id: 'dashboard',
+      label: 'Doanh Thu',
+      icon: BarChart3,
+      roles: ['superadmin'],
+    },
+    {
+      id: 'admin',
+      label: user?.role === 'admin' ? 'Hạ Tầng & Hệ Thống' : 'Hệ Thống',
+      icon: ShieldCheck,
+      roles: ['superadmin', 'admin'],
+    },
+    {
+      id: 'ai',
+      label: 'AI Assistant',
+      icon: Sparkles,
+      roles: ['superadmin', 'admin', 'staff', 'customer', 'guest'],
+    },
   ];
 
 
@@ -172,7 +248,7 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
             {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
 
-          <div className="nav-brand" onClick={() => handleSelectTab('pos')} style={{ cursor: 'pointer' }}>
+          <div className="nav-brand" onClick={() => handleSelectTab(user?.role === 'admin' ? 'admin' : 'pos')} style={{ cursor: 'pointer' }}>
             <span className="brand-dot" />
             <span>STOREFLOW<span style={{ color: 'var(--green-terminal)' }}>_AI</span></span>
           </div>
@@ -224,9 +300,35 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
               style={{ cursor: 'pointer', border: '1px solid var(--amber-primary)' }}
               title={`${lowStockCount} sản phẩm sắp hết hàng`}
             >
-              <AlertTriangle size={14} />
-              <span>CẢNH BÁO ({lowStockCount})</span>
+              <AlertTriangle size={13} />
+              <span className="nav-alert-text">CẢNH BÁO</span>
+              <span className="nav-alert-count">({lowStockCount})</span>
             </button>
+          )}
+
+          {aiEngineStatus && (
+            <div
+              onClick={() => handleSelectTab('ai')}
+              className={`badge ${aiEngineStatus.type === 'local' ? 'badge-green' : aiEngineStatus.type === 'cloud' ? 'badge-blue' : 'badge-amber'} nav-ai-status-badge`}
+              style={{
+                cursor: 'pointer',
+                fontSize: '0.68rem',
+                padding: '0.2rem 0.5rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontFamily: 'var(--font-mono)',
+                borderRadius: '999px',
+                border: '1px solid var(--border-default)',
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+              }}
+              title={aiEngineStatus.title}
+            >
+              <Cpu size={12} />
+              <span className="ai-status-full">{aiEngineStatus.label}</span>
+              <span className="ai-status-short">{aiEngineStatus.shortLabel}</span>
+            </div>
           )}
 
           <ThemeToggle />
@@ -240,7 +342,7 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
             <>
               <div className="user-profile-badge" title={user?.full_name}>
                 <span className="user-full-name">{user?.full_name}</span>
-                <RoleBadge role={user?.role} />
+                <RoleBadge role={user?.role} short />
               </div>
 
               <button
@@ -327,6 +429,31 @@ export const Navbar = ({ activeTab, onSelectTab }) => {
               </span>
               <ThemeToggle showLabel />
             </div>
+
+            {aiEngineStatus && (
+              <div
+                onClick={() => handleSelectTab('ai')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.65rem 0.85rem',
+                  marginBottom: '0.75rem',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-xs)',
+                  cursor: 'pointer',
+                }}
+                title={aiEngineStatus.title}
+              >
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Cpu size={14} color="var(--green-terminal)" /> AI ENGINE
+                </span>
+                <span className={`badge ${aiEngineStatus.type === 'local' ? 'badge-green' : aiEngineStatus.type === 'cloud' ? 'badge-blue' : 'badge-amber'}`} style={{ fontSize: '0.72rem' }}>
+                  {aiEngineStatus.label}
+                </span>
+              </div>
+            )}
 
             {user && lowStockCount > 0 && (
               <button

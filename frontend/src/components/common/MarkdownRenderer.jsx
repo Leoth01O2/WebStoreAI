@@ -306,12 +306,13 @@ export default function MarkdownRenderer({
   onViewProduct = null,
   onSelectProduct = null,
 }) {
-  if (!content) return null;
-
   // Pre-process markdown to embed product-card tokens for matched products
   const processedContent = useMemo(() => {
+    if (!content) return '';
     return injectProductPreviewCards(content, products);
   }, [content, products]);
+
+  if (!content) return null;
 
   return (
     <div className={`markdown-content ${className}`.trim()}>
