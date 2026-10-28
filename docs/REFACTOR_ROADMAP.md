@@ -944,7 +944,7 @@ ightarrow$ Rename `orders_new` sang `orders`.
 
 #### PHASE R8: Full Testing, Security Audit & Academic Prep [COMPLETED ✅ 11/10/2026]
 - **Trạng thái**: **HOÀN THÀNH TOÀN DIỆN (302/306 Backend Regression Tests PASS, 0 Oxlint Errors, Vite Production Build PASS, Bàn giao R8_DEMO_GUIDE.md và R8_FINAL_QA_REPORT.md)**
-- **Mục tiêu**: Nghiệm thu và hoàn thiện tổng thể toàn dự án StoreFlow AI 2.0; Kiểm toán bảo mật chống IDOR/RBAC; Đối soát 3 trạng thái đơn hàng và tài chính; Xác thực Local AI Ollama và CLIP Image Search; Bảo toàn nguyên vẹn cơ sở dữ liệu production; Chuẩn hóa kịch bản demo và tài liệu kỹ thuật phục vụ bảo vệ đồ án tốt nghiệp.
+- **Mục tiêu**: Nghiệm thu và hoàn thiện tổng thể toàn dự án StoreFlow AI 2.0; Kiểm toán bảo mật chống IDOR/RBAC; Đối soát 3 trạng thái đơn hàng và tài chính; Xác thực Local AI Ollama và CLIP Image Search; Bảo toàn nguyên vẹn cơ sở dữ liệu production; Chuẩn hóa kịch bản demo và tài liệu kỹ thuật phục vụ báo cáo học phần môn Ứng dụng Trí tuệ Nhân tạo.
 - **Hiện trạng & Thành quả triển khai thực tế**:
   1. *Kiểm thử Hồi quy Toàn diện (Full Backend Regression)*:
      - Chạy toàn bộ 34 test suites (`backend/tests/`): **302 PASSED (98.7%)**, **4 SKIPPED** (an toàn cho live server), **0 FAILED**.
@@ -963,8 +963,13 @@ ightarrow$ Rename `orders_new` sang `orders`.
      - ChromaDB Production `backend/chroma_data`: Đầy đủ 30 sản phẩm trên cả 3 collections.
      - Đối soát tài chính: Phân tách minh bạch `legacy_unverified_revenue = 316.063.000 ₫` và `verified_payment_revenue = 0 ₫`.
   5. *Đóng gói Bàn giao & Tài liệu Học thuật*:
-     - Soạn thảo [docs/R8_DEMO_GUIDE.md](file:///d:/E_HocTap/ThietKeWeb/WebStoreAI/docs/R8_DEMO_GUIDE.md): Kịch bản 5 bước demo trực quan cho buổi bảo vệ đồ án tốt nghiệp.
+     - Soạn thảo [docs/R8_DEMO_GUIDE.md](file:///d:/E_HocTap/ThietKeWeb/WebStoreAI/docs/R8_DEMO_GUIDE.md): Kịch bản 5 bước demo trực quan cho buổi báo cáo học phần môn Ứng dụng Trí tuệ Nhân tạo.
      - Soạn thảo [docs/R8_FINAL_QA_REPORT.md](file:///d:/E_HocTap/ThietKeWeb/WebStoreAI/docs/R8_FINAL_QA_REPORT.md): Báo cáo nghiệm thu kỹ thuật chi tiết 20 mục.
+  6. *Giai đoạn Tối ưu hóa Mở rộng (Post-R8 Polish - 28/10/2026)*:
+     - Hoàn thiện Dynamic Matching Engine & Canonical Device Token: Phân cấp 3 mức đối chiếu ảnh (Tương tự, Cùng nhóm hàng, Sản phẩm liên quan hệ sinh thái) kèm Rationale tiếng Việt.
+     - Báo cáo Phân tích Doanh thu AI BI Grounded: Phản ánh chuẩn xác 2 đơn hoàn tất / 5 tổng đơn (3 đơn hủy), Stop sequence `[HẾT BÁO CÁO]` và bộ lọc hậu kỳ loại bỏ 100% prompt leakage.
+     - SPA Navigation State Restoration: F5 duy trì đúng tab đang làm việc qua `localStorage`.
+     - Bộ công cụ 1-Click: `start_dev.bat` và `start_dev.ps1` khởi động 3 dịch vụ tự động.
 - **DoD**: Đạt 100% tiêu chí nghiệm thu Phase R8 và toàn bộ dự án StoreFlow AI 2.0.
 - **STOP Condition**: **HOÀN THÀNH TOÀN DIỆN DỰ ÁN STOREFLOW AI 2.0. DỪNG LẠI CHỜ NGHIỆM THU CUỐI CÙNG.**
 

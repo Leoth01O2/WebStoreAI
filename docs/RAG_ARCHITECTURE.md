@@ -20,8 +20,11 @@
 - Khởi tạo `get_or_create_collection()` không truyền tham số `embedding_function` tùy biến.
 - Theo cơ chế mặc định của thư viện `chromadb` (xem [`requirements.txt`](../backend/requirements.txt)), ChromaDB sử dụng mô hình embedding mặc định: **`all-MiniLM-L6-v2`** (chạy qua ONNX runtime: `ONNXMiniLM_L6_V2`) với độ đo khoảng cách Cosine (`metadata={"hnsw:space": "cosine"}`).
 
-### 1.2. Tên Collection thực tế trong ChromaDB
-- Tên Collection chính xác được đặt cố định là: **`storeflow_products`** (dòng 29 trong [`rag_service.py`](../backend/app/services/rag_service.py)).
+### 1.2. Danh sách Collection thực tế trong ChromaDB
+Hệ thống StoreFlow AI 2.0 quản lý **3 Collections độc lập** trong ChromaDB:
+1. **`storeflow_products`**: Lưu trữ vector ngữ nghĩa văn bản của 30 sản phẩm catalog (mô hình `all-MiniLM-L6-v2`, 384 chiều) phục vụ Text RAG Q&A và tư vấn bán hàng.
+2. **`storeflow_product_visuals`**: Lưu trữ tài liệu đặc trưng thị giác tổng hợp dạng văn bản phục vụ đối soát metadata.
+3. **`storeflow_product_visual_vectors`**: Lưu trữ không gian vector thị giác **512 chiều** trích xuất trực tiếp từ hình ảnh sản phẩm bằng mô hình **OpenAI CLIP ViT-B/32**, phục vụ tìm kiếm hình ảnh đa phương thức (Multimodal Visual Search).
 
 ### 1.3. Thời điểm Indexing / Sync dữ liệu từ SQLite sang ChromaDB
 Hệ thống kích hoạt đồng bộ hóa dữ liệu tại **3 thời điểm**:
@@ -83,19 +86,29 @@ Hệ thống kích hoạt đồng bộ hóa dữ liệu tại **3 thời điểm
 
 ---
 
-## 3. TÍCH HỢP LLM (GEMINI) & PROMPTING
+## 3. TÍCH HỢP PLUGGABLE AI PROVIDERS (OLLAMA & GEMINI) & PROMPTING
 
-### 3.1. Cấu hình Gemini API & Nguồn đọc `GEMINI_API_KEY`
-- **File cấu hình**: [`backend/app/core/config.py`](../backend/app/core/config.py).
-  - Sử dụng `pydantic-settings` tự động nạp từ file **`backend/.env`** (hoặc biến môi trường hệ thống).
-  - Các thiết lập cốt lõi:
-    ```python
-    GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.6-flash"
-    ```
-- **Khởi tạo SDK Client**: Trong [`backend/app/services/ai_service.py:L33-36`](../backend/app/services/ai_service.py):
+### 3.1. Kiến trúc Đa Provider (AIProviderManager)
+StoreFlow AI 2.0 áp dụng kiến trúc **Pluggable AI Providers** linh hoạt tại [`backend/app/services/ai_providers/manager.py`](../backend/app/services/ai_providers/manager.py):
+1. **OllamaProvider (Local Offline LLM)**:
+   - Mô hình: **`Qwen 2.5 1.5B`** (hoặc 3B) chạy hoàn toàn offline trên localhost (`http://127.0.0.1:11434`).
+   - Ưu điểm: Bảo vệ 100% dữ liệu riêng tư cửa hàng, không tốn chi phí và không phụ thuộc API quota.
+   - Cấu hình Anti-Leakage: Tích hợp `repeat_penalty: 1.22`, chuỗi ngắt dừng `stop: ["[HẾT BÁO CÁO]", "Phong cách giao tiếp:"]` và bộ lọc hậu kỳ `_clean_report_output` triệt tiêu hoàn toàn rò rỉ prompt hệ thống.
+2. **GeminiProvider (Cloud Multimodal LLM)**:
+   - Mô hình: **`gemini-3.6-flash`** sử dụng SDK chính thức mới `google-genai`.
+   - Sử dụng cho suy luận nâng cao và Cloud Vision khi có kết nối mạng và API key hợp lệ.
+3. **GroundedProvider (Deterministic Fallback)**:
+   - Cơ chế tự phục hồi tự động dựa 100% vào SQL + Rule Engine, kích hoạt khi cả Ollama và Gemini không khả dụng.
+
+### 3.2. Cấu hình & Nguồn đọc Settings
+- **File cấu hình**: [`backend/app/core/config.py`](../backend/app/core/config.py) nạp từ file `backend/.env`.
+- Các thiết lập cốt lõi:
   ```python
-  self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+  AI_PROVIDER: str = "auto"           # "auto", "ollama", "gemini", "grounded"
+  OLLAMA_BASE_URL: str = "http://localhost:11434"
+  OLLAMA_MODEL: str = "qwen2.5:1.5b"
+  GEMINI_API_KEY: str = ""
+  GEMINI_MODEL: str = "gemini-3.6-flash"
   ```
 
 ### 3.2. Vị trí Prompt Template gửi kèm ngữ cảnh (Context)
@@ -167,3 +180,39 @@ Kiến trúc trong dự án tuân thủ đầy đủ mô hình 3 Phase tiêu chu
 ### So sánh điểm khác biệt với RAG thông thường:
 - **RAG tài liệu thông thường**: Text Chunking tùy ý -> Top-K Vector Search -> Re-ranking -> LLM Context.
 - **RAG StoreFlow AI (Hybrid Relational RAG)**: Entity-based Chunking -> Top-K Candidate Search -> **SQLite Guardrail (Single Source of Truth)** -> Grounded Context -> LLM Generation. Cơ chế này đảm bảo dữ liệu bán lẻ (tồn kho và giá) luôn chính xác theo thời gian thực.
+
+---
+
+## 6. KIẾN TRÚC MULTIMODAL VISUAL RAG & DYNAMIC MATCHING ENGINE
+
+Hệ thống StoreFlow AI 2.0 mở rộng mô hình RAG sang không gian đa phương thức (Multimodal Image-to-Product RAG):
+
+```
+[Ảnh sản phẩm tải lên (PNG/JPG/WebP)]
+                  │
+                  ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ TRÍCH XUẤT ĐẶC TRƯNG THỊ GIÁC (CLIP ViT-B/32 / Gemini)           │
+│  - Trích xuất Vector đặc trưng 512 chiều (Metric Space)          │
+│  - Chuẩn hóa loại thiết bị động (normalize_device_type)          │
+│  - Trích xuất thuộc tính thị giác: Thiết bị, Màu sắc, Kiểu dáng  │
+└─────────────────────────────────┬────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ RETRIEVAL TRÊN CHROMADB VECTOR SPACE (512 CHIỀU)                 │
+│  - Collection: storeflow_product_visual_vectors                  │
+│  - HNSW Indexing với khoảng cách Cosine                          │
+│  - Oversampling: fetch_k = min(top_k * 3, total_vectors)         │
+└─────────────────────────────────┬────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ PHÂN CẤP ĐỐI CHIẾU THÔNG MINH & GIẢI THÍCH (DYNAMIC MATCHING)    │
+│  1. [SẢN PHẨM TƯƠNG TỰ]: Cùng chủng loại sản phẩm                │
+│  2. [CÙNG NHÓM HÀNG]: Cùng ngành hàng lớn trong danh mục         │
+│  3. [SẢN PHẨM LIÊN QUAN]: Phụ kiện tương thích trong hệ sinh thái│
+│  - Tự động sinh Rationale tiếng Việt minh bạch                   │
+│  - SQLite Truth Guard: Ràng buộc tồn kho và giá bán thực tế      │
+└──────────────────────────────────────────────────────────────────┘
+```

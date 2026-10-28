@@ -1052,7 +1052,7 @@ Thứ tự triển khai:
 ## 12. LỘ TRÌNH TRIỂN KHAI MỚI (ROADMAP REVISION: PHASES 12A-12F & 13A-13F)
 
 Theo phản hồi trực tiếp từ Giảng viên hướng dẫn:
-1. **Thay đổi 1 — AI Assistant Architecture**: Tinh gọn giao diện AI Assistant, loại bỏ tab Q&A không cần thiết cho nghiệp vụ demo, loại bỏ tab Audit Log khỏi AI UI (giải quyết triệt để lỗi trắng/full background; bảo lưu toàn bộ audit logic ở backend phục vụ an ninh/kỹ thuật). Tập trung vào 3 trụ cột: (1) Tư vấn/tìm kiếm sản phẩm, (2) Tìm kiếm sản phẩm bằng hình ảnh (Image Search), (3) Phân tích doanh thu AI.
+1. **Thay đổi 1 — AI Assistant Architecture**: Tinh gọn giao diện AI Assistant, loại bỏ tab Q&A không cần thiết cho nghiệp vụ demo, loại bỏ tab Audit Log khỏi AI UI (giải quyết triệt để lỗi trắng/full background; bảo lưu toàn bộ audit logic ở backend phục vụ an ninh/kỹ thuật). Tập trung vào 3 trụ cột: (1) Tư vấn/tìm kiếm sản phẩm, (2) Tìm kiếm sản phẩm bằng hình ảnh (Image Search), (3) Phân tích doanh thu.
 2. **Thay đổi 2 — Computer Vision & Image Search**: Tìm kiếm sản phẩm bằng hình ảnh dựa trên **Precomputed Visual Indexing**. Tuyệt đối không gọi Vision API so sánh từng ảnh của catalog mỗi khi người dùng query. Phân loại kết quả minh bạch thành 4 cấp độ: Khớp (Match), Tương tự (Similar), Liên quan (Related), Không tìm thấy (None). Tích hợp Product Cards trực quan.
 3. **Thay đổi 3 — Order Multi-Stage Workflow & Role Enforcement**: Chuyển từ quản lý trạng thái tĩnh sang Business Workflow thực tế: `PENDING` -> `ADMIN_APPROVED` -> `PROCESSING` -> `COMPLETED` (kèm `REJECTED`, `CANCELLED`). Phân định quyền rõ ràng: Customer tạo đơn chờ duyệt -> Admin duyệt/từ chối -> Staff chỉ xử lý đơn đã được duyệt -> Customer theo dõi trạng thái -> SuperAdmin quản lý ngoại lệ và giữ độc quyền doanh thu.
 4. **Nguyên tắc chia Phase**: Chia nhỏ thành các Phase độc lập, có thể kiểm tra từng bước, không gộp việc, không phá vỡ tính năng đang chạy, không làm tài liệu khi chưa hoàn thiện chức năng thực tế.
@@ -1145,7 +1145,7 @@ Theo phản hồi trực tiếp từ Giảng viên hướng dẫn:
     + Các import icon Lucide không còn dùng (`MessageSquare`, `History`, `Send`, `CheckCircle`, `AlertCircle`, `Clock`, `Layers`, `ArrowRight`, `DollarSign`).
   - **Những gì được giữ nguyên vẹn**:
     + Tab 1: "TƯ VẤN SẢN PHẨM" (Text Semantic Retrieval từ ChromaDB kết hợp chốt chặn SQLite Stock Guard) hoạt động trơn tru.
-    + Tab 2: "PHÂN TÍCH DOANH THU AI" (chỉ hiển thị cho SuperAdmin) giữ nguyên vẹn.
+    + Tab 2: "PHÂN TÍCH DOANH THU" (chỉ hiển thị cho SuperAdmin) giữ nguyên vẹn.
     + Backend API `POST /api/v1/ai/sales-qa` và `GET /api/v1/ai/logs` cùng bảng `ai_audit_logs` trong SQLite giữ nguyên 100% cho mục đích kiểm toán an ninh kỹ thuật.
     + RAG engine, ChromaDB collection, Gemini client, RBAC, Rate limiter không bị thay đổi.
   - **Kiểm thử cục bộ đã thực hiện**:

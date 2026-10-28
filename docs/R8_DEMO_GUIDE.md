@@ -1,8 +1,8 @@
-# STOREFLOW AI 2.0 — HƯỚNG DẪN VẬN HÀNH & KỊCH BẢN BẢO VỆ ĐỒ ÁN (DEMO GUIDE)
+# STOREFLOW AI 2.0 — HƯỚNG DẪN VẬN HÀNH & KỊCH BẢN BÁO CÁO HỌC PHẦN (DEMO GUIDE)
 
-> **Tài liệu bàn giao giai đoạn R8 — Final Integration & Project Delivery**
+> **Môn học:** Ứng dụng Trí tuệ Nhân tạo (Applied Artificial Intelligence)
 > **Phiên bản hệ thống:** StoreFlow AI 2.0 (Refactor v2)
-> **Mục tiêu:** Cung cấp kịch bản thực hành trực quan từng bước cho Hội đồng chấm thi / Giảng viên hướng dẫn, minh chứng trọn vẹn các năng lực kỹ thuật: Phân quyền RBAC 5 vai trò, Vòng đời đơn hàng 3 trạng thái độc lập, Local Text AI (Ollama Qwen 2.5 1.5B), Local Vision AI (CLIP ViT-B/32), SQLite Grounding chống ảo giác và Kiểm toán bóc tách doanh thu thực tế.
+> **Mục tiêu:** Cung cấp kịch bản thực hành trực quan từng bước cho Giảng viên hướng dẫn & Hội đồng chấm thi, minh chứng trọn vẹn các năng lực kỹ thuật: Phân quyền RBAC 5 vai trò, Vòng đời đơn hàng 3 trạng thái độc lập, Local Text AI (Ollama Qwen 2.5 1.5B), Local Vision AI (CLIP ViT-B/32), SQLite Truth Grounding chống ảo giác, Tìm kiếm ảnh đa phương thức phân cấp thông minh và Báo cáo Phân tích Doanh thu AI BI bóc tách số liệu thực tế.
 
 ---
 
@@ -10,43 +10,39 @@
 
 ### 1. Yêu cầu phần cứng & Môi trường đề xuất
 - **Hệ điều hành:** Windows 10/11 (hoặc Linux Ubuntu 22.04+).
-- **Phần cứng mục tiêu:** Laptop Core i5 (thế hệ 11+), 16GB RAM, Card đồ họa rời 4GB VRAM (GTX 1650 / RTX 3050 Laptop).
+- **Phần cứng mục tiêu:** Laptop Core i5 (thế hệ 11+), 16GB RAM, Card đồ họa rời 4GB VRAM (GTX 1650 / RTX 3050 Laptop) hoặc iGPU tích hợp.
 - **Môi trường phần mềm:**
   - Python 3.12 (trong thư mục `backend/.venv`).
   - Node.js 18+ (khuyên dùng Node.js 20+).
-  - Ollama (cài đặt tại `D:\Ollama` hoặc đường dẫn hệ thống).
+  - Ollama (cài đặt tại `D:\Ollama` hoặc đường dẫn mặc định hệ thống).
   - Cache Weights CLIP: `D:\huggingface_cache` (~577MB).
 
 ---
 
-### 2. Khởi động 3 thành phần hệ thống (3 Terminal độc lập)
+### 2. Khởi động hệ thống (2 lựa chọn)
 
-#### Bước 1: Khởi động Ollama Local (Mô hình Qwen 2.5 1.5B)
-Mở Terminal 1 (PowerShell):
-```powershell
-# Chạy script cấu hình an toàn models tại ổ D
-.\scripts\start_ollama.ps1
-# Hoặc chạy lệnh trực tiếp:
-# $env:OLLAMA_MODELS="D:\Ollama\models"; ollama serve
-```
-*Kiểm tra trạng thái:* Mở trình duyệt truy cập `http://localhost:11434` hiển thị `Ollama is running`.
+#### Cách 1: Tiện lợi nhất — Khởi động tự động 1-Click (Khuyên dùng)
+Tại thư mục gốc của dự án:
+- **Nhấp đúp chuột vào file `start_dev.bat`** (hoặc chạy `.\start_dev.ps1` trong PowerShell).
+- File sẽ tự động kích hoạt cả 3 dịch vụ trên 3 cửa sổ console độc lập:
+  - Cửa sổ 1: Dịch vụ Ollama Local AI (`http://localhost:11434`)
+  - Cửa sổ 2: Backend FastAPI (`http://localhost:8000/docs`)
+  - Cửa sổ 3: Frontend React Vite (`http://localhost:5173`)
 
-#### Bước 2: Khởi động Backend FastAPI
-Mở Terminal 2 (PowerShell tại thư mục gốc dự án):
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-*Kiểm tra trạng thái:* Truy cập Swagger UI tại `http://localhost:8000/docs`.
-
-#### Bước 3: Khởi động Frontend Vite
-Mở Terminal 3 (PowerShell tại thư mục gốc dự án):
-```powershell
-cd frontend
-npm run dev
-```
-*Truy cập giao diện chính:* Mở trình duyệt tại `http://localhost:5173`.
+#### Cách 2: Khởi động thủ công (3 Terminal độc lập)
+- **Terminal 1 (Ollama):** `ollama serve`
+- **Terminal 2 (Backend):** 
+  ```powershell
+  cd backend
+  .\.venv\Scripts\Activate.ps1
+  uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+  ```
+- **Terminal 3 (Frontend):**
+  ```powershell
+  cd frontend
+  npm run dev
+  ```
+*(Hệ thống đã cấu hình sẵn trong `backend/.env`, tuyệt đối không cần gõ thủ công các biến `$env:DATABASE_PATH` hay `$env:CHROMA_...`)*
 
 ---
 
@@ -68,10 +64,19 @@ npm run dev
 1. **Mở trình duyệt ở chế độ Ẩn danh (Incognito)** tại `http://localhost:5173`.
 2. **Khám phá sản phẩm:** Xem danh sách 30 sản phẩm công khai với font hiển thị tiếng Việt **Be Vietnam Pro** và phong cách **Modern Retro**.
 3. **Lọc & Tìm kiếm từ khóa:** Gõ `"chuột gaming"` hoặc lọc danh mục `"Phụ kiện"` $\rightarrow$ Danh sách cập nhật tức thì.
-4. **Tìm kiếm bằng hình ảnh (CLIP ViT-B/32 Local Vision):**
-   - Vào tab **Trợ lý AI** $\rightarrow$ chọn tính năng **Tìm kiếm bằng hình ảnh**.
-   - Kéo thả hoặc chọn một file ảnh tai nghe hoặc chuột.
-   - Nhấn **Tìm kiếm** $\rightarrow$ Hệ thống phản hồi trong ~60–80ms trên CPU, hiển thị thẻ sản phẩm tương đồng nhất kèm % độ khớp hình ảnh và trạng thái còn hàng.
+4. **Tìm kiếm bằng hình ảnh (AI Visual Match Engine - CLIP ViT-B/32 & Gemini Vision):**
+   - Vào menu **AI ASSISTANT** $\rightarrow$ chọn tab **`2. TÌM KIẾM BẰNG HÌNH ẢNH`**.
+   - Hỗ trợ 2 chế độ linh hoạt trên thanh chọn:
+     - **Local Vision (CLIP Offline, 0% Cloud):** Chạy 100% cục bộ trên CPU với mô hình OpenAI CLIP ViT-B/32 (512 chiều), phản hồi cực nhanh ~60–80ms.
+     - **Gemini Cloud Vision (Google AI):** Sử dụng Cloud Multimodal Vision trích xuất đặc trưng thị giác cao cấp.
+   - Thử nghiệm tải ảnh sản phẩm:
+     - Tải ảnh Loa Bluetooth hoặc ảnh Bàn phím $\rightarrow$ Hệ thống tự động trích xuất đặc trưng thị giác (Loại thiết bị, Màu sắc chủ đạo, Kiểu dáng).
+     - Kết quả hiển thị phân tầng thông minh theo 3 cấp độ kèm lý giải đối chiếu (Rationale) chi tiết:
+       - **`[ SẢN PHẨM TƯƠNG TỰ ]`**: Cùng chủng loại sản phẩm (ví dụ cùng là loa để bàn hoặc bàn phím cơ).
+       - **`[ CÙNG NHÓM HÀNG ]`**: Sản phẩm thuộc cùng nhóm ngành hàng lớn (ví dụ Âm thanh hoặc Phụ kiện).
+       - **`[ SẢN PHẨM LIÊN QUAN ]`**: Phụ kiện tương thích trong cùng hệ sinh thái thiết bị (ví dụ sạc dự phòng, đế dựng).
+     - Với ảnh mờ hoặc không rõ chi tiết, hệ thống trung thực thông báo: *"Chưa xác định chắc chắn (Độ tin cậy thấp)"*, tuyệt đối không bịa đặt sản phẩm sai lệch.
+   - Trực tiếp bấm **Mở bán POS** hoặc **Chi tiết** ngay trên thẻ kết quả đối chiếu.
 5. **Thử nghiệm thêm hàng vào giỏ và bấm thanh toán:**
    - Vào trang POS hoặc Chi tiết sản phẩm, thêm 1 sản phẩm vào giỏ.
    - Nhấn nút **Thanh toán** $\rightarrow$ Hệ thống hiển thị **Modal Guest Checkout Prompt** yêu cầu đăng nhập hoặc đăng ký tài khoản mới để lưu vết đơn hàng.
@@ -118,22 +123,27 @@ npm run dev
 
 ---
 
-### Kịch bản 4: Trợ lý AI Thông minh (SQLite Grounding & Local LLM Failover)
-1. **Demo Tư vấn dựa trên dữ liệu thật (Grounding):**
-   - Vào trang **Trợ lý AI**.
+### Kịch bản 4: Trợ lý AI Thông minh & Báo cáo Phân tích Doanh thu BI
+1. **Demo Tư vấn dựa trên dữ liệu thật (Grounding & RBAC):**
+   - Vào menu **AI ASSISTANT** $\rightarrow$ chọn tab **`1. TƯ VẤN SẢN PHẨM (RAG)`**.
    - Hỏi: *"Shop có tai nghe nào chống ồn dưới 1 triệu còn hàng không?"*
    - Quan sát câu trả lời:
-     - Badge Provider hiển thị `Ollama Local (GPU) (Qwen 2.5 1.5B)`.
+     - Badge Provider hiển thị `Ollama Local (qwen2.5:1.5b)`.
      - Phản hồi bằng tiếng Việt chuẩn mực, chỉ gợi ý các mẫu tai nghe **thực tế có trong kho** với tồn kho $> 0$ và đúng giá bán lẻ.
      - Tuyệt đối không bịa đặt sản phẩm ngoài danh mục và không làm lộ giá vốn `cost_price`.
 2. **Demo Cơ chế Chống Hallucination & Failover (Tắt Ollama):**
-   - Mở Terminal tắt tiến trình Ollama (`Ctrl + C` tại Terminal 1).
-   - Đặt lại câu hỏi trên giao diện AI Assistant.
-   - Quan sát:
-     - Hệ thống không bị treo hoặc crash màn hình trắng.
-     - Tự động kích hoạt cơ chế **Safe Grounded Fallback (SQL + Rule Engine)**.
-     - Badge Provider chuyển sang màu vàng `Chế độ Tra cứu Trực tiếp (An toàn)`.
-     - Trả về danh sách sản phẩm khớp chính xác từ cơ sở dữ liệu SQLite một cách trung thực.
+   - Thử nghiệm tắt tiến trình Ollama (`Ctrl + C` tại cửa sổ Ollama).
+   - Đặt lại câu hỏi trên giao diện AI Assistant $\rightarrow$ Hệ thống kích hoạt tức thì cơ chế **Safe Grounded Fallback (SQL + Rule Engine)**, huy hiệu chuyển sang màu vàng bảo vệ trải nghiệm người dùng không bị gián đoạn.
+3. **Demo Báo cáo Phân tích Kinh doanh Thông minh (StoreFlow BI):**
+   - Đăng nhập tài khoản `superadmin`.
+   - Vào tab **`3. PHÂN TÍCH DOANH THU AI`**, chọn kỳ báo cáo: **Hôm nay / 7 ngày / Tháng này / Toàn thời gian** $\rightarrow$ Bấm **`[LÀM MỚI BÁO CÁO]`**.
+   - Quan sát phân tích tài chính thông minh:
+     - Thẻ chỉ số hiển thị rõ ràng: **Tổng doanh thu tích lũy**, **Đơn hoàn tất / Tổng đơn (2 / 5 đơn)** (loại bỏ 3 đơn đã hủy/hoàn tiền), **11 mặt hàng chạm ngưỡng báo động hết kho**.
+     - Báo cáo phân tích chuyên sâu gồm đúng 4 mục: *1. Tổng quan hiệu suất kinh doanh*, *2. Điểm sáng bán hàng*, *3. Cảnh báo kho hàng & Rủi ro*, *4. Đề xuất hành động*.
+     - Cơ chế **Stop Sequence & Post-Sanitization**: Báo cáo kết thúc gãy gọn, chuyên nghiệp, triệt tiêu 100% hiện tượng rò rỉ prompt hệ thống hoặc lặp vòng lặp vô tận ở cuối văn bản.
+4. **Kiểm tra Duy trì Trạng thái Điều hướng (SPA State Restoration):**
+   - Đang ở tab **`PHÂN TÍCH DOANH THU AI`** hoặc **`TÌM KIẾM BẰNG HÌNH ẢNH`**, nhấn phím **F5 (Tải lại trang)**.
+   - Quan sát: Trình duyệt vẫn ở đúng tab AI Assistant đang làm việc (thông qua cơ chế lưu vết `localStorage`), không bị văng ngược về trang POS như các hệ thống thông thường.
 
 ---
 
