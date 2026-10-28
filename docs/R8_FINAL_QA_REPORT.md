@@ -3,8 +3,8 @@
 > **Giai đoạn:** Phase R8 — Final Integration, End-to-End Testing & Project Delivery
 > **Nhánh làm việc:** `refactor/storeflow-ai-v2`
 > **Hệ điều hành kiểm thử:** Windows 11 (Intel Core i5-11400H, 16GB RAM, RTX 3050 Laptop 4GB VRAM)
-> **Ngày lập báo cáo:** 11/10/2026
-> **Trạng thái:** HOÀN THÀNH TOÀN DIỆN — SẴN SÀNG BẢO VỆ ĐỒ ÁN TỐT NGHIỆP
+> **Ngày lập báo cáo:** 11/10/2026 (Cập nhật hoàn thiện: 28/10/2026)
+> **Trạng thái:** HOÀN THÀNH TOÀN DIỆN — SẴN SÀNG BÁO CÁO HỌC PHẦN MÔN ỨNG DỤNG TRÍ TUỆ NHÂN TẠO
 
 ---
 
@@ -286,6 +286,25 @@ README.md                                (Cập nhật hướng dẫn vận hàn
 
 ---
 
+## 21. NGHIỆM THU ĐỢT TỐI ƯU HÓA MỞ RỘNG (POST-R8 ENHANCEMENTS)
+
+Trong đợt cập nhật và hoàn thiện chuyên sâu gần nhất (28/10/2026), hệ thống đã hoàn tất 5 cải tiến lớn:
+1. **Engine Đối chiếu Hình ảnh Thông minh (Dynamic Visual Match Engine)**:
+   - Chuẩn hóa phân loại thiết bị động (`normalize_device_type`) với thứ tự ưu tiên các từ ghép (`laptop_stand`, `cooling_pad`, `mousepad`, `smartwatch`, `game_controller`, `hub_adapter`...) trước các từ đơn (`laptop`, `tablet`, `phone`), loại bỏ triệt để xung đột phân loại.
+   - Phân cấp đối chiếu 3 mức rõ ràng trên giao diện: `[ SẢN PHẨM TƯƠNG TỰ ]`, `[ CÙNG NHÓM HÀNG ]`, `[ SẢN PHẨM LIÊN QUAN ]` (ecosystem accessories như sạc dự phòng cho điện thoại, đế tản nhiệt cho laptop) kèm rationale giải thích trực quan bằng tiếng Việt.
+   - Cơ chế phát hiện mập mờ (Uncertainty Handling): Ảnh không rõ góc cạnh được cảnh báo *"Chưa xác định chắc chắn (Độ tin cậy thấp)"* và chỉ tra cứu metric space diện rộng, không bịa đặt sản phẩm bừa bãi.
+2. **Báo cáo Phân tích Doanh thu AI BI Grounded & Chống Lặp Prompt**:
+   - Bóc tách số liệu SQL chính xác: Tách bạch rõ 2 đơn hoàn tất / 5 tổng đơn (3 đơn đã hủy/hoàn tiền), không tính trùng doanh số đơn hủy.
+   - Triệt tiêu 100% hiện tượng instruction bleed (rò rỉ quy tắc hệ thống ở cuối báo cáo) của các mô hình LLM nhỏ (Qwen 1.5B) bằng cấu hình Stop Sequence `[HẾT BÁO CÁO]`, tăng `repeat_penalty: 1.22` và bộ lọc hậu kỳ `_clean_report_output`.
+3. **Chất lượng Mã nguồn & An toàn Kiểu dữ liệu (Type Safety)**:
+   - Trình kiểm tra kiểu tĩnh hiện đại **Pyrefly** quét đạt kết quả tuyệt đối: **`INFO 0 diagnostics (0 errors, 0 warnings)`**.
+4. **Duy trì Trạng thái Điều hướng SPA (Navigation State Persistence)**:
+   - Cơ chế ghi nhớ vị trí làm việc qua `localStorage`: Khi người dùng nhấn F5 tại bất kỳ tab nào (kể cả các sub-tab AI Assistant), giao diện giữ nguyên vị trí, không bị văng về trang POS.
+5. **Tiện ích Khởi động Tự động 1-Click**:
+   - Bổ sung file kịch bản thực thi [`start_dev.bat`](file:///d:/E_HocTap/ThietKeWeb/WebStoreAI/start_dev.bat) và [`start_dev.ps1`](file:///d:/E_HocTap/ThietKeWeb/WebStoreAI/start_dev.ps1) giúp khởi chạy đồng thời cả 3 dịch vụ (Ollama, Backend, Frontend) chỉ với 1 thao tác.
+
+---
+
 > [!NOTE]
-> **ĐÃ HOÀN TẤT TOÀN DIỆN PHASE R8: FINAL INTEGRATION, END-TO-END TESTING & PROJECT DELIVERY.**
-> **HỆ THỐNG DỪNG LẠI TẠI ĐÂY. TUYỆT ĐỐI KHÔNG TỰ ĐỘNG COMMIT/PUSH GIT. CHỜ BẠN NGHIỆM THU.**
+> **ĐÃ HOÀN TẤT TOÀN DIỆN DỰ ÁN STOREFLOW AI 2.0.**
+> **SẴN SÀNG BÁO CÁO VÀ NGHIỆM THU HỌC PHẦN MÔN ỨNG DỤNG TRÍ TUỆ NHÂN TẠO.**

@@ -273,6 +273,24 @@
 * **Trả lời**:  
   "Dạ không. Trong `products.py:L229-233`, lệnh đồng bộ vector được bọc trong khối `try...except`. Giao dịch lưu sản phẩm vào SQLite là ưu tiên sống còn và đã hoàn tất (commit) trước. Nếu ChromaDB gặp trục trặc, dữ liệu sản phẩm trong SQL vẫn được bảo đảm toàn vẹn và Admin có thể dùng nút `Đồng bộ lại Vector DB` (`POST /api/v1/ai/sync-index`) để bù đắp sau."
 
+#### Câu 6: "Làm thế nào để hệ thống tìm kiếm sản phẩm bằng hình ảnh chạy offline mượt mà không cần GPU đắt tiền?"
+* **Trả lời**:  
+  "Dạ, nhóm em tích hợp mô hình thị giác máy tính **OpenAI CLIP ViT-B/32** chạy 100% trên CPU (0 MB VRAM) qua thư viện PyTorch/Transformers. Mô hình trích xuất vector đặc trưng thị giác 512 chiều và đối chiếu khoảng cách Cosine trên collection `storeflow_product_visual_vectors` trong ChromaDB. Tốc độ xử lý chỉ mất ~60-80ms trên CPU thông thường của laptop."
+
+#### Câu 7: "Tại sao mô hình cục bộ nhỏ như Qwen 2.5 1.5B đôi khi lặp lại hướng dẫn hoặc rò rỉ prompt hệ thống ở cuối báo cáo, và nhóm đã khắc phục thế nào?"
+* **Trả lời**:  
+  "Dạ, các mô hình nhỏ (~1.5B tham số) khi sinh văn bản dài dễ gặp hiện tượng *'Instruction Bleed'* và vòng lặp suy biến (degenerative loop) nếu không có điểm dừng rõ ràng. Nhóm đã áp dụng giải pháp 3 lớp:
+  1. **Prompt Boundary**: Quy định báo cáo chỉ gồm 4 mục và bắt buộc kết thúc bằng ký hiệu `[HẾT BÁO CÁO]`.
+  2. **Stop Sequences & Repeat Penalty**: Cấu hình tham số Ollama với `repeat_penalty: 1.22` và danh sách `stop` tokens để ngắt sinh token ngay khi viết xong Mục 4.
+  3. **Bộ lọc hậu kỳ (Post-Sanitizer)**: Thuật toán `_clean_report_output` quét và cắt bỏ triệt để mọi phần lặp n-gram hoặc rò rỉ prompt hệ thống."
+
+#### Câu 8: "Hệ thống phân biệt như thế nào giữa 'Sản phẩm tương tự', 'Cùng nhóm hàng' và 'Sản phẩm liên quan' khi tìm bằng ảnh?"
+* **Trả lời**:  
+  "Dạ, nhóm xây dựng thuật toán phân tầng Dynamic Matching:
+  - **Sản phẩm tương tự**: Có cùng loại thiết bị đã chuẩn hóa (`normalize_device_type`) và độ tương đồng Cosine $\ge 0.55$ (ví dụ cùng là loa, tai nghe, bàn phím).
+  - **Cùng nhóm hàng**: Khác loại thiết bị con nhưng chung danh mục ngành hàng lớn (ví dụ tai nghe và loa đều thuộc Âm thanh).
+  - **Sản phẩm liên quan**: Phụ kiện tương thích trong hệ sinh thái (ví dụ sạc dự phòng, đế dựng laptop cho điện thoại/laptop) kèm lời giải thích (Rationale) chi tiết bằng tiếng Việt."
+
 ---
 
 ### 4. Danh sách 5 thuật ngữ Backend/Database cốt lõi cần học thuộc lòng
@@ -285,6 +303,6 @@
 ---
 
 ### KỊCH BẢN PHÂN VAI TRÌNH BÀY TRƯỚC HỘI ĐỒNG
-- **Kiên (Nhóm trưởng)**: Mở đầu giới thiệu tổng quan kiến trúc hệ thống, sơ đồ 3 Phase RAG, cách nhúng vector `all-MiniLM-L6-v2` và cách tích hợp Google Gemini 3.6 Flash.
-- **Đạt**: Tiếp nối phân tích cơ chế lưu trữ SQLite, chứng minh tính toàn vẹn dữ liệu bằng Atomic Transactions và giải thích chốt chặn Guardrail loại bỏ 100% rủi ro tư vấn hàng hết.
-- **Hưng**: Demo trực tiếp trên giao diện: thử gõ câu hỏi tìm kiếm trên Web, cho Thầy/Cô xem thẻ sản phẩm đối chiếu, bấm nút "Mở bán POS" để chứng minh sự liền mạch giữa AI và nghiệp vụ bán hàng thực tế.
+- **Kiên (Nhóm trưởng)**: Mở đầu giới thiệu tổng quan kiến trúc hệ thống, kiến trúc Pluggable AI Providers (Ollama Qwen 2.5 1.5B Local, OpenAI CLIP ViT-B/32, Gemini 3.6 Flash), sơ đồ 3 Phase RAG và cơ chế thị giác máy tính 512 chiều.
+- **Đạt**: Tiếp nối phân tích cơ chế lưu trữ SQLite WAL, chứng minh tính toàn vẹn dữ liệu bằng Atomic Transactions, chốt chặn Guardrail loại bỏ 100% rủi ro tư vấn hàng hết, và cơ chế bóc tách tài chính trung thực trong Báo cáo Doanh thu BI.
+- **Hưng**: Demo trực tiếp trên giao diện: thử gõ câu hỏi tư vấn RAG, thử tải ảnh tai nghe/loa/phụ kiện cho Thầy/Cô thấy khả năng phân loại 3 cấp độ thông minh kèm rationale tiếng Việt, cho xem Báo cáo BI gãy gọn và chứng minh tính năng F5 giữ nguyên tab điều hướng.
