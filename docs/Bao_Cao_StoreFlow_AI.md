@@ -76,7 +76,7 @@ Mặc dù nhóm đã nỗ lực hết mình với tinh thần nghiêm túc để
 
 Báo cáo học phần **ỨNG DỤNG TRÍ TUỆ NHÂN TẠO** với đề tài **“HỆ THỐNG QUẢN LÝ BÁN HÀNG CÓ TÍCH HỢP AI” (StoreFlow AI / WebStoreAI)** trình bày quá trình nghiên cứu, thiết kế kiến trúc và hiện thực hóa một ứng dụng quản trị bán lẻ đa kênh tích hợp Trí tuệ nhân tạo (AI). Khác với các hệ thống thương mại điện tử truyền thống hoặc các chatbot AI hoạt động độc lập dễ mắc lỗi "ảo giác" (hallucination), StoreFlow AI giải quyết bài toán cốt lõi: kết hợp chặt chẽ giữa khả năng suy luận ngôn ngữ tự nhiên của Mô hình ngôn ngữ lớn (LLM), thị giác máy tính và Nguồn chân lý thực tế (Ground Truth) từ cơ sở dữ liệu quan hệ giao dịch bán hàng SQLite ở chế độ Write-Ahead Logging (WAL).
 
-Hệ thống được phát triển theo kiến trúc hướng dịch vụ với backend Python FastAPI và frontend tương tác React 18 (Vite). Các đóng góp kỹ thuật trọng tâm của đề tài bao gồm:
+Hệ thống được phát triển theo kiến trúc hướng dịch vụ với backend Python FastAPI và frontend tương tác React 19 (Vite 8). Các đóng góp kỹ thuật trọng tâm của đề tài bao gồm:
 1. **Kiến trúc Pluggable AI Engine đa nhà cung cấp:** Hỗ trợ chuyển đổi linh hoạt giữa mô hình chạy cục bộ ngoại tuyến Ollama Local Qwen 2.5 (1.5B tham số, vận hành trên GPU hoặc CPU), mô hình đám mây Google Gemini 3.6 Flash (qua Google GenAI SDK) và cơ chế chuyển đổi dự phòng an toàn (Safe Grounded Fallback) tra cứu trực tiếp từ SQLite khi mất kết nối hoặc hết hạn ngạch API.
 2. **Quy trình truy xuất tăng cường sinh ngữ cảnh lai (Hybrid RAG) và Chốt chặn hai lớp (Double SQL Verification):** Kết hợp tìm kiếm vector ngữ nghĩa (ChromaDB với 3 bộ sưu tập), tìm kiếm từ khóa thưa (Sparse BM25) và lọc cấu trúc SQL thông qua thuật toán Reciprocal Rank Fusion (RRF); áp dụng chốt chặn hậu truy xuất (L1) và tiền phản hồi (L2) loại bỏ hoàn toàn hiện tượng tư vấn hàng đã hết kho hoặc báo sai giá niêm yết.
 3. **Động cơ tìm kiếm sản phẩm bằng hình ảnh đa phương thức (Multimodal Visual Search Dual Engine):** Cho phép nhận diện và đối chiếu ảnh chụp qua mô hình cục bộ OpenAI CLIP ViT-B/32 (vector 512 chiều chạy trên CPU tiêu tốn 0 MB VRAM) và Gemini Cloud Vision, phân loại quan hệ qua Động cơ đối chiếu thị giác động (Dynamic Visual Match Engine) thành 3 cấp độ (`[ SẢN PHẨM TƯƠNG TỰ ]`, `[ CÙNG NHÓM HÀNG ]`, `[ SẢN PHẨM LIÊN QUAN ]`) kèm lý do đối chiếu tiếng Việt minh bạch và xử lý ảnh có độ tin cậy thấp.
@@ -249,7 +249,7 @@ Mục tiêu tổng quát của đề tài là thiết kế, xây dựng và đá
   - Mô hình ngôn ngữ lớn (Qwen 2.5 1.5B tham số, Google Gemini 3.6 Flash).
   - Kỹ thuật truy xuất tăng cường sinh văn bản (RAG) và thuật toán hợp nhất xếp hạng Reciprocal Rank Fusion (RRF).
   - Mô hình thị giác máy tính đối chiếu ngôn ngữ - hình ảnh (OpenAI CLIP ViT-B/32).
-  - Kiến trúc ứng dụng Web phân tầng (FastAPI, React 18, SQLite WAL, ChromaDB).
+  - Kiến trúc ứng dụng Web phân tầng (FastAPI, React 19, SQLite WAL, ChromaDB).
 - **Phạm vi nghiên cứu:**
   - Áp dụng cho mô hình bán lẻ thiết bị công nghệ, phụ kiện máy tính và thiết bị văn phòng.
   - Thử nghiệm và đánh giá hệ thống trên môi trường máy tính cá nhân (Windows 11, CPU x86_64, hỗ trợ cả card đồ họa tiêu chuẩn hoặc thuần CPU).
@@ -342,7 +342,7 @@ Hệ thống StoreFlow AI được hiện thực hóa dựa trên hệ sinh thá
   - *Ollama Local LLM:* Tích hợp mô hình mã nguồn mở **Qwen 2.5 (phiên bản 1.5B tham số)** vận hành ngoại tuyến hoàn toàn thông qua máy chủ Ollama cục bộ (`http://localhost:11434`), giải quyết bài toán độc lập dữ liệu và không tốn chi phí API.
   - *Google Gemini API:* Kết nối mô hình đa phương thức thế hệ mới **Gemini 3.6 Flash** thông qua bộ thư viện `google-genai` chính thức của Google, phục vụ các tác vụ phân tích thị giác nâng cao và suy luận ngữ cảnh dài khi có kết nối Internet.
   - *Mô hình nhúng ảnh cục bộ:* **OpenAI CLIP ViT-B/32** thông qua thư viện `sentence-transformers`, tạo vector 512 chiều trực tiếp trên CPU, tiêu thụ 0 MB bộ nhớ card đồ họa (VRAM).
-- **Frontend ứng dụng:** **React 18** xây dựng trên nền tảng đóng gói siêu tốc **Vite**, thiết kế theo phong cách giao diện báo in cổ điển (Vintage Editorial / Retro Print Catalog), hỗ trợ chuyển đổi giao diện sáng/tối (Dual Theme) và lưu giữ trạng thái điều hướng qua `localStorage`.
+- **Frontend ứng dụng:** **React 19** xây dựng trên nền tảng đóng gói siêu tốc **Vite 8**, thiết kế theo phong cách giao diện báo in cổ điển (Vintage Editorial / Retro Print Catalog), hỗ trợ chuyển đổi giao diện sáng/tối (Dual Theme) và lưu giữ trạng thái điều hướng qua `localStorage`.
 
 <div style="page-break-after: always;"></div>
 
@@ -395,7 +395,7 @@ Hệ thống StoreFlow AI được xây dựng theo kiến trúc hướng dịch
 skinparam componentStyle uml2
 skinparam wrapWidth 200
 
-package "Frontend Layer (React 18 + Vite)" {
+package "Frontend Layer (React 19 + Vite)" {
   [Public Storefront & POS View] as UI_POS
   [AI Assistant Dashboard] as UI_AI
   [Order & Inventory Manager] as UI_Admin
@@ -690,7 +690,7 @@ Hệ thống StoreFlow AI được triển khai và kiểm thử thực nghiệm
 | **Phần cứng (Hardware)** | CPU AMD Ryzen 7 / Intel Core i7 đa nhân; RAM 16 GB; GPU NVIDIA GeForce (hỗ trợ CUDA) hoặc chế độ CPU Fallback thuần túy |
 | **Hệ điều hành** | Microsoft Windows 11 64-bit |
 | **Môi trường Backend** | Python 3.12 (môi trường ảo `.venv`), quản lý gói qua pip |
-| **Môi trường Frontend** | Node.js v20+, React 18, Vite 5 |
+| **Môi trường Frontend** | Node.js v20+ / v24+, React 19, Vite 8 |
 | **Cơ sở dữ liệu** | SQLite 3 (WAL mode: `demo_webstore.db`), ChromaDB v0.5+ (`demo_chroma/`) |
 | **Mô hình cục bộ** | Ollama Engine v0.3+, mô hình `qwen2.5:1.5b` (kích thước ~1.0 GB) |
 | **Mô hình thị giác CPU** | `sentence-transformers/clip-ViT-B-32` (512 chiều, bộ nhớ VRAM = 0 MB) |
@@ -848,7 +848,7 @@ Sau quá trình nghiên cứu, thiết kế và phát triển đề tài **“H�
    - Đã nghiên cứu sâu và làm chủ kiến trúc RAG lai (Hybrid RAG), kết hợp giữa biểu diễn vector ngữ nghĩa dày (Dense Embedding) và xếp hạng từ khóa xác suất (Sparse BM25) qua thuật toán Reciprocal Rank Fusion.
    - Làm chủ kỹ thuật trích xuất đặc trưng thị giác đối chiếu qua mô hình OpenAI CLIP ViT-B/32, triển khai thành công mô hình học sâu trên môi trường tài nguyên giới hạn (chạy thuần CPU).
 2. **Về mặt kỹ thuật và kiến trúc phần mềm:**
-   - Xây dựng thành công hệ thống phần mềm quản lý bán hàng chuẩn công nghiệp với kiến trúc phân tầng rõ ràng (FastAPI, React 18, SQLite WAL, ChromaDB 3 Collections).
+   - Xây dựng thành công hệ thống phần mềm quản lý bán hàng chuẩn công nghiệp với kiến trúc phân tầng rõ ràng (FastAPI, React 19, SQLite WAL, ChromaDB 3 Collections).
    - Thiết lập thành công cơ chế chốt chặn hai lớp (Double SQL Verification) kết hợp mô hình bảo vệ 8 lớp, giải quyết triệt để rủi ro ảo giác thông tin và rò rỉ prompt hệ thống.
    - Hiện thực hóa thành công kiến trúc Pluggable AI Engine, cho phép chuyển đổi mượt mà giữa AI cục bộ (Ollama Qwen 2.5) và AI đám mây (Google Gemini 3.6 Flash) với phương án dự phòng an toàn (Safe Grounded Fallback).
 3. **Về mặt kiểm thử và tính ứng dụng:**
