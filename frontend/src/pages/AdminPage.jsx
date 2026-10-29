@@ -170,24 +170,69 @@ export const AdminPage = () => {
     return matchSearch && matchRole;
   });
 
-  const getLogBadgeVariant = (action) => {
-    if (!action) return 'muted';
-    const act = action.toLowerCase();
+  const formatActionName = (log) => {
+    const feat = log?.feature || log?.action || log?.endpoint;
+    if (!feat) return 'QUERY';
+    const f = feat.toLowerCase();
+    if (f === 'recommendation' || f.includes('recommend')) return 'TƯ VẤN RAG';
+    if (f === 'sales_report' || f.includes('report')) return 'BÁO CÁO BI';
+    if (f === 'image_search' || f.includes('image')) return 'TÌM KIẾM ẢNH';
+    if (f.includes('customer_orders')) return 'TRA CỨU ĐƠN';
+    if (f.includes('qa') || f.includes('sales')) return 'HỎI ĐÁP QA';
+    return feat.toUpperCase();
+  };
+
+  const getLogBadgeVariant = (logOrAction) => {
+    const feat =
+      typeof logOrAction === 'string'
+        ? logOrAction
+        : logOrAction?.feature || logOrAction?.action || logOrAction?.endpoint || '';
+    if (!feat) return 'muted';
+    const act = feat.toLowerCase();
     if (act.includes('recommend')) return 'blue';
-    if (act.includes('qa') || act.includes('sales')) return 'amber';
     if (act.includes('report')) return 'green';
     if (act.includes('search') || act.includes('image')) return 'purple';
+    if (act.includes('qa') || act.includes('sales') || act.includes('order')) return 'amber';
     return 'muted';
   };
 
-  const getProviderBadge = (provider) => {
-    if (!provider) return <Badge variant="muted">System</Badge>;
+  const parseLogProvider = (log) => {
+    if (log?.provider) return log.provider;
+    const q = (log?.query_text || log?.query || '').toLowerCase();
+    if (q.includes('[ollama]') || q.includes('provider=ollama')) return 'Ollama Local';
+    if (q.includes('[gemini]') || q.includes('provider=gemini')) return 'Gemini Cloud';
+    if (q.includes('[grounded]') || q.includes('provider=grounded') || q.includes('[sqlite]')) return 'SQLite Grounded';
+    if (q.includes('provider=clip') || q.includes('[clip]')) return 'CLIP ViT';
+
+    const s = (log?.response_summary || '').toLowerCase();
+    if (s.includes('ollama')) return 'Ollama Local';
+    if (s.includes('gemini')) return 'Gemini Cloud';
+    if (s.includes('grounded') || s.includes('sqlite')) return 'SQLite Grounded';
+    if (s.includes('clip')) return 'CLIP ViT';
+
+    return 'System';
+  };
+
+  const getProviderBadge = (logOrProvider) => {
+    const provider = typeof logOrProvider === 'string' ? logOrProvider : parseLogProvider(logOrProvider);
+    if (!provider || provider.toLowerCase() === 'system') return <Badge variant="muted">System</Badge>;
     const p = provider.toLowerCase();
     if (p.includes('ollama')) return <Badge variant="green">Ollama Local</Badge>;
     if (p.includes('gemini')) return <Badge variant="blue">Gemini Cloud</Badge>;
     if (p.includes('clip')) return <Badge variant="purple">CLIP ViT</Badge>;
-    if (p.includes('sqlite') || p.includes('grounded')) return <Badge variant="amber">SQLite</Badge>;
+    if (p.includes('sqlite') || p.includes('grounded')) return <Badge variant="amber">SQLite Grounded</Badge>;
     return <Badge variant="muted">{provider}</Badge>;
+  };
+
+  const formatQueryText = (log) => {
+    const raw = log?.query_text || log?.prompt || log?.query;
+    if (!raw) return '—';
+    const qMatch = raw.match(/Q:\s*(.*?)(?:\s*\|\s*Budget:|$)/i);
+    if (qMatch && qMatch[1]) {
+      return qMatch[1].trim();
+    }
+    const cleaned = raw.replace(/^(\[[^\]]+\]\s*)+/, '').trim();
+    return cleaned || raw;
   };
 
   return (
@@ -610,16 +655,16 @@ export const AdminPage = () => {
                     </tr>
                   ) : (
                     aiLogs.map((log, idx) => (
-                      <tr key={idx}>
+                      <tr key={log.id || idx}>
                         <td className="font-mono" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                           {log.created_at ? new Date(log.created_at).toLocaleTimeString('vi-VN') : '—'}
                         </td>
                         <td>
-                          <Badge variant={getLogBadgeVariant(log.action || log.endpoint)}>
-                            {log.action || log.endpoint || 'QUERY'}
+                          <Badge variant={getLogBadgeVariant(log)}>
+                            {formatActionName(log)}
                           </Badge>
                         </td>
-                        <td>{getProviderBadge(log.provider)}</td>
+                        <td>{getProviderBadge(log)}</td>
                         <td
                           className="font-mono"
                           style={{
@@ -630,9 +675,9 @@ export const AdminPage = () => {
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }}
-                          title={log.prompt || log.query || ''}
+                          title={log.query_text || log.prompt || log.query || ''}
                         >
-                          {log.prompt || log.query || '—'}
+                          {formatQueryText(log)}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <span className="badge badge-green" style={{ fontSize: '0.65rem' }}>
