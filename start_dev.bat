@@ -5,7 +5,7 @@ echo   StoreFlow AI 2.0 - Khoi dong toan bo he thong
 echo ============================================================
 
 echo [1/3] Khoi dong Ollama Local AI...
-start "StoreFlow AI - Ollama" cmd /k "ollama serve"
+start "StoreFlow AI - Ollama" cmd /k "set "OLLAMA_MODELS=D:\Ollama\models" && "D:\Ollama\ollama.exe" serve"
 
 echo [2/3] Khoi dong Backend FastAPI...
 start "StoreFlow AI - Backend" cmd /k "cd backend && .venv\Scripts\activate && uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"

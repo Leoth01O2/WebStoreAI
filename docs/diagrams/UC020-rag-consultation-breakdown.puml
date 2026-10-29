@@ -1,0 +1,100 @@
+@startuml
+!theme plain
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Be Vietnam Pro, Arial, sans-serif"
+skinparam roundCorner 8
+skinparam arrowColor #4A5568
+skinparam actorBorderColor #2D3748
+skinparam usecaseBorderColor #2B6CB0
+skinparam usecaseBackgroundColor #EBF8FF
+
+' ==============================================================================
+' BIỂU ĐỒ PHÂN RÃ USE CASE: UC020 — AI TƯ VẤN SẢN PHẨM RAG (HYBRID RAG & TRUTH GUARD)
+' Hệ thống StoreFlow AI 2.0
+' ==============================================================================
+
+' --- TÁC NHÂN CHÍNH (PRIMARY ACTORS) ---
+actor "Khách vãng lai / Khách hàng\n(Guest / Customer)" as User #BEE3F8
+actor "Nhân viên bán hàng\n(Staff)" as Staff #C6F6D5
+
+' --- HỆ THỐNG PHỤ TRỢ (SECONDARY / SUPPORTING SYSTEMS) ---
+actor "ChromaDB\nVector Store" as ChromaDB << Database >> #E2E8F0
+actor "SQLite WAL\nDatabase" as SQLite << Database >> #E2E8F0
+actor "Ollama Qwen 2.5 /\nGemini Cloud" as LLM << AI Engine >> #E2E8F0
+
+rectangle "Phân rã Use Case UC020: AI Tư vấn Sản phẩm RAG" {
+
+    ' --- USE CASE GỐC (ROOT USE CASE) ---
+    usecase "UC020: AI Tư vấn Sản phẩm RAG\n(Tư vấn giỏ hàng & kiểm tra tồn kho)" as UC_ROOT #3182CE;text:white
+
+    ' --- CÁC USE CASE CON PHÂN RÃ (SUB-USE CASES) ---
+    usecase "UC020.1: Kiểm tra Tần suất Truy vấn\n(AI Rate Limiting Gate)" as UC_RATE
+    usecase "UC020.2: Phân tích Ý định & Thực thể\n(Intent Analyzer & Keyword Extract)" as UC_INTENT
+    
+    package "Tầng Truy xuất Đa kênh Lai (Hybrid Tri-Retrieval)" {
+        usecase "UC020.3: Truy xuất Lai Đa kênh\n(Dense + BM25 + Structured SQL)" as UC_RETRIEVE
+        usecase "UC020.3a: Tra cứu Vector Ngữ nghĩa\n(ChromaDB Dense 384-dim)" as UC_DENSE
+        usecase "UC020.3b: Tra cứu Từ khóa Thưa\n(In-Memory BM25 Index)" as UC_SPARSE
+        usecase "UC020.3c: Lọc CSDL Cấu trúc\n(SQLite Category/Brand Filter)" as UC_SQL
+    }
+
+    usecase "UC020.4: Hợp nhất Xếp hạng Ứng viên\n(Reciprocal Rank Fusion - RRF k=60)" as UC_RRF
+    
+    usecase "UC020.5: Chốt chặn Hậu truy xuất L1\n(L1 Truth Guard: Lọc Stock > 0 & Ẩn giá vốn)" as UC_L1
+    
+    usecase "UC020.6: Sinh Câu trả lời Tư vấn\n(Pluggable LLM Inference: Qwen/Gemini)" as UC_GEN
+    usecase "UC020.7: Chuyển đổi Dự phòng An toàn\n(Safe Grounded Fallback: SQL Template)" as UC_FALLBACK #FED7D7
+    
+    usecase "UC020.8: Chốt chặn Tiền phản hồi L2\n(L2 Truth Guard: Đối soát lại Giá & Tồn kho)" as UC_L2
+    usecase "UC020.9: Ghi Nhật ký Kiểm toán AI\n(Audit Log: Token, Latency, Fallback flag)" as UC_LOG
+}
+
+' --- KẾ THỪA & TƯƠNG TÁC TÁC NHÂN ---
+User --> UC_ROOT
+Staff --> UC_ROOT
+
+' --- QUAN HỆ PHÂN RÃ USE CASE (INCLUDE / EXTEND) ---
+UC_ROOT .> UC_RATE : <<include>>
+UC_ROOT .> UC_INTENT : <<include>>
+UC_ROOT .> UC_RETRIEVE : <<include>>
+
+UC_RETRIEVE .> UC_DENSE : <<include>>
+UC_RETRIEVE .> UC_SPARSE : <<include>>
+UC_RETRIEVE .> UC_SQL : <<include>>
+
+UC_ROOT .> UC_RRF : <<include>>
+UC_ROOT .> UC_L1 : <<include>>
+UC_ROOT .> UC_GEN : <<include>>
+
+' Mở rộng khi xảy ra lỗi/mất kết nối LLM
+UC_FALLBACK .> UC_GEN : <<extend>>\n(Khi LLM Offline / Timeout / Hết Quota)
+
+UC_ROOT .> UC_L2 : <<include>>
+UC_ROOT .> UC_LOG : <<include>>
+
+' --- TƯƠNG TÁC VỚI HỆ THỐNG PHỤ TRỢ ---
+UC_DENSE --> ChromaDB : Truy vấn cosine\nstoreflow_products
+UC_SQL --> SQLite : SELECT WHERE is_active=1
+UC_L1 --> SQLite : Xác thực tồn kho thực tế
+UC_GEN --> LLM : Gửi Prompt có Grounding
+UC_L2 --> SQLite : Đối soát giá bán lẻ niêm yết
+UC_LOG --> SQLite : INSERT ai_audit_logs
+
+note right of UC_L1
+  **Chốt chặn L1 (Post-Retrieval):**
+  - Loại bỏ 100% sản phẩm có stock <= 0.
+  - Tước bỏ hoàn toàn cost_price (giá vốn).
+  - Không cho phép LLM nhìn thấy hàng đã hết.
+end note
+
+note bottom of UC_FALLBACK
+  **Safe Grounded Fallback:**
+  - Cơ chế phòng vệ tự động.
+  - Không sinh văn bản tự do, trả về bảng
+    thông tin sản phẩm chuẩn xác từ CSDL.
+end note
+
+@enduml
+

@@ -526,14 +526,14 @@ export const PosPage = ({ onNavigate }) => {
         {isGuest ? (
           <div style={{ padding: '0.65rem 0.85rem', background: 'var(--bg-input)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ color: 'var(--amber-primary)', fontWeight: 600 }}>👤 Khách mua:</span>
+              <span style={{ color: 'var(--amber-primary)', fontWeight: 600 }}>Khách mua:</span>
               <span style={{ color: 'var(--text-muted)' }}>Khách vãng lai (Chưa đăng nhập)</span>
             </div>
           </div>
         ) : isCustomer ? (
           <div style={{ padding: '0.65rem 0.85rem', background: 'var(--bg-input)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ color: 'var(--amber-primary)', fontWeight: 600 }}>👤 Người mua:</span>
+              <span style={{ color: 'var(--amber-primary)', fontWeight: 600 }}>Người mua:</span>
               <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
                 {selectedCustomer ? `${selectedCustomer.name} (${selectedCustomer.phone || selectedCustomer.customer_code})` : (user?.full_name || user?.username)}
               </span>
@@ -752,7 +752,7 @@ export const PosPage = ({ onNavigate }) => {
 
           {paymentMethod === 'cash' && (isCustomer || isGuest) && (
             <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: '4px', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              💵 Thanh toán tiền mặt khi nhận hàng (COD).
+              [₫] Thanh toán tiền mặt khi nhận hàng (COD).
             </div>
           )}
 

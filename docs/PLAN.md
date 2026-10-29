@@ -875,7 +875,7 @@ Thứ tự triển khai:
      - Toàn bộ API quản trị nội bộ (`/api/v1/products`, `/api/v1/orders`, `/api/v1/customers`, `/api/v1/reports/*`, `/api/v1/purchases`, `/api/v1/inventory/*`) tiếp tục được bảo vệ nghiêm ngặt bằng JWT RBAC, trả về 401 Unauthorized nếu Guest gọi.
   3. **Quy trình đặt hàng Guest -> Customer**:
      - Guest có thể chọn sản phẩm và thêm vào giỏ hàng.
-     - Trong giỏ hàng, ô khách hàng hiển thị: "👤 Khách mua: Khách vãng lai (Chưa đăng nhập)". Ẩn ô nhập chiết khấu thủ công.
+     - Trong giỏ hàng, ô khách hàng hiển thị: "Khách mua: Khách vãng lai (Chưa đăng nhập)". Ẩn ô nhập chiết khấu thủ công.
      - Khi bấm nút "🔒 ĐĂNG NHẬP ĐỂ ĐẶT HÀNG", hệ thống hiển thị thông báo hướng dẫn và điều hướng sang trang Đăng nhập / Đăng ký.
      - Trang Login được bổ sung nút "← Quay lại xem sản phẩm" giúp Guest quay lại cửa hàng dễ dàng nếu chưa muốn đăng nhập.
      - Sau khi Customer đăng nhập, toàn bộ luồng mua hàng POS, tạo Order thực tế với backend (`POST /api/v1/orders`), trừ kho tự động và quản lý "Đơn Hàng Của Tôi" tiếp tục hoạt động chính xác 100%.

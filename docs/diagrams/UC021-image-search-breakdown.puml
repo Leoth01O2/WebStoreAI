@@ -1,0 +1,101 @@
+@startuml
+!theme plain
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Be Vietnam Pro, Arial, sans-serif"
+skinparam roundCorner 8
+skinparam arrowColor #4A5568
+skinparam actorBorderColor #2D3748
+skinparam usecaseBorderColor #2F855A
+skinparam usecaseBackgroundColor #F0FFF4
+
+' ==============================================================================
+' BIỂU ĐỒ PHÂN RÃ USE CASE: UC021 — TÌM KIẾM SẢN PHẨM BẰNG HÌNH ẢNH ĐA PHƯƠNG THỨC
+' Hệ thống StoreFlow AI 2.0 (Dual Engine: Local CLIP CPU & Gemini Cloud)
+' ==============================================================================
+
+' --- TÁC NHÂN CHÍNH (PRIMARY ACTORS) ---
+actor "Khách vãng lai / Khách hàng\n(Guest / Customer)" as User #BEE3F8
+actor "Nhân viên quầy POS\n(Staff)" as Staff #C6F6D5
+
+' --- HỆ THỐNG PHỤ TRỢ (SECONDARY / SUPPORTING SYSTEMS) ---
+actor "Local CLIP ViT-B/32\n(CPU, 0 MB VRAM)" as CLIP << AI Model >> #E2E8F0
+actor "Gemini Cloud Vision\n(Google GenAI API)" as GeminiVision << AI Cloud >> #E2E8F0
+actor "ChromaDB\nVisual Vectors" as ChromaDB << Database >> #E2E8F0
+actor "SQLite WAL\nDatabase" as SQLite << Database >> #E2E8F0
+
+rectangle "Phân rã Use Case UC021: Tìm kiếm Sản phẩm bằng Hình ảnh" {
+
+    ' --- USE CASE GỐC (ROOT USE CASE) ---
+    usecase "UC021: Tìm kiếm Sản phẩm bằng Hình ảnh\n(Multimodal Visual Product Search)" as UC_ROOT #2F855A;text:white
+
+    ' --- CÁC USE CASE CON PHÂN RÃ (SUB-USE CASES) ---
+    usecase "UC021.1: Tiếp nhận & Kiểm tra Tính hợp lệ Tệp ảnh\n(Format JPG/PNG/WebP, Dung lượng <= 5MB)" as UC_VALIDATE
+    
+    usecase "UC021.2: Trích xuất Vector Đặc trưng Thị giác\n(Visual Embedding 512-dim Normalized)" as UC_EMBED
+    usecase "UC021.2a: Nhúng ảnh bằng Local CLIP trên CPU\n(Offline, Riêng tư, Chiếm dụng 0 MB VRAM)" as UC_CLIP
+    usecase "UC021.2b: Nhúng ảnh bằng Gemini Cloud Vision\n(Dự phòng khi cấu hình Cloud Provider)" as UC_GEMINI_V
+
+    usecase "UC021.3: Truy vấn Tương đồng Cosine trên ChromaDB\n(storeflow_product_visual_vectors)" as UC_CHROMA_QUERY
+    
+    usecase "UC021.4: Bổ sung Dữ liệu Chân lý từ SQLite\n(Truth Guard: Giá niêm yết & Tồn kho khả dụng)" as UC_SQL_ENRICH
+    
+    package "Động cơ Đối chiếu Thị giác Động (Dynamic Visual Match Engine)" {
+        usecase "UC021.5: Phân loại Quan hệ Đối chiếu Thị giác\n(Multi-Tier Relationship Classification)" as UC_CLASSIFY
+        usecase "UC021.5a: Gán nhãn [SẢN PHẨM TƯƠNG TỰ]\n(MATCH / SIMILAR: Cùng loại, Score >= 0.45)" as UC_TIER1
+        usecase "UC021.5b: Gán nhãn [CÙNG NHÓM HÀNG]\n(SAME-CATEGORY: Cùng danh mục, màu sắc khác)" as UC_TIER2
+        usecase "UC021.5c: Gán nhãn [SẢN PHẨM LIÊN QUAN]\n(RELATED: Phụ kiện đi kèm, Score >= 0.35)" as UC_TIER3
+    }
+
+    usecase "UC021.6: Xử lý Ảnh ngoài Danh mục / Không chắc chắn\n(Out-of-Domain / Low-Confidence Handling)" as UC_UNCERTAIN #FED7D7
+    
+    usecase "UC021.7: Tạo Phản hồi Trực quan & Lý do Đối chiếu\n(Visual Grounding Explanation tiếng Việt)" as UC_EXPLAIN
+}
+
+' --- KẾ THỪA & TƯƠNG TÁC TÁC NHÂN ---
+User --> UC_ROOT
+Staff --> UC_ROOT
+
+' --- QUAN HỆ PHÂN RÃ USE CASE (INCLUDE / EXTEND) ---
+UC_ROOT .> UC_VALIDATE : <<include>>
+UC_ROOT .> UC_EMBED : <<include>>
+
+UC_EMBED <|-- UC_CLIP : (Chế độ Cục bộ mặc định)
+UC_EMBED <|-- UC_GEMINI_V : (Chế độ Đám mây tùy chọn)
+
+UC_ROOT .> UC_CHROMA_QUERY : <<include>>
+UC_ROOT .> UC_SQL_ENRICH : <<include>>
+UC_ROOT .> UC_CLASSIFY : <<include>>
+
+UC_CLASSIFY .> UC_TIER1 : <<extend>>\n(Score >= 0.45 & Cùng nhóm)
+UC_CLASSIFY .> UC_TIER2 : <<extend>>\n(Cùng danh mục)
+UC_CLASSIFY .> UC_TIER3 : <<extend>>\n(Score >= 0.35 & Phụ kiện)
+
+' Mở rộng xử lý khi gặp ảnh game, ảnh không phải sản phẩm
+UC_UNCERTAIN .> UC_CLASSIFY : <<extend>>\n(Score < 0.35 hoặc ảnh ngoài danh mục)
+
+UC_ROOT .> UC_EXPLAIN : <<include>>
+
+' --- TƯƠNG TÁC VỚI HỆ THỐNG PHỤ TRỢ ---
+UC_CLIP --> CLIP : Forward pass qua Vision Transformer
+UC_GEMINI_V --> GeminiVision : Gọi google-genai REST API
+UC_CHROMA_QUERY --> ChromaDB : Cosine similarity Top-K (512-dim)
+UC_SQL_ENRICH --> SQLite : Lấy giá lẻ, stock, category_name
+
+note right of UC_UNCERTAIN
+  **Xử lý Ngoại lệ Thị giác (Out-of-Domain):**
+  - Tránh hiện tượng ép mọi ảnh vào 1 sản phẩm.
+  - Ví dụ: Ảnh chụp game Minecraft hoặc ảnh phong cảnh
+    được đánh dấu is_uncertain=True hoặc từ chối gợi ý,
+    thông báo cho người dùng biết ảnh không khớp danh mục.
+end note
+
+note bottom of UC_EXPLAIN
+  **Minh bạch Thị giác (Visual Grounding):**
+  - Mỗi sản phẩm trả về kèm lý do đối chiếu rõ ràng:
+    "Cùng kiểu dáng công thái học, màu đen, độ tương đồng 78%".
+end note
+
+@enduml
+

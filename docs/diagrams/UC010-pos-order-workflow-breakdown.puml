@@ -1,0 +1,98 @@
+@startuml
+!theme plain
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Be Vietnam Pro, Arial, sans-serif"
+skinparam roundCorner 8
+skinparam arrowColor #4A5568
+skinparam actorBorderColor #2D3748
+skinparam usecaseBorderColor #C53030
+skinparam usecaseBackgroundColor #FFF5F5
+
+' ==============================================================================
+' BIỂU ĐỒ PHÂN RÃ USE CASE: UC010 — BÁN HÀNG TẠI QUẦY POS & VẬN HÀNH ĐƠN HÀNG
+' Hệ thống StoreFlow AI 2.0 (Cỗ máy trạng thái 3 chiều độc lập & Giao dịch Atomic)
+' ==============================================================================
+
+' --- TÁC NHÂN CHÍNH (PRIMARY ACTORS) ---
+actor "Khách hàng\n(Customer)" as Customer #BEE3F8
+actor "Nhân viên quầy / kho\n(Staff)" as Staff #C6F6D5
+actor "Chủ cửa hàng\n(SuperAdmin)" as SuperAdmin #FED7D7
+
+' --- HỆ THỐNG PHỤ TRỢ (SECONDARY / SUPPORTING SYSTEMS) ---
+actor "SQLite WAL\nDatabase" as SQLite << Database Engine >> #E2E8F0
+
+rectangle "Phân rã Use Case UC010: Bán hàng POS & Vận hành Luồng Đơn hàng" {
+
+    ' --- USE CASE GỐC (ROOT USE CASE) ---
+    usecase "UC010: Bán hàng tại quầy POS & Vận hành Đơn hàng\n(POS Order Creation & Lifecycle Workflow)" as UC_ROOT #C53030;text:white
+
+    ' --- CÁC USE CASE CON PHÂN RÃ (SUB-USE CASES) ---
+    usecase "UC010.1: Tra cứu Sản phẩm & Kiểm tra Tồn kho Khả dụng\n(Real-time Inventory Check: stock > 0)" as UC_PROD_CHECK
+    
+    usecase "UC010.2: Tìm kiếm & Gán Khách hàng vào Đơn\n(Customer Lookup & Attribution)" as UC_CUST_LOOKUP
+    usecase "UC010.2a: Che giấu Dữ liệu Nhạy cảm Khách hàng\n(PII Data Masking: Phone & Email đối với Staff)" as UC_PII_MASK #FED7D7
+    
+    usecase "UC010.3: Tạo Đơn hàng & Trừ Tồn kho Nguyên tử\n(Atomic BEGIN IMMEDIATE Transaction & Rollback)" as UC_ATOMIC_TX
+    
+    package "Cỗ máy Quản lý Luồng Trạng thái 3 Chiều (3-Dimension Workflow)" {
+        usecase "UC010.4: Quản lý Vòng đời Trạng thái Đơn hàng\n(Order: 4 states | Payment: 5 states | Shipping: 4 states)" as UC_WORKFLOW
+        
+        usecase "UC010.4a: Phê duyệt / Từ chối Đơn hàng Chờ duyệt\n(SuperAdmin Approve/Reject remote orders)" as UC_APPROVE
+        usecase "UC010.4b: Nhận đơn & Xử lý Giao nhận\n(Staff Claim & Process orders)" as UC_PROCESS
+        usecase "UC010.4c: Xác nhận Thu tiền COD tại quầy / Giao hàng\n(Staff / SuperAdmin Confirm COD)" as UC_COD
+        usecase "UC010.4d: Xác minh Tiền Chuyển khoản Ngân hàng\n(SuperAdmin Verify Bank Transfer)" as UC_VERIFY_PAY
+        usecase "UC010.4e: Tiếp nhận Hàng Trả lại & Tự động Hoàn kho\n(Staff Confirm Return -> Inventory Restocked)" as UC_RETURN
+        usecase "UC010.4f: Xác nhận Hoàn tiền & Kết thúc Đơn\n(SuperAdmin Confirm Refund)" as UC_REFUND
+    }
+
+    usecase "UC010.5: Ghi nhận Lịch sử Kiểm toán Vết Đơn hàng\n(Order Audit Logging: Actor, Old State -> New State)" as UC_AUDIT
+}
+
+' --- TƯƠNG TÁC TÁC NHÂN ---
+Customer --> UC_ROOT
+Staff --> UC_ROOT
+SuperAdmin --> UC_ROOT
+
+' --- QUAN HỆ PHÂN RÃ USE CASE (INCLUDE / EXTEND) ---
+UC_ROOT .> UC_PROD_CHECK : <<include>>
+UC_ROOT .> UC_CUST_LOOKUP : <<include>>
+
+UC_PII_MASK .> UC_CUST_LOOKUP : <<extend>>\n(Khi tác nhân thực hiện là Staff)
+
+UC_ROOT .> UC_ATOMIC_TX : <<include>>
+UC_ROOT .> UC_WORKFLOW : <<include>>
+
+UC_WORKFLOW .> UC_APPROVE : <<extend>>\n(Chỉ định SuperAdmin)
+UC_WORKFLOW .> UC_PROCESS : <<extend>>\n(Staff / SuperAdmin)
+UC_WORKFLOW .> UC_COD : <<extend>>\n(Staff / SuperAdmin)
+UC_WORKFLOW .> UC_VERIFY_PAY : <<extend>>\n(Chỉ định SuperAdmin)
+UC_WORKFLOW .> UC_RETURN : <<extend>>\n(Staff tiếp nhận hàng trả)
+UC_WORKFLOW .> UC_REFUND : <<extend>>\n(Chỉ định SuperAdmin)
+
+UC_ROOT .> UC_AUDIT : <<include>>
+
+' --- TƯƠNG TÁC VỚI HỆ THỐNG PHỤ TRỢ ---
+UC_PROD_CHECK --> SQLite : Query products WHERE stock > 0
+UC_CUST_LOOKUP --> SQLite : Query customers
+UC_ATOMIC_TX --> SQLite : BEGIN IMMEDIATE;\nUPDATE products SET stock = stock - qty;\nINSERT INTO orders, order_items;\nCOMMIT;
+UC_RETURN --> SQLite : Tự động bù stock = stock + return_qty
+UC_AUDIT --> SQLite : INSERT INTO order_audit_logs
+
+note right of UC_ATOMIC_TX
+  **Bảo toàn Giao dịch (Atomic Transaction):**
+  - Chống Race Condition khi nhiều quầy POS bán đồng thời.
+  - Sử dụng khóa độc quyền `BEGIN IMMEDIATE` trong SQLite WAL.
+  - Nếu số lượng mua vượt tồn kho -> Tự động ROLLBACK ngay lập tức.
+end note
+
+note bottom of UC_PII_MASK
+  **Bảo vệ Thông tin Nhạy cảm (PII Privacy):**
+  - Nhân viên Staff chỉ nhìn thấy `098****123` và `a***@gmail.com`.
+  - Khách hàng không bị lộ số điện thoại khi nhân viên tạo đơn.
+  - Chỉ SuperAdmin mới được xem PII đầy đủ.
+end note
+
+@enduml
+
